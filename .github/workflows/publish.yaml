@@ -32,7 +32,5 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Publish @mcowger/pi-plexus
-        run: npm publish --access public
+        run: npm publish --access public --provenance
         working-directory: packages/plexus-pi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
