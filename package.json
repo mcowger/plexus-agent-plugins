@@ -1,0 +1,18 @@
+{
+  "name": "plexus-agent-plugins",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "build": "bun run --cwd packages/plexus-pi build.ts",
+    "sync-versions": "bun scripts/sync-versions.ts",
+    "release": "bun scripts/release.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

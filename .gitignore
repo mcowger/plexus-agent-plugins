@@ -1,0 +1,36 @@
+# dependencies
+node_modules
+
+# output — keep the built extension artifact but ignore everything else in dist
+dist/
+!packages/*/dist/
+packages/*/dist/*
+!packages/*/dist/extension.js
+*.tgz
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+*.log
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# dotenv
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IDE
+.idea
+
+# macOS
+.DS_Store

@@ -1,0 +1,33 @@
+{
+	"name": "@mcowger/pi-plexus",
+	"version": "0.1.0",
+	"description": "Plexus AI proxy plugin for pi and oh-my-pi coding agents",
+	"type": "module",
+	"main": "./dist/extension.js",
+	"files": [
+		"dist/extension.js",
+		"package.json"
+	],
+	"pi": {
+		"extensions": [
+			"dist/extension.js"
+		]
+	},
+	"scripts": {
+		"build": "bun run build.ts"
+	},
+	"dependencies": {
+		"plexus-models": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"@earendil-works/pi-ai": "link:@earendil-works/pi-ai",
+		"@earendil-works/pi-coding-agent": "link:@earendil-works/pi-coding-agent"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/mcowger/plexus-agent-plugins.git",
+		"directory": "packages/plexus-pi"
+	},
+	"license": "MIT"
+}
