@@ -22,8 +22,10 @@ jobs:
       - name: Sync versions from tag
         run: bun scripts/sync-versions.ts ${GITHUB_REF_NAME#v}
 
-      - name: Copy README into package
-        run: cp README.md packages/plexus-pi/README.md
+      - name: Copy README into packages
+        run: |
+          cp README.md packages/plexus-pi/README.md
+          cp README.md packages/plexus-opencode/README.md
 
       - uses: actions/setup-node@v6
         with:
@@ -34,3 +36,7 @@ jobs:
       - name: Publish @mcowger/pi-plexus
         run: npm publish --access public --provenance
         working-directory: packages/plexus-pi
+
+      - name: Publish @mcowger/opencode-plexus
+        run: npm publish --access public --provenance
+        working-directory: packages/plexus-opencode

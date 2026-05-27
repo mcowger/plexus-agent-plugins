@@ -12,9 +12,10 @@ import { join } from "node:path";
 const root = import.meta.dir.replace(/\/scripts$/, "");
 
 // Only packages that are published to npm.
-// plexus-models is a build-time internal dep (bundled into plexus-pi) — not published.
+// plexus-models is a build-time internal dep (bundled into host packages) — not published.
 const PACKAGES = [
 	"packages/plexus-pi",
+	"packages/plexus-opencode",
 ];
 
 const readJson = async (path: string) => JSON.parse(await Bun.file(path).text());

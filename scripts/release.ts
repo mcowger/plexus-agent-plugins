@@ -51,7 +51,7 @@ if (existingTag.trim()) {
 await $`bun scripts/sync-versions.ts ${version}`;
 
 // Commit
-await $`git add packages/plexus-pi/package.json packages/plexus-models/package.json package.json`;
+await $`git add packages/plexus-pi/package.json packages/plexus-opencode/package.json packages/plexus-models/package.json package.json`;
 await $`git commit -m "Release ${tag}"`;
 
 // Tag

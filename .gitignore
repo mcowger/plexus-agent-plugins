@@ -1,11 +1,12 @@
 # dependencies
 node_modules
 
-# output — keep the built extension artifact but ignore everything else in dist
+# output — keep the built artifacts but ignore everything else in dist
 dist/
 !packages/*/dist/
 packages/*/dist/*
 !packages/*/dist/extension.js
+!packages/*/dist/index.js
 *.tgz
 
 # code coverage
