@@ -1,6 +1,6 @@
 {
 	"name": "@mcowger/opencode-plexus",
-	"version": "0.6.0",
+	"version": "0.7.0",
 	"description": "OpenCode plugin: Plexus provider with dynamic model discovery",
 	"type": "module",
 	"module": "./dist/index.js",
