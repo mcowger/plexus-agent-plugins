@@ -1,5 +1,5 @@
 pre-commit:
   commands:
     build:
-      glob: "packages/plexus-pi/src/*.ts packages/plexus-models/src/*.ts"
+      glob: "packages/*/src/*.ts"
       run: bun run build && git add packages/plexus-pi/dist/extension.js
