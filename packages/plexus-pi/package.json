@@ -1,40 +1,42 @@
 {
-  "name": "@mcowger/pi-plexus",
-  "version": "0.5.3",
-  "description": "Plexus AI proxy plugin for pi and oh-my-pi coding agents",
-  "type": "module",
-  "main": "./dist/extension.js",
-  "files": [
-    "dist/extension.js",
-    "package.json",
-    "README.md"
-  ],
-  "keywords": [
-    "plexus",
-    "pi",
-    "omp",
-    "oh-my-pi",
-    "ai",
-    "coding-agent",
-    "extension",
-    "plugin"
-  ],
-  "pi": {
-    "extensions": ["dist/extension.js"]
-  },
-  "scripts": {
-    "build": "bun run build.ts"
-  },
-  "dependencies": {
-    "plexus-models": "workspace:*"
-  },
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/mcowger/plexus-agent-plugins.git",
-    "directory": "packages/plexus-pi"
-  },
-  "license": "MIT"
+	"name": "@mcowger/pi-plexus",
+	"version": "0.5.4",
+	"description": "Plexus AI proxy plugin for pi and oh-my-pi coding agents",
+	"type": "module",
+	"main": "./dist/extension.js",
+	"files": [
+		"dist/extension.js",
+		"package.json",
+		"README.md"
+	],
+	"keywords": [
+		"plexus",
+		"pi",
+		"omp",
+		"oh-my-pi",
+		"ai",
+		"coding-agent",
+		"extension",
+		"plugin"
+	],
+	"pi": {
+		"extensions": [
+			"dist/extension.js"
+		]
+	},
+	"scripts": {
+		"build": "bun run build.ts"
+	},
+	"dependencies": {
+		"plexus-models": "workspace:*"
+	},
+	"devDependencies": {
+		"@types/bun": "latest"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/mcowger/plexus-agent-plugins.git",
+		"directory": "packages/plexus-pi"
+	},
+	"license": "MIT"
 }

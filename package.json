@@ -1,6 +1,6 @@
 {
 	"name": "plexus-agent-plugins",
-	"version": "0.5.3",
+	"version": "0.5.4",
 	"type": "module",
 	"private": true,
 	"workspaces": [
