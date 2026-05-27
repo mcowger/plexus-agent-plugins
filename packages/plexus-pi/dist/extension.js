@@ -1,8 +1,4 @@
 // @bun
-// src/extension.ts
-import * as os from "os";
-import * as path4 from "path";
-
 // ../plexus-models/src/convert.ts
 var REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
 var API_DIALECT_MAP = {
@@ -175,68 +171,59 @@ async function fetchPlexusModels(apiKey, modelsUrl) {
   const raw = await res.json();
   return { models: raw.data ?? [], raw };
 }
-// ../plexus-models/src/config.ts
-import * as fs from "fs";
-import * as path from "path";
-var PLEXUS_DIR = "extensions/plexus";
-var CONFIG_FILE = "config.json";
-function getConfigPath(agentDir) {
-  return path.join(agentDir, PLEXUS_DIR, CONFIG_FILE);
-}
-function getConfigSync(agentDir) {
+// src/config.ts
+import { existsSync, readFileSync } from "fs";
+import { mkdir, writeFile } from "fs/promises";
+import { join } from "path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+var getConfigDir = () => join(getAgentDir(), "extensions", "plexus");
+var getConfigPath = () => join(getConfigDir(), "config.json");
+var normalizeRoot = (raw) => raw.replace(/\/+$/, "");
+function getConfigSync() {
   try {
-    const raw = fs.readFileSync(getConfigPath(agentDir), "utf8");
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed;
+    if (existsSync(getConfigPath())) {
+      return JSON.parse(readFileSync(getConfigPath(), "utf8"));
     }
-    return {};
-  } catch {
-    return {};
-  }
+  } catch {}
+  return {};
 }
-async function saveBaseUrl(agentDir, baseUrl, defaultModel) {
-  const configPath = getConfigPath(agentDir);
-  const dir = path.dirname(configPath);
-  await fs.promises.mkdir(dir, { recursive: true });
-  const existing = getConfigSync(agentDir);
-  const updated = {
+async function saveBaseUrl(baseUrl, defaultModel) {
+  await mkdir(getConfigDir(), { recursive: true });
+  const existing = getConfigSync();
+  const config = {
     ...existing,
-    baseUrl: baseUrl.replace(/\/+$/, "")
+    baseUrl: normalizeRoot(baseUrl),
+    ...defaultModel !== undefined && { defaultModel }
   };
-  if (defaultModel !== undefined) {
-    updated.defaultModel = defaultModel;
-  }
-  await fs.promises.writeFile(configPath, JSON.stringify(updated, null, 2) + `
+  await writeFile(getConfigPath(), `${JSON.stringify(config, null, 2)}
 `, "utf8");
 }
-function getRawBaseUrl(agentDir) {
-  const cfg = getConfigSync(agentDir);
-  const raw = cfg.baseUrl ?? process.env["PLEXUS_BASE_URL"] ?? null;
-  if (!raw)
-    return null;
-  return raw.replace(/\/+$/, "");
+function getRawBaseUrl() {
+  const config = getConfigSync();
+  if (config.baseUrl)
+    return config.baseUrl;
+  return process.env["PLEXUS_BASE_URL"] ?? null;
 }
-function getBaseUrl(agentDir) {
-  const raw = getRawBaseUrl(agentDir);
-  return raw ? `${raw}/v1` : null;
+function getModelsUrl() {
+  const raw = getRawBaseUrl();
+  return raw ? `${normalizeRoot(raw)}/v1/models` : null;
 }
-function getModelsUrl(agentDir) {
-  const raw = getRawBaseUrl(agentDir);
-  return raw ? `${raw}/v1/models` : null;
+function getBaseUrl() {
+  const raw = getRawBaseUrl();
+  return raw ? `${normalizeRoot(raw)}/v1` : null;
 }
-// ../plexus-models/src/cache.ts
-import * as fs2 from "fs";
-import * as path2 from "path";
-var PLEXUS_DIR2 = "extensions/plexus";
-var CACHE_FILE = "plexus-models-cache.json";
-var RAW_RESPONSE_FILE = "plexus-models-response.json";
-function getCachePath(agentDir) {
-  return path2.join(agentDir, PLEXUS_DIR2, CACHE_FILE);
+function getDefaultModel() {
+  return getConfigSync().defaultModel ?? null;
 }
-function getRawResponsePath(agentDir) {
-  return path2.join(agentDir, PLEXUS_DIR2, RAW_RESPONSE_FILE);
-}
+
+// src/cache.ts
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
+import { mkdir as mkdir2, writeFile as writeFile2 } from "fs/promises";
+import { join as join2 } from "path";
+import { getAgentDir as getAgentDir2 } from "@earendil-works/pi-coding-agent";
+var getCacheDir = () => join2(getAgentDir2(), "extensions", "plexus");
+var getModelsCachePath = () => join2(getCacheDir(), "plexus-models-cache.json");
+var getRawResponsePath = () => join2(getCacheDir(), "plexus-models-response.json");
 function parseCacheData(raw) {
   try {
     const parsed = JSON.parse(raw);
@@ -253,44 +240,45 @@ function parseCacheData(raw) {
     return null;
   }
 }
-function readCachedModelsSync(agentDir) {
+function readCachedModelsSync() {
   try {
-    const raw = fs2.readFileSync(getCachePath(agentDir), "utf8");
-    return parseCacheData(raw);
+    const p = getModelsCachePath();
+    if (!existsSync2(p))
+      return null;
+    return parseCacheData(readFileSync2(p, "utf8"));
   } catch {
     return null;
   }
 }
-async function writeCachedModels(agentDir, models) {
-  const cachePath = getCachePath(agentDir);
-  await fs2.promises.mkdir(path2.dirname(cachePath), { recursive: true });
+async function writeCachedModels(models) {
+  await mkdir2(getCacheDir(), { recursive: true });
   const payload = { models, timestamp: Date.now() };
-  await fs2.promises.writeFile(cachePath, JSON.stringify(payload, null, 2) + `
+  await writeFile2(getModelsCachePath(), `${JSON.stringify(payload, null, 2)}
 `, "utf8");
 }
-async function writeRawResponse(agentDir, data) {
-  const rawPath = getRawResponsePath(agentDir);
-  await fs2.promises.mkdir(path2.dirname(rawPath), { recursive: true });
-  await fs2.promises.writeFile(rawPath, JSON.stringify(data, null, 2) + `
+async function writeRawResponse(data) {
+  await mkdir2(getCacheDir(), { recursive: true });
+  await writeFile2(getRawResponsePath(), `${JSON.stringify(data, null, 2)}
 `, "utf8");
 }
-// ../plexus-models/src/log.ts
-import * as fs3 from "fs";
-import * as path3 from "path";
-var PLEXUS_DIR3 = "extensions/plexus";
-var LOG_FILE = "plexus.log";
-function log(agentDir, message, data) {
+
+// src/log.ts
+import { appendFileSync, mkdirSync } from "fs";
+import { join as join3 } from "path";
+import { getAgentDir as getAgentDir3 } from "@earendil-works/pi-coding-agent";
+var getCacheDir2 = () => join3(getAgentDir3(), "extensions", "plexus");
+var getLogPath = () => join3(getCacheDir2(), "plexus.log");
+function log(message, data) {
   try {
-    const logPath = path3.join(agentDir, PLEXUS_DIR3, LOG_FILE);
-    const dir = path3.dirname(logPath);
-    fs3.mkdirSync(dir, { recursive: true });
+    mkdirSync(getCacheDir2(), { recursive: true });
     const ts = new Date().toISOString();
     const line = data !== undefined ? `${ts} ${message} ${JSON.stringify(data)}
 ` : `${ts} ${message}
 `;
-    fs3.appendFileSync(logPath, line, "utf8");
+    appendFileSync(getLogPath(), line, "utf8");
   } catch {}
 }
+
 // src/mapper.ts
 function descriptorToPiModel(descriptor) {
   const cost = {
@@ -323,106 +311,127 @@ function descriptorToPiModel(descriptor) {
 
 // src/extension.ts
 var PROVIDER_NAME = "plexus";
-function getAgentDir() {
-  const override = process.env["PI_CODING_AGENT_DIR"];
-  if (override)
-    return path4.resolve(override);
-  const configDir = process.env["PI_CONFIG_DIR"] || ".pi";
-  return path4.join(os.homedir(), configDir, "agent");
-}
-function getApiKey() {
-  return process.env["PLEXUS_API_KEY"];
-}
+var currentModels = [];
 function plexusExtension(pi) {
-  const agentDir = getAgentDir();
-  const key = getApiKey();
-  if (key) {
-    const cached = readCachedModelsSync(agentDir);
-    if (cached && cached.models.length > 0) {
-      const baseUrl = getBaseUrl(agentDir);
-      if (baseUrl) {
-        pi.registerProvider(PROVIDER_NAME, {
-          baseUrl,
-          apiKey: key,
-          api: "openai-completions",
-          authHeader: true,
-          models: cached.models.map(descriptorToPiModel)
-        });
-        log(agentDir, "startup: registered from cache", { count: cached.models.length });
-      }
+  const cached = readCachedModelsSync();
+  const startupBaseUrl = getBaseUrl() ?? "http://localhost/v1";
+  const startupModels = cached?.models.map(descriptorToPiModel) ?? [];
+  log("startup", {
+    cachedModelCount: startupModels.length,
+    startupBaseUrl
+  });
+  pi.registerProvider(PROVIDER_NAME, {
+    api: "openai-completions",
+    apiKey: PROVIDER_NAME,
+    authHeader: true,
+    baseUrl: startupBaseUrl,
+    models: startupModels
+  });
+  currentModels = startupModels;
+  pi.on("session_start", async (_event, ctx) => {
+    const apiKey = await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME);
+    const baseUrl = getBaseUrl();
+    log("session_start", { hasApiKey: !!apiKey, baseUrl });
+    if (!apiKey || !baseUrl) {
+      log("session_start: no auth configured, skipping refresh");
+      await trySetDefaultModel(pi, startupModels);
+      return;
     }
-  }
-  pi.on("session_start", async () => {
-    await doRefresh(pi, agentDir, null);
+    await doRefresh(pi, apiKey, ctx, true);
   });
   pi.registerCommand("plexus", {
-    description: "Manage Plexus AI model proxy. Sub-commands: login, refresh",
-    async handler(args, ctx) {
+    description: "Plexus provider commands: login, refresh",
+    getArgumentCompletions: () => [
+      { value: "login", label: "login", description: "Configure Plexus base URL and API key" },
+      { value: "refresh", label: "refresh", description: "Refresh Plexus models from the API" }
+    ],
+    handler: async (args, ctx) => {
       const sub = args.trim().toLowerCase();
       if (sub === "login" || sub === "") {
-        await handleLogin(pi, ctx, agentDir);
-      } else if (sub === "refresh") {
-        await handleRefresh(pi, ctx, agentDir);
-      } else {
-        ctx.ui.notify(`Unknown sub-command: "${args}". Use: /plexus login | /plexus refresh`, "warning");
+        await handleLogin(pi, ctx);
+        return;
       }
+      if (sub === "refresh") {
+        await handleRefresh(pi, ctx);
+        return;
+      }
+      ctx.ui.notify(`Unknown sub-command: "${args}". Use: /plexus login | /plexus refresh`, "warning");
     }
   });
 }
-async function handleLogin(pi, ctx, agentDir) {
-  if (!getApiKey()) {
-    ctx.ui.notify("PLEXUS_API_KEY env var is not set. Set it and restart omp.", "error");
-    return;
-  }
+async function handleLogin(pi, ctx) {
   const baseUrlInput = await ctx.ui.input("Plexus base URL", "https://plexus.example.com");
   if (!baseUrlInput) {
     ctx.ui.notify("Login cancelled.", "info");
     return;
   }
-  const defaultModelInput = await ctx.ui.input("Default model (optional \u2014 Enter to skip)", "");
-  await saveBaseUrl(agentDir, baseUrlInput.trim(), defaultModelInput?.trim() || undefined);
-  ctx.ui.notify("Plexus config saved. Refreshing models\u2026", "info");
-  await doRefresh(pi, agentDir, ctx);
-}
-async function handleRefresh(pi, ctx, agentDir) {
-  ctx.ui.notify("Refreshing Plexus models\u2026", "info");
-  await doRefresh(pi, agentDir, ctx);
-}
-async function doRefresh(pi, agentDir, notify) {
-  const modelsUrl = getModelsUrl(agentDir);
-  const baseUrl = getBaseUrl(agentDir);
-  const key = getApiKey();
-  if (!key) {
-    if (notify)
-      notify.ui.notify("PLEXUS_API_KEY env var is not set.", "error");
+  const apiKeyInput = await ctx.ui.input("Plexus API key");
+  if (!apiKeyInput) {
+    ctx.ui.notify("Login cancelled.", "info");
     return;
   }
+  const defaultModelInput = await ctx.ui.input("Default model (optional \u2014 Enter to skip)", "");
+  const defaultModel = defaultModelInput?.trim() || undefined;
+  await saveBaseUrl(baseUrlInput.trim(), defaultModel);
+  ctx.modelRegistry.authStorage.set(PROVIDER_NAME, { type: "api_key", key: apiKeyInput.trim() });
+  log("login: saved", { baseUrl: baseUrlInput.trim(), defaultModel });
+  ctx.ui.notify("Plexus credentials saved. Refreshing models\u2026", "info");
+  await doRefresh(pi, apiKeyInput.trim(), ctx, false);
+}
+async function handleRefresh(pi, ctx) {
+  const apiKey = await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME);
+  if (!apiKey) {
+    ctx.ui.notify("No Plexus API key configured. Run /plexus login first.", "error");
+    return;
+  }
+  ctx.ui.notify("Refreshing Plexus models\u2026", "info");
+  await doRefresh(pi, apiKey, ctx, true);
+}
+async function doRefresh(pi, apiKey, ctx, setDefault) {
+  const modelsUrl = getModelsUrl();
+  const baseUrl = getBaseUrl();
   if (!modelsUrl || !baseUrl) {
-    if (notify)
-      notify.ui.notify("Plexus base URL not configured. Run /plexus login first.", "warning");
+    if (ctx)
+      ctx.ui.notify("Plexus base URL not configured. Run /plexus login first.", "warning");
+    log("doRefresh: no base URL configured");
     return;
   }
   try {
-    const { models: raw, raw: rawResponse } = await fetchPlexusModels(key, modelsUrl);
-    const descriptors = convertDescriptors(raw, baseUrl);
-    await writeCachedModels(agentDir, descriptors);
-    await writeRawResponse(agentDir, rawResponse);
+    const { models: apiModels, raw } = await fetchPlexusModels(apiKey, modelsUrl);
+    const descriptors = convertDescriptors(apiModels, baseUrl);
+    const piModels = descriptors.map(descriptorToPiModel);
+    await Promise.all([writeCachedModels(descriptors), writeRawResponse(raw)]);
+    currentModels = piModels;
     pi.registerProvider(PROVIDER_NAME, {
-      baseUrl,
-      apiKey: key,
       api: "openai-completions",
+      apiKey: PROVIDER_NAME,
       authHeader: true,
-      models: descriptors.map(descriptorToPiModel)
+      baseUrl,
+      models: piModels
     });
-    log(agentDir, "refresh: ok", { count: descriptors.length });
-    if (notify)
-      notify.ui.notify(`Plexus: loaded ${descriptors.length} models.`, "info");
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    log(agentDir, "refresh: error", { error: message });
-    if (notify)
-      notify.ui.notify(`Plexus refresh failed: ${message}`, "error");
+    log("doRefresh: registered", { count: piModels.length });
+    if (ctx)
+      ctx.ui.notify(`Refreshed ${piModels.length} Plexus models`, "info");
+    if (setDefault)
+      await trySetDefaultModel(pi, piModels);
+  } catch (error) {
+    log("doRefresh: failed", { error: String(error) });
+    if (ctx) {
+      ctx.ui.notify(`Refresh failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+    }
   }
+}
+async function trySetDefaultModel(pi, models) {
+  const defaultModelId = getDefaultModel();
+  if (!defaultModelId)
+    return;
+  const model = models.find((m) => m.id === defaultModelId);
+  if (!model) {
+    log("trySetDefaultModel: model not found", { defaultModelId });
+    return;
+  }
+  const ok = await pi.setModel(model);
+  log("trySetDefaultModel", { defaultModelId, ok });
 }
 export {
   plexusExtension as default

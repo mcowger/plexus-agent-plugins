@@ -9,7 +9,7 @@ export type {
 	PlexusTopProvider,
 } from "./types.ts";
 
-// Model conversion
+// Model fetching and conversion
 export {
 	adjustBaseUrl,
 	convertDescriptors,
@@ -20,24 +20,3 @@ export {
 	mapInputModalities,
 	mapPreferredApi,
 } from "./convert.ts";
-
-// Configuration I/O
-export {
-	getBaseUrl,
-	getConfigSync,
-	getDefaultModel,
-	getModelsUrl,
-	getRawBaseUrl,
-	saveBaseUrl,
-} from "./config.ts";
-
-// Cache I/O
-export {
-	readCachedModels,
-	readCachedModelsSync,
-	writeCachedModels,
-	writeRawResponse,
-} from "./cache.ts";
-
-// Logging
-export { log } from "./log.ts";

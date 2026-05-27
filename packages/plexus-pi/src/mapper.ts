@@ -4,7 +4,7 @@ import {
 	detectOpenAICompletionsCompat,
 	type PlexusApiModel,
 	type PlexusModelDescriptor,
-} from "plexus-models";
+} from "../../plexus-models/src/index.ts";
 
 /**
  * Maps a PlexusModelDescriptor to a pi ProviderModelConfig entry suitable for

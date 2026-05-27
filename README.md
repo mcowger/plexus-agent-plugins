@@ -2,100 +2,114 @@
 
 Exposes models from a self-hosted [Plexus](https://github.com/mcowger/plexus) AI proxy as a first-class provider inside AI coding agents. Models appear in the agent's model picker with correct wire-protocol behavior, as if they were natively supported providers.
 
-Supported hosts:
-
-- **oh-my-pi** (`can1357/oh-my-pi`) — via `plexus-pi` (the legacy-pi shim handles scope remapping automatically)
-- **pi** (`earendil-works/pi`) — via `plexus-pi`
-
 ## Prerequisites
 
-- [Bun](https://bun.sh) ≥ 1.1
 - A running Plexus instance
-- `PLEXUS_API_KEY` set in your environment
-
-```sh
-export PLEXUS_API_KEY=your-key-here
-```
-
-Add this to your shell profile (`~/.zshrc`, `~/.zprofile`, etc.) so it persists across restarts.
 
 ## Installation
 
-### oh-my-pi
+The built `dist/extension.js` is committed to the repo, so no build step is needed for any install method.
+
+### Option 1 — npm (recommended)
 
 ```sh
-git clone https://github.com/mcowger/plexus-agent-plugins
-cd plexus-agent-plugins
-bun install
-bun run --cwd packages/plexus-pi build.ts
-omp plugin link packages/plexus-pi
+cd ~/.pi/agent/extensions
+npm install @mcowger/pi-plexus
 ```
 
-### pi (earendil-works)
+pi auto-discovers packages under `~/.pi/agent/extensions/` that have a `pi.extensions` field in their `package.json`.
+
+### Option 2 — git clone into the extensions directory
 
 ```sh
-git clone https://github.com/mcowger/plexus-agent-plugins
-cd plexus-agent-plugins
-bun install
-bun run --cwd packages/plexus-pi build.ts
+git clone https://github.com/mcowger/plexus-agent-plugins ~/.pi/agent/extensions/plexus-agent-plugins
 ```
 
-Then add the extension path to your pi config, or symlink the package into `~/.pi/extensions/`.
+pi will find `packages/plexus-pi/` inside that directory and load `dist/extension.js`.
 
-## Usage
+### Option 3 — git clone anywhere + settings.json
 
-On the first run, configure the Plexus base URL:
+```sh
+git clone https://github.com/mcowger/plexus-agent-plugins ~/code/plexus-agent-plugins
+```
+
+Then register the path in `~/.pi/agent/settings.json`:
+
+```json
+{
+  "extensions": [
+    "~/code/plexus-agent-plugins/packages/plexus-pi"
+  ]
+}
+```
+
+## First-time setup
+
+On first use, run the login command inside pi:
 
 ```
 /plexus login
 ```
 
 You will be prompted for:
+
 - **Plexus base URL** — e.g. `https://plexus.example.com`
+- **Plexus API key**
 - **Default model** (optional)
 
-After login, models appear immediately in the model picker. They also refresh automatically on every new session.
+Credentials are stored in pi's standard `auth.json` (API key) and a small `config.json` (base URL). Models are fetched immediately and cached for fast startup.
 
-To force a refresh:
+After login, models appear in the model picker and refresh automatically on every new session.
+
+To force a refresh at any time:
 
 ```
 /plexus refresh
 ```
 
-## Configuration
+## Configuration files
 
-| What | How |
-|---|---|
-| API key | `PLEXUS_API_KEY` environment variable (required) |
-| Base URL | Set via `/plexus login`, stored at `~/.{omp,pi}/agent/extensions/plexus/config.json` |
-| Default model | Optionally set during `/plexus login` |
-
-Config, cache, and logs are written under the agent's data directory:
+All files live under the agent's data directory:
 
 ```
-~/.omp/agent/extensions/plexus/
-  config.json                  # base URL and default model
-  plexus-models-cache.json     # last-fetched model list
+~/.pi/agent/extensions/plexus/
+  config.json                  # base URL and optional default model
+  plexus-models-cache.json     # last-fetched model list (startup cache)
   plexus-models-response.json  # raw API response (diagnostics)
   plexus.log                   # extension activity log
 ```
 
-## Development
-
-After editing source files, rebuild before changes take effect:
-
-```sh
-bun run --cwd packages/plexus-pi build.ts
-```
-
-The build bundles `plexus-models` into a single `dist/extension.js`. The `dist/` file is what the agent loads; source files are the single source of truth.
+The API key is stored in pi's own `~/.pi/agent/auth.json` alongside all other provider credentials — it is never written to a separate file.
 
 ## Package layout
 
 ```
 packages/
-  plexus-models/   # host-agnostic data layer (fetch, parse, cache, config)
-  plexus-pi/       # host adapter + extension entry point
+  plexus-models/        # host-agnostic data layer
+    src/
+      types.ts          # wire types (PlexusApiModel, PlexusModelDescriptor, etc.)
+      convert.ts        # model fetching, conversion, compat detection
+      index.ts          # barrel export
+  plexus-pi/            # pi host adapter
+    src/
+      extension.ts      # entry point: commands, session refresh, auth flow
+      mapper.ts         # PlexusModelDescriptor → pi ProviderModelConfig
+      config.ts         # base URL / default model config I/O
+      cache.ts          # model cache I/O
+      log.ts            # append-only log
+    package.json        # declares pi.extensions entry point
 ```
 
-`plexus-models` has zero imports from any agent framework and can be tested in isolation.
+`plexus-models` has zero imports from any agent framework. `plexus-pi` imports it via a relative path.
+
+## Development
+
+After cloning, install dependencies to set up the pre-commit hook:
+
+```sh
+bun install
+```
+
+The pre-commit hook (via lefthook) rebuilds `dist/extension.js` automatically whenever source files change, so the committed artifact stays in sync. After committing, reload the extension in pi with `/reload` or restart the agent.
+
+To add support for a new host agent, see [AGENTS.md](AGENTS.md).

@@ -1,9 +1,8 @@
 {
 	"name": "@mcowger/pi-plexus",
 	"version": "0.5.4",
-	"description": "Plexus AI proxy plugin for pi and oh-my-pi coding agents",
+	"description": "Plexus AI proxy plugin for the pi coding agent",
 	"type": "module",
-	"main": "./dist/extension.js",
 	"files": [
 		"dist/extension.js",
 		"package.json",
@@ -12,8 +11,6 @@
 	"keywords": [
 		"plexus",
 		"pi",
-		"omp",
-		"oh-my-pi",
 		"ai",
 		"coding-agent",
 		"extension",
@@ -27,8 +24,9 @@
 	"scripts": {
 		"build": "bun run build.ts"
 	},
-	"dependencies": {
-		"plexus-models": "workspace:*"
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "*",
+		"@earendil-works/pi-coding-agent": "*"
 	},
 	"devDependencies": {
 		"@types/bun": "latest"

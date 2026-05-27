@@ -1,6 +1,7 @@
 /**
  * Bundles src/extension.ts + plexus-models into a single dist/extension.js
- * that the OMP legacy-pi shim can load without needing to resolve bare specifiers.
+ * for npm publishing. Not needed for development — pi loads src/extension.ts
+ * directly via jiti when installed from source (git clone or path).
  *
  * Run: bun run build.ts
  */
@@ -11,8 +12,8 @@ const result = await Bun.build({
 	outdir: path.join(import.meta.dir, "dist"),
 	target: "bun",
 	format: "esm",
-	// Bundle plexus-models in; keep @earendil-works/* external so the legacy
-	// shim can remap them to OMP's bundled copies at load time.
+	// Bundle plexus-models inline; keep @earendil-works/* and node:* external
+	// so pi's virtual module shim can remap them to its bundled copies at load time.
 	external: [
 		"@earendil-works/pi-ai",
 		"@earendil-works/pi-coding-agent",
@@ -29,4 +30,4 @@ if (!result.success) {
 	process.exit(1);
 }
 
-console.log("Built:", result.outputs.map(o => o.path).join(", "));
+console.log("Built:", result.outputs.map((o) => o.path).join(", "));

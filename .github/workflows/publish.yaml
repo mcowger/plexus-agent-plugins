@@ -6,8 +6,8 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
+  id-token: write # Required for OIDC trusted publishing
 
 jobs:
   release:
@@ -24,10 +24,6 @@ jobs:
 
       - name: Copy README into package
         run: cp README.md packages/plexus-pi/README.md
-
-      - name: Build @mcowger/pi-plexus
-        run: bun run build.ts
-        working-directory: packages/plexus-pi
 
       - uses: actions/setup-node@v6
         with:
