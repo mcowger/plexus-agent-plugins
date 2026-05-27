@@ -22,6 +22,9 @@ jobs:
       - name: Sync versions from tag
         run: bun scripts/sync-versions.ts ${GITHUB_REF_NAME#v}
 
+      - name: Build dist artifacts
+        run: bun run build
+
       - name: Copy README into packages
         run: |
           cp README.md packages/plexus-pi/README.md
