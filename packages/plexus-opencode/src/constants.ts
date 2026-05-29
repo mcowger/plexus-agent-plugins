@@ -3,6 +3,7 @@ export const PLEXUS_PROVIDER_NAME = "Plexus"
 export const PLEXUS_PLUGIN_ID = "@mcowger/opencode-plexus"
 export const PLEXUS_LOG_SERVICE = "opencode-plexus"
 export const OPENAI_COMPATIBLE_NPM = "@ai-sdk/openai-compatible"
+export const PLEXUS_BASE_URL_OPTION = "plexusBaseURL"
 
 export const ENV_BASE_URL = "PLEXUS_BASE_URL"
 export const ENV_API_KEY = "PLEXUS_API_KEY"

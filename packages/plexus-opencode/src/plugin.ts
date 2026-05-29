@@ -7,6 +7,7 @@ import { buildModels, type ConfigModel } from "./mapper.ts"
 import {
   OPENAI_COMPATIBLE_NPM,
   PLACEHOLDER_MODEL_ID,
+  PLEXUS_BASE_URL_OPTION,
   PLEXUS_PROVIDER_ID,
   PLEXUS_PROVIDER_NAME,
   REFRESH_TTL_MS,
@@ -19,12 +20,57 @@ import { apiBase, modelsUrl, trimURL } from "./url.ts"
 
 let lastRefresh: { at: number; models: Record<string, ConfigModel> } | null = null
 
+function mergeModelMaps(
+  base: Record<string, ConfigModel>,
+  overrides: Record<string, ConfigModel> | null,
+): Record<string, ConfigModel> {
+  if (!overrides) return base
+
+  const merged: Record<string, ConfigModel> = { ...base }
+  for (const [id, override] of Object.entries(overrides)) {
+    const existing = merged[id]
+    if (!existing) {
+      merged[id] = override
+      continue
+    }
+
+    merged[id] = {
+      ...existing,
+      ...override,
+      provider: {
+        ...(existing.provider ?? {}),
+        ...(override.provider ?? {}),
+      },
+      ...(existing.cost || override.cost
+        ? {
+            cost: {
+              ...(existing.cost ?? { input: 0, output: 0 }),
+              ...(override.cost ?? {}),
+            },
+          }
+        : {}),
+      limit: {
+        ...existing.limit,
+        ...override.limit,
+      },
+      modalities: {
+        input: override.modalities?.input ?? existing.modalities.input,
+        output: override.modalities?.output ?? existing.modalities.output,
+      },
+    }
+  }
+
+  return merged
+}
+
 async function refreshModels(
   client: Parameters<Plugin>[0]["client"],
   baseURL: string,
+  log: ReturnType<typeof createLogger>,
   apiKey?: string,
 ): Promise<Record<string, ConfigModel>> {
   if (lastRefresh && Date.now() - lastRefresh.at < REFRESH_TTL_MS) {
+    log.info(`Using in-memory plexus model cache (${Object.keys(lastRefresh.models).length} models)`)
     return lastRefresh.models
   }
 
@@ -33,7 +79,12 @@ async function refreshModels(
   // the unauthenticated model list still works.
   const url = modelsUrl(baseURL)
   const { models: apiModels, raw } = await fetchPlexusModels(apiKey ?? "", url)
-  const built = buildModels(apiModels)
+  const built = buildModels(apiModels, apiBase(baseURL))
+  for (const [id, model] of Object.entries(built)) {
+    const providerNpm = model.provider?.npm ?? OPENAI_COMPATIBLE_NPM
+    const providerApi = model.provider?.api ?? "(missing)"
+    log.info(`Model mapping ${id}: npm=${providerNpm} api=${providerApi}`)
+  }
   lastRefresh = { at: Date.now(), models: built }
   // fire-and-forget
   writeCache(client, built, raw).catch(() => {})
@@ -66,9 +117,18 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
       )
 
       const { baseURL, apiKey } = resolveConfig(existing as never)
+      log.info(
+        `Resolved plexus config: baseURL=${baseURL ?? "(missing)"} apiKey=${apiKey ? "present" : "missing"}`,
+      )
+      if (typeof existingOptions["baseURL"] === "string") {
+        log.warn(`Ignoring legacy provider.options.baseURL=${String(existingOptions["baseURL"])}`)
+      }
 
       // Start with sync-readable cache as fallback
       const cachedSync = readCachedModelsSync()
+      if (cachedSync) {
+        log.info(`Loaded sync plexus cache with ${Object.keys(cachedSync).length} models`)
+      }
 
       const merged: Record<string, unknown> = {
         ...existing,
@@ -76,7 +136,7 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
         npm: (existing["npm"] as string | undefined) ?? OPENAI_COMPATIBLE_NPM,
         options: {
           ...existingOptions,
-          ...(baseURL ? { baseURL: apiBase(baseURL) } : {}),
+          ...(baseURL ? { [PLEXUS_BASE_URL_OPTION]: baseURL } : {}),
           ...(apiKey ? { apiKey } : {}),
         },
         // Always seed at least one model so OpenCode doesn't prune the provider
@@ -92,21 +152,39 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
         },
       }
 
+      const mergedOptions = merged["options"] as Record<string, unknown>
+      delete mergedOptions["baseURL"]
+
       if (baseURL) {
         try {
-          const built = await refreshModels(client, baseURL, apiKey)
+          const built = await refreshModels(client, baseURL, log, apiKey)
           // User-defined model overrides in opencode.json win on a per-id basis
-          merged["models"] = { ...built, ...(existingModels ?? {}) }
+          merged["models"] = mergeModelMaps(built, existingModels)
           log.info(`Loaded ${Object.keys(built).length} plexus models from ${baseURL}`)
         } catch (e) {
           log.warn(`Live model refresh failed, using cache: ${String(e)}`)
           const cached = await readCachedModels(client)
           if (cached) {
-            merged["models"] = { ...cached, ...(existingModels ?? {}) }
+            merged["models"] = mergeModelMaps(cached, existingModels)
           }
         }
       } else {
         log.info("Plexus baseURL not configured; skipping live refresh")
+      }
+
+      // Sanity log a few common IDs so we can confirm the final merged config
+      // includes model-level provider overrides (npm/api) as expected.
+      try {
+        const mergedModels = merged["models"] as Record<string, ConfigModel>
+        for (const id of ["gemini-3.5-flash", "claude-haiku-4-5", "small-fast"]) {
+          const m = mergedModels?.[id]
+          if (!m) continue
+          log.info(
+            `Merged model ${id}: provider.npm=${m.provider?.npm ?? "(unset)"} provider.api=${m.provider?.api ?? "(unset)"}`,
+          )
+        }
+      } catch {
+        // ignore
       }
 
       cfg.provider[PLEXUS_PROVIDER_ID] = merged as never
@@ -125,8 +203,11 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
           (auth?.type === "api" ? (auth as { type: string; key: string }).key : undefined) ??
           apiKey
 
+        log.info(
+          `Auth loader resolved plexus config: baseURL=${baseURL ?? "(missing)"} apiKey=${key ? "present" : "missing"}`,
+        )
+
         return {
-          ...(baseURL ? { baseURL: apiBase(baseURL) } : {}),
           ...(key ? { apiKey: key } : {}),
         }
       },

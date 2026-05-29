@@ -3,9 +3,13 @@
 var REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
 var API_DIALECT_MAP = {
   chat_completions: "openai-completions",
+  "openai-completions": "openai-completions",
   messages: "anthropic-messages",
+  "anthropic-messages": "anthropic-messages",
   gemini: "google-generative-ai",
-  responses: "openai-responses"
+  "google-generative-ai": "google-generative-ai",
+  responses: "openai-responses",
+  "openai-responses": "openai-responses"
 };
 function mapPreferredApi(raw) {
   if (raw === undefined)
@@ -21,8 +25,6 @@ function mapPreferredApi(raw) {
 function adjustBaseUrl(baseUrl, preferredApi) {
   const stripped = baseUrl.replace(/\/+$/, "");
   switch (preferredApi) {
-    case "anthropic-messages":
-      return stripped.endsWith("/v1") ? stripped.slice(0, -3) : stripped;
     case "google-generative-ai":
       return stripped.endsWith("/v1") ? `${stripped.slice(0, -3)}/v1beta` : stripped;
     default:

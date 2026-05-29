@@ -4,9 +4,13 @@ const REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_e
 
 const API_DIALECT_MAP: Record<string, string> = {
 	chat_completions: "openai-completions",
+	"openai-completions": "openai-completions",
 	messages: "anthropic-messages",
+	"anthropic-messages": "anthropic-messages",
 	gemini: "google-generative-ai",
+	"google-generative-ai": "google-generative-ai",
 	responses: "openai-responses",
+	"openai-responses": "openai-responses",
 };
 
 /**
@@ -26,15 +30,12 @@ export function mapPreferredApi(raw: string | string[] | undefined): string {
 /**
  * Adjusts the Plexus base URL (which always ends in /v1) for the selected
  * API dialect:
- * - anthropic-messages: strip trailing /v1
  * - google-generative-ai: replace /v1 with /v1beta
  * - all others: pass through unchanged
  */
 export function adjustBaseUrl(baseUrl: string, preferredApi: string): string {
 	const stripped = baseUrl.replace(/\/+$/, "");
 	switch (preferredApi) {
-		case "anthropic-messages":
-			return stripped.endsWith("/v1") ? stripped.slice(0, -3) : stripped;
 		case "google-generative-ai":
 			return stripped.endsWith("/v1") ? `${stripped.slice(0, -3)}/v1beta` : stripped;
 		default:

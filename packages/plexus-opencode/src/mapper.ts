@@ -1,4 +1,4 @@
-import type { PlexusApiModel } from "../../plexus-models/src/index.ts"
+import { adjustBaseUrl, mapPreferredApi, type PlexusApiModel } from "../../plexus-models/src/index.ts"
 
 type Modality = "text" | "audio" | "image" | "video" | "pdf"
 
@@ -6,6 +6,10 @@ type Modality = "text" | "audio" | "image" | "video" | "pdf"
 export interface ConfigModel {
   id: string
   name: string
+  provider?: {
+    npm?: string
+    api?: string
+  }
   attachment?: boolean
   reasoning?: boolean
   temperature?: boolean
@@ -28,6 +32,27 @@ export interface ConfigModel {
 
 const REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"])
 const DEFAULT_CONTEXT = 8192
+
+function resolveModelProvider(
+  model: PlexusApiModel,
+  baseURL: string,
+): { npm?: string; api?: string } {
+  const preferredApi = mapPreferredApi(model.preferred_api)
+  const api = adjustBaseUrl(baseURL, preferredApi)
+
+  switch (preferredApi) {
+    case "anthropic-messages":
+      return { npm: "@ai-sdk/anthropic", api }
+    case "google-generative-ai":
+      return { npm: "@ai-sdk/google", api }
+    case "openai-responses":
+      return { npm: "@ai-sdk/openai", api }
+    case "openai-completions":
+      return { api }
+    default:
+      return { api }
+  }
+}
 
 function parsePrice(value: string | undefined): number {
   if (!value) return 0
@@ -84,7 +109,7 @@ function buildOutputModalities(model: PlexusApiModel): Modality[] | null {
  * Image-output and embedding models are filtered out — OpenCode does not
  * support non-chat models as chat providers.
  */
-export function buildModels(models: PlexusApiModel[]): Record<string, ConfigModel> {
+export function buildModels(models: PlexusApiModel[], baseURL: string): Record<string, ConfigModel> {
   const result: Record<string, ConfigModel> = {}
 
   for (const m of models) {
@@ -116,10 +141,12 @@ export function buildModels(models: PlexusApiModel[]): Record<string, ConfigMode
     const hasCachePricing = cacheReadPrice > 0 || cacheWritePrice > 0
 
     const hasNonTextInput = inputModalities.some((mod) => mod !== "text")
+    const provider = resolveModelProvider(m, baseURL)
 
     const entry: ConfigModel = {
       id: m.id,
       name: m.name ?? m.id,
+      provider,
       limit: {
         context: contextLength,
         output: maxOutput,

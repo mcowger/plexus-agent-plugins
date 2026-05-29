@@ -116,10 +116,23 @@ Run inside OpenCode:
 
 Select **Plexus** and enter your base URL and API key. Models are loaded immediately and cached for fast startup on subsequent sessions.
 
+For OpenCode, enter the Plexus API base URL including the trailing `/v1`, for example:
+
+```text
+https://plexus.example.com/v1
+```
+
+The OpenCode plugin respects each model's `preferred_api` value and routes models through the matching SDK/API shape:
+
+- `chat_completions` / `openai-completions` → OpenAI-compatible chat completions
+- `responses` / `openai-responses` → OpenAI Responses API
+- `messages` / `anthropic-messages` → Anthropic Messages API
+- `gemini` / `google-generative-ai` → Google Gemini API
+
 You can also pre-configure via environment variables:
 
 ```sh
-export PLEXUS_BASE_URL=https://plexus.example.com
+export PLEXUS_BASE_URL=https://plexus.example.com/v1
 export PLEXUS_API_KEY=your-api-key
 ```
 
