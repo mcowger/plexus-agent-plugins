@@ -28,14 +28,17 @@ export function mapPreferredApi(raw: string | string[] | undefined): string {
 }
 
 /**
- * Adjusts the Plexus base URL (which always ends in /v1) for the selected
+ * Adjusts the Plexus base URL (which normally ends in /v1) for the selected
  * API dialect:
+ * - anthropic-messages: strip the trailing /v1 because Anthropic clients add /v1/messages
  * - google-generative-ai: replace /v1 with /v1beta
  * - all others: pass through unchanged
  */
 export function adjustBaseUrl(baseUrl: string, preferredApi: string): string {
 	const stripped = baseUrl.replace(/\/+$/, "");
 	switch (preferredApi) {
+		case "anthropic-messages":
+			return stripped.endsWith("/v1") ? stripped.slice(0, -3) : stripped;
 		case "google-generative-ai":
 			return stripped.endsWith("/v1") ? `${stripped.slice(0, -3)}/v1beta` : stripped;
 		default:

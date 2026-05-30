@@ -25,6 +25,8 @@ function mapPreferredApi(raw) {
 function adjustBaseUrl(baseUrl, preferredApi) {
   const stripped = baseUrl.replace(/\/+$/, "");
   switch (preferredApi) {
+    case "anthropic-messages":
+      return stripped.endsWith("/v1") ? stripped.slice(0, -3) : stripped;
     case "google-generative-ai":
       return stripped.endsWith("/v1") ? `${stripped.slice(0, -3)}/v1beta` : stripped;
     default:

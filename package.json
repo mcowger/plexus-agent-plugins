@@ -8,6 +8,7 @@
 	],
 	"scripts": {
 		"build": "bun run --cwd packages/plexus-pi build.ts && bun run --cwd packages/plexus-opencode build.ts",
+		"test": "bun test",
 		"postinstall": "command -v lefthook >/dev/null 2>&1 && lefthook install || true",
 		"sync-versions": "bun scripts/sync-versions.ts",
 		"release": "bun scripts/release.ts"
