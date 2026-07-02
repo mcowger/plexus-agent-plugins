@@ -14,6 +14,7 @@ export {
 	adjustBaseUrl,
 	convertDescriptors,
 	convertToDescriptor,
+	DEFAULT_MODELS_FETCH_TIMEOUT_MS,
 	detectOpenAICompletionsCompat,
 	fetchPlexusModels,
 	inferReasoning,

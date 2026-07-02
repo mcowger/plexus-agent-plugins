@@ -233,23 +233,43 @@ export function detectOpenAICompletionsCompat(
 	return compat;
 }
 
+/** Default request timeout for fetchPlexusModels, in milliseconds. */
+export const DEFAULT_MODELS_FETCH_TIMEOUT_MS = 10_000;
+
 /**
  * Issues a GET to the Plexus /v1/models endpoint and returns the parsed model list
  * plus the raw response envelope.
+ *
+ * Bounded by an AbortController-based timeout (default 10s) so a slow or
+ * unreachable server cannot hang the caller indefinitely — plugin startup
+ * paths depend on this call resolving (or rejecting) promptly.
  */
 export async function fetchPlexusModels(
 	apiKey: string,
 	modelsUrl: string,
+	timeoutMs: number = DEFAULT_MODELS_FETCH_TIMEOUT_MS,
 ): Promise<{ models: PlexusApiModel[]; raw: import("./types.ts").PlexusApiResponse }> {
-	const res = await fetch(modelsUrl, {
-		headers: {
-			Authorization: `Bearer ${apiKey}`,
-			Accept: "application/json",
-		},
-	});
-	if (!res.ok) {
-		throw new Error(`Plexus models fetch failed: ${res.status} ${res.statusText}`);
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	try {
+		const res = await fetch(modelsUrl, {
+			headers: {
+				Authorization: `Bearer ${apiKey}`,
+				Accept: "application/json",
+			},
+			signal: controller.signal,
+		});
+		if (!res.ok) {
+			throw new Error(`Plexus models fetch failed: ${res.status} ${res.statusText}`);
+		}
+		const raw = (await res.json()) as import("./types.ts").PlexusApiResponse;
+		return { models: raw.data ?? [], raw };
+	} catch (err) {
+		if (err instanceof Error && err.name === "AbortError") {
+			throw new Error(`Plexus models fetch timed out after ${timeoutMs}ms`);
+		}
+		throw err;
+	} finally {
+		clearTimeout(timer);
 	}
-	const raw = (await res.json()) as import("./types.ts").PlexusApiResponse;
-	return { models: raw.data ?? [], raw };
 }

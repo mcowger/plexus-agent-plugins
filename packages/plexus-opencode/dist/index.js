@@ -10,6 +10,7 @@ var ENV_BASE_URL = "PLEXUS_BASE_URL";
 var ENV_API_KEY = "PLEXUS_API_KEY";
 var MODELS_FETCH_TIMEOUT_MS = 1e4;
 var REFRESH_TTL_MS = 60000;
+var CONFIG_HOOK_REFRESH_BUDGET_MS = 3000;
 var PLACEHOLDER_MODEL_ID = "plexus-unconfigured";
 
 // ../plexus-models/src/convert.ts
@@ -46,18 +47,31 @@ function adjustBaseUrl(baseUrl, preferredApi) {
       return stripped;
   }
 }
-async function fetchPlexusModels(apiKey, modelsUrl) {
-  const res = await fetch(modelsUrl, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      Accept: "application/json"
+var DEFAULT_MODELS_FETCH_TIMEOUT_MS = 1e4;
+async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(modelsUrl, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json"
+      },
+      signal: controller.signal
+    });
+    if (!res.ok) {
+      throw new Error(`Plexus models fetch failed: ${res.status} ${res.statusText}`);
     }
-  });
-  if (!res.ok) {
-    throw new Error(`Plexus models fetch failed: ${res.status} ${res.statusText}`);
+    const raw = await res.json();
+    return { models: raw.data ?? [], raw };
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Plexus models fetch timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  const raw = await res.json();
-  return { models: raw.data ?? [], raw };
 }
 // src/cache.ts
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
@@ -85,24 +99,6 @@ async function getDir(client) {
   } catch {}
   resolvedDir = fallbackDir();
   return resolvedDir;
-}
-function syncCachePath() {
-  return join(fallbackDir(), CACHE_FILE);
-}
-function readCachedModelsSync() {
-  try {
-    const path = syncCachePath();
-    if (!existsSync(path))
-      return null;
-    const raw = readFileSync(path, "utf8");
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed.models === "object" && !Array.isArray(parsed.models)) {
-      return parsed.models;
-    }
-    return null;
-  } catch {
-    return null;
-  }
 }
 async function readCachedModels(client) {
   try {
@@ -313,6 +309,19 @@ function buildModels(models, baseURL) {
 
 // src/plugin.ts
 var lastRefresh = null;
+var inFlightRefresh = null;
+function raceWithTimeout(promise, timeoutMs) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ status: "timed-out" }), timeoutMs);
+    promise.then((value) => {
+      clearTimeout(timer);
+      resolve({ status: "resolved", value });
+    }, (error) => {
+      clearTimeout(timer);
+      resolve({ status: "rejected", error });
+    });
+  });
+}
 function mergeModelMaps(base, overrides) {
   if (!overrides)
     return base;
@@ -348,22 +357,30 @@ function mergeModelMaps(base, overrides) {
   }
   return merged;
 }
-async function refreshModels(client, baseURL, log, apiKey) {
+function refreshModels(client, baseURL, log, apiKey) {
   if (lastRefresh && Date.now() - lastRefresh.at < REFRESH_TTL_MS) {
     log.info(`Using in-memory plexus model cache (${Object.keys(lastRefresh.models).length} models)`);
-    return lastRefresh.models;
+    return Promise.resolve(lastRefresh.models);
   }
-  const url = modelsUrl(baseURL);
-  const { models: apiModels, raw } = await fetchPlexusModels(apiKey ?? "", url);
-  const built = buildModels(apiModels, apiBase(baseURL));
-  for (const [id, model] of Object.entries(built)) {
-    const providerNpm = model.provider?.npm ?? OPENAI_COMPATIBLE_NPM;
-    const providerApi = model.provider?.api ?? "(missing)";
-    log.info(`Model mapping ${id}: npm=${providerNpm} api=${providerApi}`);
-  }
-  lastRefresh = { at: Date.now(), models: built };
-  writeCache(client, built, raw).catch(() => {});
-  return built;
+  if (inFlightRefresh)
+    return inFlightRefresh;
+  const run = async () => {
+    const url = modelsUrl(baseURL);
+    const { models: apiModels, raw } = await fetchPlexusModels(apiKey ?? "", url);
+    const built = buildModels(apiModels, apiBase(baseURL));
+    for (const [id, model] of Object.entries(built)) {
+      const providerNpm = model.provider?.npm ?? OPENAI_COMPATIBLE_NPM;
+      const providerApi = model.provider?.api ?? "(missing)";
+      log.info(`Model mapping ${id}: npm=${providerNpm} api=${providerApi}`);
+    }
+    lastRefresh = { at: Date.now(), models: built };
+    writeCache(client, built, raw).catch(() => {});
+    return built;
+  };
+  inFlightRefresh = run().finally(() => {
+    inFlightRefresh = null;
+  });
+  return inFlightRefresh;
 }
 var PlexusProviderPlugin = async (ctx) => {
   const { client } = ctx;
@@ -379,9 +396,9 @@ var PlexusProviderPlugin = async (ctx) => {
       if (typeof existingOptions["baseURL"] === "string") {
         log.warn(`Ignoring legacy provider.options.baseURL=${String(existingOptions["baseURL"])}`);
       }
-      const cachedSync = readCachedModelsSync();
-      if (cachedSync) {
-        log.info(`Loaded sync plexus cache with ${Object.keys(cachedSync).length} models`);
+      const cachedAsync = await readCachedModels(client);
+      if (cachedAsync) {
+        log.info(`Loaded plexus cache with ${Object.keys(cachedAsync).length} models`);
       }
       const merged = {
         ...existing,
@@ -392,7 +409,7 @@ var PlexusProviderPlugin = async (ctx) => {
           ...baseURL ? { [PLEXUS_BASE_URL_OPTION]: baseURL } : {},
           ...apiKey ? { apiKey } : {}
         },
-        models: existingModels ?? cachedSync ?? {
+        models: existingModels ?? cachedAsync ?? {
           [PLACEHOLDER_MODEL_ID]: {
             id: PLACEHOLDER_MODEL_ID,
             name: "Plexus (run /connect to configure)",
@@ -404,16 +421,24 @@ var PlexusProviderPlugin = async (ctx) => {
       const mergedOptions = merged["options"];
       delete mergedOptions["baseURL"];
       if (baseURL) {
-        try {
-          const built = await refreshModels(client, baseURL, log, apiKey);
-          merged["models"] = mergeModelMaps(built, existingModels);
-          log.info(`Loaded ${Object.keys(built).length} plexus models from ${baseURL}`);
-        } catch (e) {
-          log.warn(`Live model refresh failed, using cache: ${String(e)}`);
-          const cached = await readCachedModels(client);
-          if (cached) {
-            merged["models"] = mergeModelMaps(cached, existingModels);
+        const refreshPromise = refreshModels(client, baseURL, log, apiKey);
+        const race = await raceWithTimeout(refreshPromise, CONFIG_HOOK_REFRESH_BUDGET_MS);
+        if (race.status === "resolved") {
+          merged["models"] = mergeModelMaps(race.value, existingModels);
+          log.info(`Loaded ${Object.keys(race.value).length} plexus models from ${baseURL}`);
+        } else if (race.status === "rejected") {
+          log.warn(`Live model refresh failed, using cache: ${String(race.error)}`);
+          if (cachedAsync) {
+            merged["models"] = mergeModelMaps(cachedAsync, existingModels);
           }
+        } else {
+          log.info(`Live model refresh still pending after ${CONFIG_HOOK_REFRESH_BUDGET_MS}ms; using cache and continuing in background`);
+          if (cachedAsync) {
+            merged["models"] = mergeModelMaps(cachedAsync, existingModels);
+          }
+          refreshPromise.catch((e) => {
+            log.warn(`Background plexus model refresh failed: ${String(e)}`);
+          });
         }
       } else {
         log.info("Plexus baseURL not configured; skipping live refresh");
@@ -499,5 +524,6 @@ export {
   OPENAI_COMPATIBLE_NPM,
   MODELS_FETCH_TIMEOUT_MS,
   ENV_BASE_URL,
-  ENV_API_KEY
+  ENV_API_KEY,
+  CONFIG_HOOK_REFRESH_BUDGET_MS
 };

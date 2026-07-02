@@ -162,18 +162,31 @@ function detectOpenAICompletionsCompat(providerName, baseUrl) {
   }
   return compat;
 }
-async function fetchPlexusModels(apiKey, modelsUrl) {
-  const res = await fetch(modelsUrl, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      Accept: "application/json"
+var DEFAULT_MODELS_FETCH_TIMEOUT_MS = 1e4;
+async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(modelsUrl, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json"
+      },
+      signal: controller.signal
+    });
+    if (!res.ok) {
+      throw new Error(`Plexus models fetch failed: ${res.status} ${res.statusText}`);
     }
-  });
-  if (!res.ok) {
-    throw new Error(`Plexus models fetch failed: ${res.status} ${res.statusText}`);
+    const raw = await res.json();
+    return { models: raw.data ?? [], raw };
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Plexus models fetch timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
-  const raw = await res.json();
-  return { models: raw.data ?? [], raw };
 }
 // src/config.ts
 import { existsSync, readFileSync } from "fs";
@@ -183,13 +196,18 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 var getConfigDir = () => join(getAgentDir(), "extensions", "plexus");
 var getConfigPath = () => join(getConfigDir(), "config.json");
 var normalizeRoot = (raw) => raw.replace(/\/+$/, "");
+var cachedConfig = null;
 function getConfigSync() {
+  if (cachedConfig)
+    return cachedConfig;
   try {
     if (existsSync(getConfigPath())) {
-      return JSON.parse(readFileSync(getConfigPath(), "utf8"));
+      cachedConfig = JSON.parse(readFileSync(getConfigPath(), "utf8"));
+      return cachedConfig;
     }
   } catch {}
-  return {};
+  cachedConfig = {};
+  return cachedConfig;
 }
 async function saveBaseUrl(baseUrl, defaultModel) {
   await mkdir(getConfigDir(), { recursive: true });
@@ -201,6 +219,7 @@ async function saveBaseUrl(baseUrl, defaultModel) {
   };
   await writeFile(getConfigPath(), `${JSON.stringify(config, null, 2)}
 `, "utf8");
+  cachedConfig = config;
 }
 function getRawBaseUrl() {
   const config = getConfigSync();
@@ -267,19 +286,26 @@ async function writeRawResponse(data) {
 }
 
 // src/log.ts
-import { appendFileSync, mkdirSync } from "fs";
+import { mkdir as mkdir3, appendFile } from "fs/promises";
 import { join as join3 } from "path";
 import { getAgentDir as getAgentDir3 } from "@earendil-works/pi-coding-agent";
 var getCacheDir2 = () => join3(getAgentDir3(), "extensions", "plexus");
 var getLogPath = () => join3(getCacheDir2(), "plexus.log");
+var dirEnsured = false;
 function log(message, data) {
+  writeLogLine(message, data);
+}
+async function writeLogLine(message, data) {
   try {
-    mkdirSync(getCacheDir2(), { recursive: true });
+    if (!dirEnsured) {
+      await mkdir3(getCacheDir2(), { recursive: true });
+      dirEnsured = true;
+    }
     const ts = new Date().toISOString();
     const line = data !== undefined ? `${ts} ${message} ${JSON.stringify(data)}
 ` : `${ts} ${message}
 `;
-    appendFileSync(getLogPath(), line, "utf8");
+    await appendFile(getLogPath(), line, "utf8");
   } catch {}
 }
 

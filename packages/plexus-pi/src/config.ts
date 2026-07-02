@@ -13,13 +13,21 @@ interface PlexusConfig {
 
 const normalizeRoot = (raw: string): string => raw.replace(/\/+$/, "");
 
+/** Cached parsed config, resolved once per process and invalidated on write.
+ *  Avoids re-issuing a sync file read on every getBaseUrl/getModelsUrl/
+ *  getDefaultModel call. */
+let cachedConfig: PlexusConfig | null = null;
+
 export function getConfigSync(): PlexusConfig {
+	if (cachedConfig) return cachedConfig;
 	try {
 		if (existsSync(getConfigPath())) {
-			return JSON.parse(readFileSync(getConfigPath(), "utf8")) as PlexusConfig;
+			cachedConfig = JSON.parse(readFileSync(getConfigPath(), "utf8")) as PlexusConfig;
+			return cachedConfig;
 		}
 	} catch {}
-	return {};
+	cachedConfig = {};
+	return cachedConfig;
 }
 
 export async function saveBaseUrl(baseUrl: string, defaultModel?: string): Promise<void> {
@@ -31,6 +39,7 @@ export async function saveBaseUrl(baseUrl: string, defaultModel?: string): Promi
 		...(defaultModel !== undefined && { defaultModel }),
 	};
 	await writeFile(getConfigPath(), `${JSON.stringify(config, null, 2)}\n`, "utf8");
+	cachedConfig = config;
 }
 
 export function getRawBaseUrl(): string | null {

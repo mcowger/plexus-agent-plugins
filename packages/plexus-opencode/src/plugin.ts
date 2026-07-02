@@ -1,10 +1,11 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import { fetchPlexusModels } from "../../plexus-models/src/index.ts"
-import { readCachedModels, readCachedModelsSync, writeCache } from "./cache.ts"
+import { readCachedModels, writeCache } from "./cache.ts"
 import { resolveConfig, persistToGlobalConfig } from "./config-store.ts"
 import { createLogger } from "./log.ts"
 import { buildModels, type ConfigModel } from "./mapper.ts"
 import {
+  CONFIG_HOOK_REFRESH_BUDGET_MS,
   OPENAI_COMPATIBLE_NPM,
   PLACEHOLDER_MODEL_ID,
   PLEXUS_BASE_URL_OPTION,
@@ -19,6 +20,37 @@ import { apiBase, modelsUrl, trimURL } from "./url.ts"
 // ---------------------------------------------------------------------------
 
 let lastRefresh: { at: number; models: Record<string, ConfigModel> } | null = null
+
+/** Dedupes concurrent refresh attempts so overlapping config() calls (or a
+ *  config() call racing an in-progress background refresh) share one fetch. */
+let inFlightRefresh: Promise<Record<string, ConfigModel>> | null = null
+
+type RaceResult<T> =
+  | { status: "resolved"; value: T }
+  | { status: "rejected"; error: unknown }
+  | { status: "timed-out" }
+
+/**
+ * Awaits `promise` for at most `timeoutMs`. If it doesn't settle in time,
+ * resolves with { status: "timed-out" } — the original promise keeps
+ * running and its eventual outcome is left to the caller (e.g. background
+ * cache write, or a .catch() for logging).
+ */
+function raceWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<RaceResult<T>> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ status: "timed-out" }), timeoutMs)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve({ status: "resolved", value })
+      },
+      (error) => {
+        clearTimeout(timer)
+        resolve({ status: "rejected", error })
+      },
+    )
+  })
+}
 
 function mergeModelMaps(
   base: Record<string, ConfigModel>,
@@ -63,7 +95,7 @@ function mergeModelMaps(
   return merged
 }
 
-async function refreshModels(
+function refreshModels(
   client: Parameters<Plugin>[0]["client"],
   baseURL: string,
   log: ReturnType<typeof createLogger>,
@@ -71,24 +103,36 @@ async function refreshModels(
 ): Promise<Record<string, ConfigModel>> {
   if (lastRefresh && Date.now() - lastRefresh.at < REFRESH_TTL_MS) {
     log.info(`Using in-memory plexus model cache (${Object.keys(lastRefresh.models).length} models)`)
-    return lastRefresh.models
+    return Promise.resolve(lastRefresh.models)
   }
 
-  // fetchPlexusModels in plexus-models takes (apiKey, modelsUrl) — apiKey is
-  // required by that signature. Fall back to empty string when not provided so
-  // the unauthenticated model list still works.
-  const url = modelsUrl(baseURL)
-  const { models: apiModels, raw } = await fetchPlexusModels(apiKey ?? "", url)
-  const built = buildModels(apiModels, apiBase(baseURL))
-  for (const [id, model] of Object.entries(built)) {
-    const providerNpm = model.provider?.npm ?? OPENAI_COMPATIBLE_NPM
-    const providerApi = model.provider?.api ?? "(missing)"
-    log.info(`Model mapping ${id}: npm=${providerNpm} api=${providerApi}`)
+  // Dedupe concurrent callers (e.g. config() racing a prior background
+  // refresh) onto a single in-flight fetch.
+  if (inFlightRefresh) return inFlightRefresh
+
+  const run = async (): Promise<Record<string, ConfigModel>> => {
+    // fetchPlexusModels in plexus-models takes (apiKey, modelsUrl) — apiKey is
+    // required by that signature. Fall back to empty string when not provided so
+    // the unauthenticated model list still works. It is internally bounded by
+    // an AbortController timeout, so this can't hang indefinitely.
+    const url = modelsUrl(baseURL)
+    const { models: apiModels, raw } = await fetchPlexusModels(apiKey ?? "", url)
+    const built = buildModels(apiModels, apiBase(baseURL))
+    for (const [id, model] of Object.entries(built)) {
+      const providerNpm = model.provider?.npm ?? OPENAI_COMPATIBLE_NPM
+      const providerApi = model.provider?.api ?? "(missing)"
+      log.info(`Model mapping ${id}: npm=${providerNpm} api=${providerApi}`)
+    }
+    lastRefresh = { at: Date.now(), models: built }
+    // fire-and-forget
+    writeCache(client, built, raw).catch(() => {})
+    return built
   }
-  lastRefresh = { at: Date.now(), models: built }
-  // fire-and-forget
-  writeCache(client, built, raw).catch(() => {})
-  return built
+
+  inFlightRefresh = run().finally(() => {
+    inFlightRefresh = null
+  })
+  return inFlightRefresh
 }
 
 // ---------------------------------------------------------------------------
@@ -124,10 +168,11 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
         log.warn(`Ignoring legacy provider.options.baseURL=${String(existingOptions["baseURL"])}`)
       }
 
-      // Start with sync-readable cache as fallback
-      const cachedSync = readCachedModelsSync()
-      if (cachedSync) {
-        log.info(`Loaded sync plexus cache with ${Object.keys(cachedSync).length} models`)
+      // Async cache read — config() is already async, so there's no reason
+      // to pay for a blocking sync file read here.
+      const cachedAsync = await readCachedModels(client)
+      if (cachedAsync) {
+        log.info(`Loaded plexus cache with ${Object.keys(cachedAsync).length} models`)
       }
 
       const merged: Record<string, unknown> = {
@@ -142,7 +187,7 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
         // Always seed at least one model so OpenCode doesn't prune the provider
         // before /connect runs. The placeholder is replaced once a live fetch
         // succeeds or a real cache exists.
-        models: existingModels ?? cachedSync ?? {
+        models: existingModels ?? cachedAsync ?? {
           [PLACEHOLDER_MODEL_ID]: {
             id: PLACEHOLDER_MODEL_ID,
             name: "Plexus (run /connect to configure)",
@@ -156,17 +201,38 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
       delete mergedOptions["baseURL"]
 
       if (baseURL) {
-        try {
-          const built = await refreshModels(client, baseURL, log, apiKey)
+        // Give the live refresh a short budget to complete inline (covers
+        // the common "already warm" case where refreshModels resolves from
+        // the in-memory TTL cache almost instantly). If it doesn't finish in
+        // time, fall back to cache/placeholder immediately and let the
+        // refresh keep running in the background — startup must not block
+        // on a slow or unreachable Plexus server.
+        const refreshPromise = refreshModels(client, baseURL, log, apiKey)
+        const race = await raceWithTimeout(refreshPromise, CONFIG_HOOK_REFRESH_BUDGET_MS)
+
+        if (race.status === "resolved") {
           // User-defined model overrides in opencode.json win on a per-id basis
-          merged["models"] = mergeModelMaps(built, existingModels)
-          log.info(`Loaded ${Object.keys(built).length} plexus models from ${baseURL}`)
-        } catch (e) {
-          log.warn(`Live model refresh failed, using cache: ${String(e)}`)
-          const cached = await readCachedModels(client)
-          if (cached) {
-            merged["models"] = mergeModelMaps(cached, existingModels)
+          merged["models"] = mergeModelMaps(race.value, existingModels)
+          log.info(`Loaded ${Object.keys(race.value).length} plexus models from ${baseURL}`)
+        } else if (race.status === "rejected") {
+          log.warn(`Live model refresh failed, using cache: ${String(race.error)}`)
+          if (cachedAsync) {
+            merged["models"] = mergeModelMaps(cachedAsync, existingModels)
           }
+        } else {
+          log.info(
+            `Live model refresh still pending after ${CONFIG_HOOK_REFRESH_BUDGET_MS}ms; using cache and continuing in background`,
+          )
+          if (cachedAsync) {
+            merged["models"] = mergeModelMaps(cachedAsync, existingModels)
+          }
+          // Let it finish in the background; refreshModels() already caches
+          // the result in lastRefresh and writes it to disk. Swallow errors
+          // here — they're logged inside refreshModels' caller paths only
+          // when awaited, so log explicitly for the background case.
+          refreshPromise.catch((e) => {
+            log.warn(`Background plexus model refresh failed: ${String(e)}`)
+          })
         }
       } else {
         log.info("Plexus baseURL not configured; skipping live refresh")
