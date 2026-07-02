@@ -1,4 +1,3 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -10,32 +9,24 @@ const PLUGIN_SUBDIR = join("plugins", "plexus")
 const CACHE_FILE = "models-cache.json"
 const RAW_FILE = "models-raw.json"
 
-/** Resolved once per process, then cached. */
-let resolvedDir: string | null = null
-
 /** Default fallback path that doesn't require an API call. */
 function fallbackDir(): string {
   return join(homedir(), ".local", "share", "opencode", PLUGIN_SUBDIR)
 }
 
-/** Resolve the cache directory using client.path.get(), falling back to homedir. */
-async function getDir(client: PluginInput["client"]): Promise<string> {
-  if (resolvedDir) return resolvedDir
-
-  try {
-    const res = await client.path.get()
-    const data = (res as unknown as { data?: { state?: string } | null })?.data
-    const state = typeof data?.state === "string" && data.state ? data.state : undefined
-    if (state) {
-      resolvedDir = join(state, PLUGIN_SUBDIR)
-      return resolvedDir
-    }
-  } catch {
-    // fall through to homedir fallback
-  }
-
-  resolvedDir = fallbackDir()
-  return resolvedDir
+/**
+ * Resolve the cache directory.
+ *
+ * IMPORTANT: this must NOT call back into the OpenCode server (e.g.
+ * client.path.get()) — the config() hook runs as part of the server's own
+ * bootstrap/config-loading sequence, before the server is necessarily ready
+ * to service its own HTTP routes. Making an HTTP round-trip back to the
+ * server from inside config() can deadlock startup indefinitely (observed:
+ * client.path.get() never resolves and never rejects). Always use the plain
+ * homedir path instead.
+ */
+function getDir(): string {
+  return fallbackDir()
 }
 
 interface ModelCache {
@@ -44,39 +35,21 @@ interface ModelCache {
 }
 
 // ---------------------------------------------------------------------------
-// Sync helpers (homedir-only; used during the synchronous part of config hook)
+// Async helpers (homedir-resolved path, used after await)
 // ---------------------------------------------------------------------------
 
-function syncCachePath(): string {
-  return join(fallbackDir(), CACHE_FILE)
-}
-
-/** Read cached models synchronously from the homedir fallback path. */
-export function readCachedModelsSync(): Record<string, ConfigModel> | null {
-  try {
-    const path = syncCachePath()
-    if (!existsSync(path)) return null
-    const raw = readFileSync(path, "utf8")
-    const parsed = JSON.parse(raw) as ModelCache
-    if (parsed && typeof parsed.models === "object" && !Array.isArray(parsed.models)) {
-      return parsed.models
-    }
-    return null
-  } catch {
-    return null
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Async helpers (SDK-resolved path, used after await)
-// ---------------------------------------------------------------------------
-
-/** Read cached models asynchronously (uses SDK-resolved state dir). */
+/**
+ * Read cached models asynchronously.
+ *
+ * The `client` parameter is unused (kept for call-site compatibility) —
+ * resolving the cache dir must never call back into the OpenCode server; see
+ * getDir() for why.
+ */
 export async function readCachedModels(
-  client: PluginInput["client"],
+  _client: PluginInput["client"],
 ): Promise<Record<string, ConfigModel> | null> {
   try {
-    const dir = await getDir(client)
+    const dir = getDir()
     const content = await readFile(join(dir, CACHE_FILE), "utf8")
     const parsed = JSON.parse(content) as ModelCache
     if (parsed && typeof parsed.models === "object" && !Array.isArray(parsed.models)) {
@@ -88,14 +61,19 @@ export async function readCachedModels(
   }
 }
 
-/** Write the model cache and (optionally) raw API response to disk. Never throws. */
+/**
+ * Write the model cache and (optionally) raw API response to disk. Never throws.
+ *
+ * The `client` parameter is unused (kept for call-site compatibility) — see
+ * getDir() for why cache dir resolution must stay purely local.
+ */
 export async function writeCache(
-  client: PluginInput["client"],
+  _client: PluginInput["client"],
   models: Record<string, ConfigModel>,
   raw?: PlexusApiResponse,
 ): Promise<void> {
   try {
-    const dir = await getDir(client)
+    const dir = getDir()
     await mkdir(dir, { recursive: true })
 
     const cache: ModelCache = { models, timestamp: Date.now() }
@@ -103,15 +81,6 @@ export async function writeCache(
 
     if (raw !== undefined) {
       await writeFile(join(dir, RAW_FILE), JSON.stringify(raw, null, 2) + "\n", "utf8")
-    }
-
-    // Mirror to homedir so the sync fallback is always fresh
-    try {
-      const syncDir = fallbackDir()
-      mkdirSync(syncDir, { recursive: true })
-      writeFileSync(join(syncDir, CACHE_FILE), JSON.stringify(cache, null, 2) + "\n", "utf8")
-    } catch {
-      // best-effort; never block
     }
   } catch {
     // Never block plugin init on cache write failures

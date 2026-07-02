@@ -74,35 +74,21 @@ async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_F
   }
 }
 // src/cache.ts
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
 var PLUGIN_SUBDIR = join("plugins", "plexus");
 var CACHE_FILE = "models-cache.json";
 var RAW_FILE = "models-raw.json";
-var resolvedDir = null;
 function fallbackDir() {
   return join(homedir(), ".local", "share", "opencode", PLUGIN_SUBDIR);
 }
-async function getDir(client) {
-  if (resolvedDir)
-    return resolvedDir;
-  try {
-    const res = await client.path.get();
-    const data = res?.data;
-    const state = typeof data?.state === "string" && data.state ? data.state : undefined;
-    if (state) {
-      resolvedDir = join(state, PLUGIN_SUBDIR);
-      return resolvedDir;
-    }
-  } catch {}
-  resolvedDir = fallbackDir();
-  return resolvedDir;
+function getDir() {
+  return fallbackDir();
 }
-async function readCachedModels(client) {
+async function readCachedModels(_client) {
   try {
-    const dir = await getDir(client);
+    const dir = getDir();
     const content = await readFile(join(dir, CACHE_FILE), "utf8");
     const parsed = JSON.parse(content);
     if (parsed && typeof parsed.models === "object" && !Array.isArray(parsed.models)) {
@@ -113,9 +99,9 @@ async function readCachedModels(client) {
     return null;
   }
 }
-async function writeCache(client, models, raw) {
+async function writeCache(_client, models, raw) {
   try {
-    const dir = await getDir(client);
+    const dir = getDir();
     await mkdir(dir, { recursive: true });
     const cache = { models, timestamp: Date.now() };
     await writeFile(join(dir, CACHE_FILE), JSON.stringify(cache, null, 2) + `
@@ -124,12 +110,6 @@ async function writeCache(client, models, raw) {
       await writeFile(join(dir, RAW_FILE), JSON.stringify(raw, null, 2) + `
 `, "utf8");
     }
-    try {
-      const syncDir = fallbackDir();
-      mkdirSync(syncDir, { recursive: true });
-      writeFileSync(join(syncDir, CACHE_FILE), JSON.stringify(cache, null, 2) + `
-`, "utf8");
-    } catch {}
   } catch {}
 }
 
