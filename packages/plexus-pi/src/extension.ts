@@ -10,7 +10,13 @@
  */
 
 // Type-only — erased at runtime, never resolved by the module loader
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ProviderConfig } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionCommandContext,
+	ExtensionContext,
+	ProviderConfig,
+	SessionStartEvent,
+} from "@earendil-works/pi-coding-agent";
 import type { Api, OAuthCredentials, OAuthLoginCallbacks } from "@earendil-works/pi-ai";
 import {
 	adjustBaseUrl,
@@ -33,6 +39,10 @@ export function getPlexusModelBaseUrl(baseUrl: string, api: string): string {
 	const normalized = baseUrl.trim().replace(/\/+$/, "");
 	const apiBase = normalized.endsWith("/v1") ? normalized : `${normalized}/v1`;
 	return adjustBaseUrl(apiBase, api);
+}
+
+export function shouldRefreshModels(reason: SessionStartEvent["reason"]): boolean {
+	return reason === "startup" || reason === "reload";
 }
 
 // Keep the current model list in module scope so setDefaultModel can reference it.
@@ -65,7 +75,12 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	// -------------------------------------------------------------------------
 	// session_start: live-refresh models using the stored API key.
 	// -------------------------------------------------------------------------
-	pi.on("session_start", async (_event, ctx) => {
+	pi.on("session_start", async (event, ctx) => {
+		if (!shouldRefreshModels(event.reason)) {
+			log("session_start: skipping refresh", { reason: event.reason });
+			return;
+		}
+
 		const apiKey = (await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME)) ?? getEnvApiKey();
 		const baseUrl = getBaseUrl();
 

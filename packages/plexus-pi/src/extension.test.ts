@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { getPlexusModelBaseUrl } from "./extension.ts";
+import { getPlexusModelBaseUrl, shouldRefreshModels } from "./extension.ts";
 
 describe("Plexus model base URLs", () => {
 	test("preserves the root URL for Anthropic messages", () => {
@@ -15,5 +15,15 @@ describe("Plexus model base URLs", () => {
 		expect(getPlexusModelBaseUrl("https://plexus.example.com", "google-generative-ai")).toBe(
 			"https://plexus.example.com/v1beta",
 		);
+	});
+});
+
+describe("Plexus model refresh", () => {
+	test("refreshes only when pi starts or reloads", () => {
+		expect(shouldRefreshModels("startup")).toBe(true);
+		expect(shouldRefreshModels("reload")).toBe(true);
+		expect(shouldRefreshModels("new")).toBe(false);
+		expect(shouldRefreshModels("resume")).toBe(false);
+		expect(shouldRefreshModels("fork")).toBe(false);
 	});
 });

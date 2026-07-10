@@ -227,7 +227,7 @@ Models with a falsy `id` are skipped. Missing metadata falls back to safe defaul
 
 ## Adapter behavior
 
-- **pi** refreshes on session start and through `/plexus refresh`. It accepts either root URLs or URLs ending in `/v1` and normalizes them before calling Plexus.
+- **pi** refreshes on startup, extension reload, and through `/plexus refresh`. It accepts either root URLs or URLs ending in `/v1` and normalizes them before calling Plexus.
 - **OpenCode** seeds the provider from cache or a placeholder model during config loading, then performs live discovery through the `provider.models` hook. If Plexus is slow or unavailable, OpenCode uses the cache and lets the refresh continue in the background.
 - Both adapters convert Plexus's per-token base and tier rates to the per-million-token units expected by their host.
 

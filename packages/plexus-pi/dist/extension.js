@@ -470,6 +470,9 @@ function getPlexusModelBaseUrl(baseUrl, api) {
   const apiBase = normalized.endsWith("/v1") ? normalized : `${normalized}/v1`;
   return adjustBaseUrl(apiBase, api);
 }
+function shouldRefreshModels(reason) {
+  return reason === "startup" || reason === "reload";
+}
 var currentModels = [];
 function plexusExtension(pi) {
   const cached = readCachedModelsSync();
@@ -488,7 +491,11 @@ function plexusExtension(pi) {
     oauth: createPlexusLoginProvider(pi)
   });
   currentModels = startupModels;
-  pi.on("session_start", async (_event, ctx) => {
+  pi.on("session_start", async (event, ctx) => {
+    if (!shouldRefreshModels(event.reason)) {
+      log("session_start: skipping refresh", { reason: event.reason });
+      return;
+    }
     const apiKey = await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME) ?? getEnvApiKey();
     const baseUrl = getBaseUrl();
     log("session_start", { hasApiKey: !!apiKey, baseUrl });
@@ -608,6 +615,7 @@ async function trySetDefaultModel(pi, models) {
   log("trySetDefaultModel", { defaultModelId, ok });
 }
 export {
+  shouldRefreshModels,
   getPlexusModelBaseUrl,
   plexusExtension as default
 };
