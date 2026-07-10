@@ -121,6 +121,19 @@ describe("convertToDescriptor", () => {
 
 		expect(descriptors.map((model) => model.id)).toEqual(["claude-haiku-4-5"]);
 	});
+
+	test("skips embedding-only models during batch conversion", () => {
+		const descriptors = convertDescriptors(
+			[
+				baseModel,
+				{ ...baseModel, id: "gemini-embedding-001", architecture: { output_modalities: ["embedding"] } },
+				{ ...baseModel, id: "text-embedding-3-small", architecture: undefined },
+			],
+			"https://plexus.example.com/v1",
+		);
+
+		expect(descriptors.map((model) => model.id)).toEqual(["claude-haiku-4-5"]);
+	});
 });
 
 describe("inferReasoning", () => {

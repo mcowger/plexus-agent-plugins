@@ -1,6 +1,7 @@
 // @bun
 // ../plexus-models/src/convert.ts
 var REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
+var NON_CHAT_ID_PATTERN = /embedding|embed|tts|whisper|image-[0-9]|image\b.*gen|diffusion|dall-e|stable-diff|sdxl|dream/i;
 var API_DIALECT_MAP = {
   chat_completions: "openai-completions",
   "openai-completions": "openai-completions",
@@ -43,6 +44,12 @@ function mapInputModalities(model) {
       result.push(m);
   }
   return result.length > 0 ? result : ["text"];
+}
+function isChatModel(model) {
+  const outputModalities = model.architecture?.output_modalities;
+  if (outputModalities !== undefined)
+    return outputModalities.includes("text");
+  return !NON_CHAT_ID_PATTERN.test(model.id);
 }
 function inferReasoning(model) {
   const params = model.supported_parameters;
@@ -116,7 +123,7 @@ function convertToDescriptor(raw, baseUrl) {
 function convertDescriptors(models, baseUrl) {
   const result = [];
   for (const m of models) {
-    if (!m.id)
+    if (!m.id || !isChatModel(m))
       continue;
     result.push(convertToDescriptor(m, baseUrl));
   }
@@ -455,11 +462,16 @@ function descriptorToPiModel(descriptor) {
 var PROVIDER_NAME = "plexus";
 var PROVIDER_API_KEY_TEMPLATE = "${PLEXUS_API_KEY}";
 var PLEXUS_CREDENTIAL_EXPIRES_AT = 253402300799000;
+function getPlexusModelBaseUrl(baseUrl, api) {
+  const normalized = baseUrl.trim().replace(/\/+$/, "");
+  const apiBase = normalized.endsWith("/v1") ? normalized : `${normalized}/v1`;
+  return adjustBaseUrl(apiBase, api);
+}
 var currentModels = [];
 function plexusExtension(pi) {
   const cached = readCachedModelsSync();
   const startupBaseUrl = getBaseUrl() ?? "http://localhost/v1";
-  const startupModels = cached?.models.map(descriptorToPiModel) ?? [];
+  const startupModels = cached?.models.filter(isChatModel).map(descriptorToPiModel) ?? [];
   log("startup", {
     cachedModelCount: startupModels.length,
     startupBaseUrl
@@ -532,8 +544,7 @@ function createPlexusLoginProvider(pi) {
       const baseUrl = credentials.plexusBaseUrl;
       if (!baseUrl)
         return models;
-      const apiBase = baseUrl.trim().replace(/\/+$/, "").endsWith("/v1") ? baseUrl.trim().replace(/\/+$/, "") : `${baseUrl.trim().replace(/\/+$/, "")}/v1`;
-      return models.map((model) => model.provider === PROVIDER_NAME ? { ...model, baseUrl: apiBase } : model);
+      return models.map((model) => model.provider === PROVIDER_NAME ? { ...model, baseUrl: getPlexusModelBaseUrl(baseUrl, model.api) } : model);
     }
   };
 }
@@ -594,5 +605,6 @@ async function trySetDefaultModel(pi, models) {
   log("trySetDefaultModel", { defaultModelId, ok });
 }
 export {
+  getPlexusModelBaseUrl,
   plexusExtension as default
 };

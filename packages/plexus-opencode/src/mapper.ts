@@ -1,4 +1,4 @@
-import { adjustBaseUrl, mapPreferredApi, type PlexusApiModel } from "../../plexus-models/src/index.ts"
+import { adjustBaseUrl, isChatModel, mapPreferredApi, type PlexusApiModel } from "../../plexus-models/src/index.ts"
 
 type Modality = "text" | "audio" | "image" | "video" | "pdf"
 
@@ -110,10 +110,6 @@ function buildInputModalities(model: PlexusApiModel): Modality[] {
   return mapped.length > 0 ? [...new Set(mapped)] : ["text"]
 }
 
-// Patterns that identify non-chat models when no architecture metadata is present.
-const NON_CHAT_ID_PATTERN =
-  /embedding|embed|tts|whisper|image-[0-9]|image\b.*gen|diffusion|dall-e|stable-diff|sdxl|dream/i
-
 function buildOutputModalities(model: PlexusApiModel): Modality[] | null {
   const raw = model.architecture?.output_modalities
 
@@ -123,9 +119,6 @@ function buildOutputModalities(model: PlexusApiModel): Modality[] | null {
     const mapped = raw.map(mapModality).filter((m): m is Modality => m !== null)
     return mapped.length > 0 ? [...new Set(mapped)] : ["text"]
   }
-
-  // No architecture — use id heuristics.
-  if (NON_CHAT_ID_PATTERN.test(model.id)) return null
 
   return ["text"]
 }
@@ -141,7 +134,7 @@ export function buildModels(models: PlexusApiModel[], baseURL: string): Record<s
   const result: Record<string, ConfigModel> = {}
 
   for (const m of models) {
-    if (!m.id) continue
+    if (!m.id || !isChatModel(m)) continue
 
     const outputModalities = buildOutputModalities(m)
     if (outputModalities === null) continue

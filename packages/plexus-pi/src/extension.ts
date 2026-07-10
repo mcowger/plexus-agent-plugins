@@ -12,7 +12,12 @@
 // Type-only — erased at runtime, never resolved by the module loader
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ProviderConfig } from "@earendil-works/pi-coding-agent";
 import type { Api, OAuthCredentials, OAuthLoginCallbacks } from "@earendil-works/pi-ai";
-import { convertDescriptors, fetchPlexusModels } from "../../plexus-models/src/index.ts";
+import {
+	adjustBaseUrl,
+	convertDescriptors,
+	fetchPlexusModels,
+	isChatModel,
+} from "../../plexus-models/src/index.ts";
 import { getBaseUrl, getDefaultModel, getEnvApiKey, getModelsUrl, saveBaseUrl } from "./config.ts";
 import { readCachedModelsSync, writeCachedModels, writeRawResponse } from "./cache.ts";
 import { log } from "./log.ts";
@@ -24,6 +29,12 @@ const PLEXUS_CREDENTIAL_EXPIRES_AT = 253_402_300_799_000;
 
 type PlexusCredentials = OAuthCredentials & { plexusBaseUrl?: string };
 
+export function getPlexusModelBaseUrl(baseUrl: string, api: string): string {
+	const normalized = baseUrl.trim().replace(/\/+$/, "");
+	const apiBase = normalized.endsWith("/v1") ? normalized : `${normalized}/v1`;
+	return adjustBaseUrl(apiBase, api);
+}
+
 // Keep the current model list in module scope so setDefaultModel can reference it.
 let currentModels: ReturnType<typeof descriptorToPiModel>[] = [];
 
@@ -34,7 +45,7 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	// -------------------------------------------------------------------------
 	const cached = readCachedModelsSync();
 	const startupBaseUrl = getBaseUrl() ?? "http://localhost/v1";
-	const startupModels = cached?.models.map(descriptorToPiModel) ?? [];
+	const startupModels = cached?.models.filter(isChatModel).map(descriptorToPiModel) ?? [];
 
 	log("startup", {
 		cachedModelCount: startupModels.length,
@@ -123,11 +134,10 @@ function createPlexusLoginProvider(pi: ExtensionAPI): NonNullable<ProviderConfig
 		modifyModels(models, credentials) {
 			const baseUrl = (credentials as PlexusCredentials).plexusBaseUrl;
 			if (!baseUrl) return models;
-			const apiBase = baseUrl.trim().replace(/\/+$/, "").endsWith("/v1")
-				? baseUrl.trim().replace(/\/+$/, "")
-				: `${baseUrl.trim().replace(/\/+$/, "")}/v1`;
 			return models.map((model) => (
-				model.provider === PROVIDER_NAME ? { ...model, baseUrl: apiBase } : model
+				model.provider === PROVIDER_NAME
+					? { ...model, baseUrl: getPlexusModelBaseUrl(baseUrl, model.api) }
+					: model
 			));
 		},
 	};

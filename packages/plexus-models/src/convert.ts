@@ -1,6 +1,8 @@
 import type { PlexusApiModel, PlexusModelDescriptor } from "./types.ts";
 
 const REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
+const NON_CHAT_ID_PATTERN =
+	/embedding|embed|tts|whisper|image-[0-9]|image\b.*gen|diffusion|dall-e|stable-diff|sdxl|dream/i;
 
 export type OpenAICompletionsThinkingFormat =
 	| "openai"
@@ -70,6 +72,13 @@ export function mapInputModalities(model: PlexusApiModel): ("text" | "image")[] 
 		if (m === "text" || m === "image") result.push(m);
 	}
 	return result.length > 0 ? result : ["text"];
+}
+
+/** Returns whether a model can produce text suitable for an agent chat session. */
+export function isChatModel(model: Pick<PlexusApiModel, "id" | "architecture">): boolean {
+	const outputModalities = model.architecture?.output_modalities;
+	if (outputModalities !== undefined) return outputModalities.includes("text");
+	return !NON_CHAT_ID_PATTERN.test(model.id);
 }
 
 /**
@@ -153,13 +162,13 @@ export function convertToDescriptor(raw: PlexusApiModel, baseUrl: string): Plexu
 }
 
 /**
- * Batch-converts an array of PlexusApiModel, silently skipping entries with falsy ids.
+ * Batch-converts an array of PlexusApiModel, silently skipping entries with falsy ids or no text output.
  * Output order matches input order minus skipped entries.
  */
 export function convertDescriptors(models: PlexusApiModel[], baseUrl: string): PlexusModelDescriptor[] {
 	const result: PlexusModelDescriptor[] = [];
 	for (const m of models) {
-		if (!m.id) continue;
+		if (!m.id || !isChatModel(m)) continue;
 		result.push(convertToDescriptor(m, baseUrl));
 	}
 	return result;
