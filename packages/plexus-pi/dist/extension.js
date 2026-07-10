@@ -64,11 +64,29 @@ function resolveMaxTokens(model, contextWindow) {
   const v = model.top_provider?.max_completion_tokens ?? null;
   return v != null && v > 0 ? v : contextWindow;
 }
+function resolvePricingTiers(model) {
+  const pricing = model.pricing;
+  if (!pricing?.tiers)
+    return;
+  const tiers = pricing.tiers.flatMap((tier) => {
+    if (!Number.isFinite(tier.input_tokens_above) || tier.input_tokens_above < 0)
+      return [];
+    return [{
+      inputTokensAbove: tier.input_tokens_above,
+      input: parsePrice(tier.prompt ?? pricing.prompt),
+      output: parsePrice(tier.completion ?? pricing.completion),
+      cacheRead: parsePrice(tier.input_cache_read ?? pricing.input_cache_read),
+      cacheWrite: parsePrice(tier.input_cache_write ?? pricing.input_cache_write)
+    }];
+  });
+  return tiers.length > 0 ? tiers : undefined;
+}
 function convertToDescriptor(raw, baseUrl) {
   const preferredApi = mapPreferredApi(raw.preferred_api);
   const adjustedBaseUrl = adjustBaseUrl(baseUrl, preferredApi);
   const contextWindow = resolveContextWindow(raw);
   const maxTokens = resolveMaxTokens(raw, contextWindow);
+  const tiers = resolvePricingTiers(raw);
   const descriptor = {
     id: raw.id,
     name: raw.name ?? raw.id,
@@ -81,7 +99,8 @@ function convertToDescriptor(raw, baseUrl) {
       input: parsePrice(raw.pricing?.prompt),
       output: parsePrice(raw.pricing?.completion),
       cacheRead: parsePrice(raw.pricing?.input_cache_read),
-      cacheWrite: parsePrice(raw.pricing?.input_cache_write)
+      cacheWrite: parsePrice(raw.pricing?.input_cache_write),
+      ...tiers !== undefined ? { tiers } : {}
     },
     contextWindow,
     maxTokens
@@ -167,11 +186,11 @@ async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_F
   const controller = new AbortController;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const headers = { Accept: "application/json" };
+    if (apiKey)
+      headers.Authorization = `Bearer ${apiKey}`;
     const res = await fetch(modelsUrl, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json"
-      },
+      headers,
       signal: controller.signal
     });
     if (!res.ok) {
@@ -195,7 +214,76 @@ import { join } from "path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 var getConfigDir = () => join(getAgentDir(), "extensions", "plexus");
 var getConfigPath = () => join(getConfigDir(), "config.json");
-var normalizeRoot = (raw) => raw.replace(/\/+$/, "");
+var ENV_BASE_URL = "PLEXUS_BASE_URL";
+var ENV_API_URL = "PLEXUS_API_URL";
+var ENV_API_KEY = "PLEXUS_API_KEY";
+var ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+var ENV_VAR_NAME_PREFIX_RE = /^[A-Za-z_][A-Za-z0-9_]*/;
+var normalizeRoot = (raw) => raw.trim().replace(/\/+$/, "");
+function resolveConfigTemplate(value) {
+  let result = "";
+  let index = 0;
+  while (index < value.length) {
+    const dollarIndex = value.indexOf("$", index);
+    if (dollarIndex < 0) {
+      result += value.slice(index);
+      break;
+    }
+    result += value.slice(index, dollarIndex);
+    const nextChar = value[dollarIndex + 1];
+    if (nextChar === "$" || nextChar === "!") {
+      result += nextChar;
+      index = dollarIndex + 2;
+      continue;
+    }
+    if (nextChar === "{") {
+      const endIndex = value.indexOf("}", dollarIndex + 2);
+      if (endIndex < 0) {
+        result += "$";
+        index = dollarIndex + 1;
+        continue;
+      }
+      const name = value.slice(dollarIndex + 2, endIndex);
+      if (!ENV_VAR_NAME_RE.test(name)) {
+        result += value.slice(dollarIndex, endIndex + 1);
+        index = endIndex + 1;
+        continue;
+      }
+      const envValue = process.env[name];
+      if (envValue === undefined)
+        return;
+      result += envValue;
+      index = endIndex + 1;
+      continue;
+    }
+    const match = value.slice(dollarIndex + 1).match(ENV_VAR_NAME_PREFIX_RE);
+    if (match) {
+      const envValue = process.env[match[0]];
+      if (envValue === undefined)
+        return;
+      result += envValue;
+      index = dollarIndex + 1 + match[0].length;
+      continue;
+    }
+    result += "$";
+    index = dollarIndex + 1;
+  }
+  return result;
+}
+function resolveStringOption(value) {
+  if (!value)
+    return;
+  const resolved = resolveConfigTemplate(value)?.trim();
+  return resolved || undefined;
+}
+var normalizeConfigBaseUrl = (raw) => {
+  const root = normalizeRoot(raw);
+  return root.endsWith("/v1") ? root.slice(0, -3) : root;
+};
+var normalizeApiBase = (raw) => {
+  const root = normalizeConfigBaseUrl(raw);
+  return root ? `${root}/v1` : "";
+};
 var cachedConfig = null;
 function getConfigSync() {
   if (cachedConfig)
@@ -214,7 +302,7 @@ async function saveBaseUrl(baseUrl, defaultModel) {
   const existing = getConfigSync();
   const config = {
     ...existing,
-    baseUrl: normalizeRoot(baseUrl),
+    baseUrl: normalizeConfigBaseUrl(baseUrl),
     ...defaultModel !== undefined && { defaultModel }
   };
   await writeFile(getConfigPath(), `${JSON.stringify(config, null, 2)}
@@ -223,17 +311,18 @@ async function saveBaseUrl(baseUrl, defaultModel) {
 }
 function getRawBaseUrl() {
   const config = getConfigSync();
-  if (config.baseUrl)
-    return config.baseUrl;
-  return process.env["PLEXUS_BASE_URL"] ?? null;
+  return resolveStringOption(process.env[ENV_API_URL]) ?? resolveStringOption(process.env[ENV_BASE_URL]) ?? resolveStringOption(config.baseUrl) ?? null;
+}
+function getEnvApiKey() {
+  return resolveStringOption(process.env[ENV_API_KEY]) ?? null;
 }
 function getModelsUrl() {
   const raw = getRawBaseUrl();
-  return raw ? `${normalizeRoot(raw)}/v1/models` : null;
+  return raw ? `${normalizeApiBase(raw)}/models` : null;
 }
 function getBaseUrl() {
   const raw = getRawBaseUrl();
-  return raw ? `${normalizeRoot(raw)}/v1` : null;
+  return raw ? normalizeApiBase(raw) : null;
 }
 function getDefaultModel() {
   return getConfigSync().defaultModel ?? null;
@@ -310,20 +399,41 @@ async function writeLogLine(message, data) {
 }
 
 // src/mapper.ts
+import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 function descriptorToPiModel(descriptor) {
+  let builtinModel;
+  if (descriptor.piProvider && descriptor.piModel) {
+    try {
+      builtinModel = getBuiltinModel(descriptor.piProvider, descriptor.piModel);
+    } catch {
+      builtinModel = undefined;
+    }
+  }
   const cost = {
     input: descriptor.cost.input * 1e6,
     output: descriptor.cost.output * 1e6,
     cacheRead: descriptor.cost.cacheRead * 1e6,
-    cacheWrite: descriptor.cost.cacheWrite * 1e6
+    cacheWrite: descriptor.cost.cacheWrite * 1e6,
+    ...descriptor.cost.tiers ? {
+      tiers: descriptor.cost.tiers.map((tier) => ({
+        inputTokensAbove: tier.inputTokensAbove,
+        input: tier.input * 1e6,
+        output: tier.output * 1e6,
+        cacheRead: tier.cacheRead * 1e6,
+        cacheWrite: tier.cacheWrite * 1e6
+      }))
+    } : {}
   };
   let compat;
   if (descriptor.preferredApi === "openai-completions") {
-    const heuristic = detectOpenAICompletionsCompat(descriptor.provider, descriptor.baseUrl);
-    const merged = descriptor.piOptions ? { ...heuristic, ...descriptor.piOptions } : heuristic;
+    const heuristic = detectOpenAICompletionsCompat(descriptor.piProvider ?? descriptor.provider, descriptor.baseUrl);
+    const builtinCompat = builtinModel?.compat;
+    const merged = { ...heuristic, ...builtinCompat ?? {}, ...descriptor.piOptions ?? {} };
     compat = merged;
   } else if (descriptor.piOptions) {
     compat = descriptor.piOptions;
+  } else if (builtinModel?.compat) {
+    compat = builtinModel.compat;
   }
   return {
     id: descriptor.id,
@@ -335,12 +445,16 @@ function descriptorToPiModel(descriptor) {
     cost,
     contextWindow: descriptor.contextWindow,
     maxTokens: descriptor.maxTokens,
+    ...builtinModel?.thinkingLevelMap !== undefined ? { thinkingLevelMap: builtinModel.thinkingLevelMap } : {},
+    ...builtinModel?.headers !== undefined ? { headers: builtinModel.headers } : {},
     ...compat !== undefined ? { compat } : {}
   };
 }
 
 // src/extension.ts
 var PROVIDER_NAME = "plexus";
+var PROVIDER_API_KEY_TEMPLATE = "${PLEXUS_API_KEY}";
+var PLEXUS_CREDENTIAL_EXPIRES_AT = 253402300799000;
 var currentModels = [];
 function plexusExtension(pi) {
   const cached = readCachedModelsSync();
@@ -352,14 +466,15 @@ function plexusExtension(pi) {
   });
   pi.registerProvider(PROVIDER_NAME, {
     api: "openai-completions",
-    apiKey: PROVIDER_NAME,
+    apiKey: PROVIDER_API_KEY_TEMPLATE,
     authHeader: true,
     baseUrl: startupBaseUrl,
-    models: startupModels
+    models: startupModels,
+    oauth: createPlexusLoginProvider(pi)
   });
   currentModels = startupModels;
   pi.on("session_start", async (_event, ctx) => {
-    const apiKey = await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME);
+    const apiKey = await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME) ?? getEnvApiKey();
     const baseUrl = getBaseUrl();
     log("session_start", { hasApiKey: !!apiKey, baseUrl });
     if (!apiKey || !baseUrl) {
@@ -370,48 +485,62 @@ function plexusExtension(pi) {
     await doRefresh(pi, apiKey, ctx, true);
   });
   pi.registerCommand("plexus", {
-    description: "Plexus provider commands: login, refresh",
+    description: "Plexus provider commands: refresh (setup: /login plexus)",
     getArgumentCompletions: () => [
-      { value: "login", label: "login", description: "Configure Plexus base URL and API key" },
       { value: "refresh", label: "refresh", description: "Refresh Plexus models from the API" }
     ],
     handler: async (args, ctx) => {
       const sub = args.trim().toLowerCase();
-      if (sub === "login" || sub === "") {
-        await handleLogin(pi, ctx);
-        return;
-      }
-      if (sub === "refresh") {
+      if (sub === "refresh" || sub === "") {
         await handleRefresh(pi, ctx);
         return;
       }
-      ctx.ui.notify(`Unknown sub-command: "${args}". Use: /plexus login | /plexus refresh`, "warning");
+      ctx.ui.notify(`Unknown sub-command: "${args}". Use /login plexus for setup or /plexus refresh to refresh models.`, "warning");
     }
   });
 }
-async function handleLogin(pi, ctx) {
-  const baseUrlInput = await ctx.ui.input("Plexus base URL", "https://plexus.example.com");
-  if (!baseUrlInput) {
-    ctx.ui.notify("Login cancelled.", "info");
-    return;
-  }
-  const apiKeyInput = await ctx.ui.input("Plexus API key");
-  if (!apiKeyInput) {
-    ctx.ui.notify("Login cancelled.", "info");
-    return;
-  }
-  const defaultModelInput = await ctx.ui.input("Default model (optional \u2014 Enter to skip)", "");
-  const defaultModel = defaultModelInput?.trim() || undefined;
-  await saveBaseUrl(baseUrlInput.trim(), defaultModel);
-  ctx.modelRegistry.authStorage.set(PROVIDER_NAME, { type: "api_key", key: apiKeyInput.trim() });
-  log("login: saved", { baseUrl: baseUrlInput.trim(), defaultModel });
-  ctx.ui.notify("Plexus credentials saved. Refreshing models\u2026", "info");
-  await doRefresh(pi, apiKeyInput.trim(), ctx, false);
+function createPlexusLoginProvider(pi) {
+  return {
+    name: "Plexus",
+    async login(callbacks) {
+      const baseUrl = (await callbacks.onPrompt({
+        message: "Plexus base URL",
+        placeholder: "https://plexus.example.com"
+      })).trim();
+      if (!baseUrl)
+        throw new Error("Plexus base URL is required.");
+      const apiKey = (await callbacks.onPrompt({ message: "Plexus API key" })).trim();
+      if (!apiKey)
+        throw new Error("Plexus API key is required.");
+      await saveBaseUrl(baseUrl);
+      callbacks.onProgress?.("Refreshing Plexus models...");
+      await doRefresh(pi, apiKey, null, false);
+      return {
+        access: apiKey,
+        refresh: apiKey,
+        expires: PLEXUS_CREDENTIAL_EXPIRES_AT,
+        plexusBaseUrl: baseUrl
+      };
+    },
+    async refreshToken(credentials) {
+      return { ...credentials, expires: PLEXUS_CREDENTIAL_EXPIRES_AT };
+    },
+    getApiKey(credentials) {
+      return String(credentials.access || credentials.refresh || "");
+    },
+    modifyModels(models, credentials) {
+      const baseUrl = credentials.plexusBaseUrl;
+      if (!baseUrl)
+        return models;
+      const apiBase = baseUrl.trim().replace(/\/+$/, "").endsWith("/v1") ? baseUrl.trim().replace(/\/+$/, "") : `${baseUrl.trim().replace(/\/+$/, "")}/v1`;
+      return models.map((model) => model.provider === PROVIDER_NAME ? { ...model, baseUrl: apiBase } : model);
+    }
+  };
 }
 async function handleRefresh(pi, ctx) {
-  const apiKey = await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME);
+  const apiKey = await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME) ?? getEnvApiKey();
   if (!apiKey) {
-    ctx.ui.notify("No Plexus API key configured. Run /plexus login first.", "error");
+    ctx.ui.notify("No Plexus API key configured. Run /login plexus first.", "error");
     return;
   }
   ctx.ui.notify("Refreshing Plexus models\u2026", "info");
@@ -422,7 +551,7 @@ async function doRefresh(pi, apiKey, ctx, setDefault) {
   const baseUrl = getBaseUrl();
   if (!modelsUrl || !baseUrl) {
     if (ctx)
-      ctx.ui.notify("Plexus base URL not configured. Run /plexus login first.", "warning");
+      ctx.ui.notify("Plexus base URL not configured. Run /login plexus first.", "warning");
     log("doRefresh: no base URL configured");
     return;
   }
@@ -434,10 +563,11 @@ async function doRefresh(pi, apiKey, ctx, setDefault) {
     currentModels = piModels;
     pi.registerProvider(PROVIDER_NAME, {
       api: "openai-completions",
-      apiKey: PROVIDER_NAME,
+      apiKey: PROVIDER_API_KEY_TEMPLATE,
       authHeader: true,
       baseUrl,
-      models: piModels
+      models: piModels,
+      oauth: createPlexusLoginProvider(pi)
     });
     log("doRefresh: registered", { count: piModels.length });
     if (ctx)

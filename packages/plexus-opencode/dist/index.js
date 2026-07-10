@@ -7,6 +7,7 @@ var PLEXUS_LOG_SERVICE = "opencode-plexus";
 var OPENAI_COMPATIBLE_NPM = "@ai-sdk/openai-compatible";
 var PLEXUS_BASE_URL_OPTION = "plexusBaseURL";
 var ENV_BASE_URL = "PLEXUS_BASE_URL";
+var ENV_API_URL = "PLEXUS_API_URL";
 var ENV_API_KEY = "PLEXUS_API_KEY";
 var MODELS_FETCH_TIMEOUT_MS = 1e4;
 var REFRESH_TTL_MS = 60000;
@@ -52,11 +53,11 @@ async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_F
   const controller = new AbortController;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
+    const headers = { Accept: "application/json" };
+    if (apiKey)
+      headers.Authorization = `Bearer ${apiKey}`;
     const res = await fetch(modelsUrl, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json"
-      },
+      headers,
       signal: controller.signal
     });
     if (!res.ok) {
@@ -113,18 +114,21 @@ async function writeCache(_client, models, raw) {
   } catch {}
 }
 
-// src/config-store.ts
-import { createOpencodeClient } from "@opencode-ai/sdk/v2/client";
-
 // src/url.ts
 function trimURL(s) {
   return s.trim().replace(/\/+$/, "");
 }
-function apiBase(baseURL) {
-  const next = trimURL(baseURL);
+function rootURL(s) {
+  const next = trimURL(s);
   if (!next)
     return "";
-  return next.endsWith("/v1") ? next : `${next}/v1`;
+  return next.endsWith("/v1") ? next.slice(0, -3) : next;
+}
+function apiBase(baseURL) {
+  const next = rootURL(baseURL);
+  if (!next)
+    return "";
+  return `${next}/v1`;
 }
 function modelsUrl(baseURL) {
   const base = apiBase(baseURL);
@@ -132,39 +136,75 @@ function modelsUrl(baseURL) {
 }
 
 // src/config-store.ts
-function getV1ClientConfig(input) {
-  return input._client?.getConfig?.() ?? {};
+var ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+var ENV_VAR_NAME_PREFIX_RE = /^[A-Za-z_][A-Za-z0-9_]*/;
+var AUTH_METADATA_BASE_URL = "plexusBaseURL";
+function resolveConfigTemplate(value) {
+  let result = "";
+  let index = 0;
+  while (index < value.length) {
+    const dollarIndex = value.indexOf("$", index);
+    if (dollarIndex < 0) {
+      result += value.slice(index);
+      break;
+    }
+    result += value.slice(index, dollarIndex);
+    const nextChar = value[dollarIndex + 1];
+    if (nextChar === "$" || nextChar === "!") {
+      result += nextChar;
+      index = dollarIndex + 2;
+      continue;
+    }
+    if (nextChar === "{") {
+      const endIndex = value.indexOf("}", dollarIndex + 2);
+      if (endIndex < 0) {
+        result += "$";
+        index = dollarIndex + 1;
+        continue;
+      }
+      const name = value.slice(dollarIndex + 2, endIndex);
+      if (!ENV_VAR_NAME_RE.test(name)) {
+        result += value.slice(dollarIndex, endIndex + 1);
+        index = endIndex + 1;
+        continue;
+      }
+      const envValue = process.env[name];
+      if (envValue === undefined)
+        return;
+      result += envValue;
+      index = endIndex + 1;
+      continue;
+    }
+    const match = value.slice(dollarIndex + 1).match(ENV_VAR_NAME_PREFIX_RE);
+    if (match) {
+      const envValue = process.env[match[0]];
+      if (envValue === undefined)
+        return;
+      result += envValue;
+      index = dollarIndex + 1 + match[0].length;
+      continue;
+    }
+    result += "$";
+    index = dollarIndex + 1;
+  }
+  return result;
 }
-function createV2Client(serverUrl, input) {
-  const v1Config = getV1ClientConfig(input);
-  return createOpencodeClient({
-    baseUrl: serverUrl.toString(),
-    fetch: v1Config.fetch,
-    headers: v1Config.headers,
-    throwOnError: true
-  });
+function resolveStringOption(value) {
+  if (typeof value !== "string")
+    return;
+  const resolved = resolveConfigTemplate(value)?.trim();
+  return resolved || undefined;
 }
-function resolveConfig(provider) {
-  const envBaseURL = process.env[ENV_BASE_URL];
+function resolveConfig(provider, authMetadata) {
+  const envBaseURL = process.env[ENV_API_URL] ?? process.env[ENV_BASE_URL];
   const envApiKey = process.env[ENV_API_KEY];
-  const optBaseURL = typeof provider?.options?.[PLEXUS_BASE_URL_OPTION] === "string" ? trimURL(provider.options[PLEXUS_BASE_URL_OPTION]) : undefined;
-  const legacyBaseURL = typeof provider?.options?.baseURL === "string" ? trimURL(provider.options.baseURL) : undefined;
-  const optApiKey = typeof provider?.options?.apiKey === "string" ? provider.options.apiKey.trim() : undefined;
-  const baseURL = (envBaseURL ? trimURL(envBaseURL) : undefined) || optBaseURL || legacyBaseURL || undefined;
+  const authBaseURL = resolveStringOption(authMetadata?.[AUTH_METADATA_BASE_URL]);
+  const optBaseURL = resolveStringOption(provider?.options?.[PLEXUS_BASE_URL_OPTION]);
+  const legacyBaseURL = resolveStringOption(provider?.options?.baseURL);
+  const optApiKey = resolveStringOption(provider?.options?.apiKey);
+  const baseURL = (envBaseURL ? rootURL(envBaseURL) : undefined) || (authBaseURL ? rootURL(authBaseURL) : undefined) || (optBaseURL ? rootURL(optBaseURL) : undefined) || (legacyBaseURL ? rootURL(legacyBaseURL) : undefined) || undefined;
   const apiKey = (envApiKey ? envApiKey.trim() : undefined) || optApiKey || undefined;
   return { baseURL: baseURL || undefined, apiKey: apiKey || undefined };
-}
-async function persistToGlobalConfig(serverUrl, client, baseURL, apiKey) {
-  const v2 = createV2Client(serverUrl, client);
-  await v2.global.config.update({
-    config: {
-      provider: {
-        [PLEXUS_PROVIDER_ID]: {
-          options: { [PLEXUS_BASE_URL_OPTION]: baseURL, apiKey }
-        }
-      }
-    }
-  });
 }
 
 // src/log.ts
@@ -182,6 +222,7 @@ function createLogger(client) {
 // src/mapper.ts
 var REASONING_PARAMS2 = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
 var DEFAULT_CONTEXT = 8192;
+var PER_TOKEN_TO_PER_MILLION = 1e6;
 function resolveModelProvider(model, baseURL) {
   const preferredApi = mapPreferredApi(model.preferred_api);
   const api = adjustBaseUrl(baseURL, preferredApi);
@@ -202,7 +243,24 @@ function parsePrice(value) {
   if (!value)
     return 0;
   const n = parseFloat(value);
-  return Number.isNaN(n) ? 0 : n;
+  return Number.isFinite(n) && n >= 0 ? n * PER_TOKEN_TO_PER_MILLION : 0;
+}
+function buildPricingTiers(model) {
+  const pricing = model.pricing;
+  if (!pricing?.tiers)
+    return;
+  const tiers = pricing.tiers.flatMap((tier) => {
+    if (!Number.isFinite(tier.input_tokens_above) || tier.input_tokens_above < 0)
+      return [];
+    return [{
+      inputTokensAbove: tier.input_tokens_above,
+      input: parsePrice(tier.prompt ?? pricing.prompt),
+      output: parsePrice(tier.completion ?? pricing.completion),
+      cacheRead: parsePrice(tier.input_cache_read ?? pricing.input_cache_read),
+      cacheWrite: parsePrice(tier.input_cache_write ?? pricing.input_cache_write)
+    }];
+  });
+  return tiers.length > 0 ? tiers : undefined;
 }
 function mapModality(m) {
   switch (m) {
@@ -256,6 +314,7 @@ function buildModels(models, baseURL) {
     const cacheReadPrice = parsePrice(m.pricing?.input_cache_read);
     const cacheWritePrice = parsePrice(m.pricing?.input_cache_write);
     const hasCachePricing = cacheReadPrice > 0 || cacheWritePrice > 0;
+    const pricingTiers = buildPricingTiers(m);
     const hasNonTextInput = inputModalities.some((mod) => mod !== "text");
     const provider = resolveModelProvider(m, baseURL);
     const entry = {
@@ -280,7 +339,8 @@ function buildModels(models, baseURL) {
       ...params.includes("tools") ? { tool_call: true } : {},
       ...params.some((p) => REASONING_PARAMS2.has(p)) ? { reasoning: true } : {},
       ...params.includes("temperature") ? { temperature: true } : {},
-      ...hasNonTextInput ? { attachment: true } : {}
+      ...hasNonTextInput ? { attachment: true } : {},
+      ...pricingTiers ? { pricingTiers } : {}
     };
     result[m.id] = entry;
   }
@@ -290,6 +350,80 @@ function buildModels(models, baseURL) {
 // src/plugin.ts
 var lastRefresh = null;
 var inFlightRefresh = null;
+function toRuntimeCapabilities(model) {
+  const input = new Set(model.modalities.input);
+  const output = new Set(model.modalities.output);
+  return {
+    temperature: model.temperature ?? false,
+    reasoning: model.reasoning ?? false,
+    attachment: model.attachment ?? false,
+    toolcall: model.tool_call ?? false,
+    input: {
+      text: input.has("text"),
+      audio: input.has("audio"),
+      image: input.has("image"),
+      video: input.has("video"),
+      pdf: input.has("pdf")
+    },
+    output: {
+      text: output.has("text"),
+      audio: output.has("audio"),
+      image: output.has("image"),
+      video: output.has("video"),
+      pdf: output.has("pdf")
+    },
+    interleaved: false
+  };
+}
+function toRuntimeModels(models, provider) {
+  const result = {};
+  const providerNpm = typeof provider.options?.["npm"] === "string" ? provider.options["npm"] : OPENAI_COMPATIBLE_NPM;
+  const providerApi = typeof provider.options?.[PLEXUS_BASE_URL_OPTION] === "string" ? apiBase(provider.options[PLEXUS_BASE_URL_OPTION]) : "";
+  for (const [id, model] of Object.entries(models)) {
+    result[id] = {
+      id: model.id,
+      providerID: provider.id,
+      api: {
+        id: provider.id,
+        url: model.provider?.api ?? providerApi,
+        npm: model.provider?.npm ?? providerNpm
+      },
+      name: model.name,
+      capabilities: toRuntimeCapabilities(model),
+      cost: {
+        input: model.cost?.input ?? 0,
+        output: model.cost?.output ?? 0,
+        cache: {
+          read: model.cost?.cache_read ?? 0,
+          write: model.cost?.cache_write ?? 0
+        },
+        ...model.pricingTiers ? {
+          tiers: model.pricingTiers.map((tier) => ({
+            input: tier.input,
+            output: tier.output,
+            cache: { read: tier.cacheRead, write: tier.cacheWrite },
+            tier: { type: "context", size: tier.inputTokensAbove }
+          }))
+        } : {}
+      },
+      limit: model.limit,
+      status: "active",
+      options: {},
+      headers: {},
+      release_date: ""
+    };
+  }
+  return result;
+}
+function toConfigModels(models) {
+  return Object.fromEntries(Object.entries(models).map(([id, model]) => {
+    const { pricingTiers: _pricingTiers, ...configModel } = model;
+    return [id, configModel];
+  }));
+}
+function authMetadata(auth) {
+  return auth?.type === "api" ? auth.metadata : undefined;
+}
 function raceWithTimeout(promise, timeoutMs) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve({ status: "timed-out" }), timeoutMs);
@@ -301,41 +435,6 @@ function raceWithTimeout(promise, timeoutMs) {
       resolve({ status: "rejected", error });
     });
   });
-}
-function mergeModelMaps(base, overrides) {
-  if (!overrides)
-    return base;
-  const merged = { ...base };
-  for (const [id, override] of Object.entries(overrides)) {
-    const existing = merged[id];
-    if (!existing) {
-      merged[id] = override;
-      continue;
-    }
-    merged[id] = {
-      ...existing,
-      ...override,
-      provider: {
-        ...existing.provider ?? {},
-        ...override.provider ?? {}
-      },
-      ...existing.cost || override.cost ? {
-        cost: {
-          ...existing.cost ?? { input: 0, output: 0 },
-          ...override.cost ?? {}
-        }
-      } : {},
-      limit: {
-        ...existing.limit,
-        ...override.limit
-      },
-      modalities: {
-        input: override.modalities?.input ?? existing.modalities.input,
-        output: override.modalities?.output ?? existing.modalities.output
-      }
-    };
-  }
-  return merged;
 }
 function refreshModels(client, baseURL, log, apiKey) {
   if (lastRefresh && Date.now() - lastRefresh.at < REFRESH_TTL_MS) {
@@ -389,7 +488,7 @@ var PlexusProviderPlugin = async (ctx) => {
           ...baseURL ? { [PLEXUS_BASE_URL_OPTION]: baseURL } : {},
           ...apiKey ? { apiKey } : {}
         },
-        models: existingModels ?? cachedAsync ?? {
+        models: existingModels ?? (cachedAsync ? toConfigModels(cachedAsync) : null) ?? {
           [PLACEHOLDER_MODEL_ID]: {
             id: PLACEHOLDER_MODEL_ID,
             name: "Plexus (run /connect to configure)",
@@ -401,25 +500,7 @@ var PlexusProviderPlugin = async (ctx) => {
       const mergedOptions = merged["options"];
       delete mergedOptions["baseURL"];
       if (baseURL) {
-        const refreshPromise = refreshModels(client, baseURL, log, apiKey);
-        const race = await raceWithTimeout(refreshPromise, CONFIG_HOOK_REFRESH_BUDGET_MS);
-        if (race.status === "resolved") {
-          merged["models"] = mergeModelMaps(race.value, existingModels);
-          log.info(`Loaded ${Object.keys(race.value).length} plexus models from ${baseURL}`);
-        } else if (race.status === "rejected") {
-          log.warn(`Live model refresh failed, using cache: ${String(race.error)}`);
-          if (cachedAsync) {
-            merged["models"] = mergeModelMaps(cachedAsync, existingModels);
-          }
-        } else {
-          log.info(`Live model refresh still pending after ${CONFIG_HOOK_REFRESH_BUDGET_MS}ms; using cache and continuing in background`);
-          if (cachedAsync) {
-            merged["models"] = mergeModelMaps(cachedAsync, existingModels);
-          }
-          refreshPromise.catch((e) => {
-            log.warn(`Background plexus model refresh failed: ${String(e)}`);
-          });
-        }
+        log.info("Plexus baseURL configured; live discovery delegated to provider.models hook");
       } else {
         log.info("Plexus baseURL not configured; skipping live refresh");
       }
@@ -434,11 +515,41 @@ var PlexusProviderPlugin = async (ctx) => {
       } catch {}
       cfg.provider[PLEXUS_PROVIDER_ID] = merged;
     },
+    provider: {
+      id: PLEXUS_PROVIDER_ID,
+      models: async (provider, hookCtx) => {
+        const authKey = hookCtx.auth?.type === "api" ? hookCtx.auth.key : undefined;
+        const { baseURL, apiKey } = resolveConfig(provider, authMetadata(hookCtx.auth));
+        const key = authKey ?? apiKey;
+        if (!baseURL) {
+          log.info("Provider hook skipped live refresh; baseURL missing");
+          const cached2 = await readCachedModels(client);
+          return cached2 ? toRuntimeModels(cached2, provider) : {};
+        }
+        const refreshPromise = refreshModels(client, baseURL, log, key);
+        const race = await raceWithTimeout(refreshPromise, CONFIG_HOOK_REFRESH_BUDGET_MS);
+        if (race.status === "resolved") {
+          log.info(`Provider hook loaded ${Object.keys(race.value).length} plexus models from ${baseURL}`);
+          return toRuntimeModels(race.value, provider);
+        }
+        const cached = await readCachedModels(client);
+        if (race.status === "rejected") {
+          log.warn(`Provider hook live refresh failed, using cache: ${String(race.error)}`);
+        } else {
+          log.info(`Provider hook refresh still pending after ${CONFIG_HOOK_REFRESH_BUDGET_MS}ms; using cache and continuing in background`);
+          refreshPromise.catch((e) => {
+            log.warn(`Background plexus model refresh failed: ${String(e)}`);
+          });
+        }
+        return cached ? toRuntimeModels(cached, provider) : {};
+      }
+    },
     auth: {
       provider: PLEXUS_PROVIDER_ID,
       async loader(getAuth, providerInfo) {
         const auth = await getAuth();
-        const { baseURL, apiKey } = resolveConfig(providerInfo);
+        const authMetadataValue = auth?.type === "api" ? auth.metadata : undefined;
+        const { baseURL, apiKey } = resolveConfig(providerInfo, authMetadataValue);
         const key = (auth?.type === "api" ? auth.key : undefined) ?? apiKey;
         log.info(`Auth loader resolved plexus config: baseURL=${baseURL ?? "(missing)"} apiKey=${key ? "present" : "missing"}`);
         return {
@@ -459,7 +570,7 @@ var PlexusProviderPlugin = async (ctx) => {
             }
           ],
           async authorize(inputs = {}) {
-            const baseURL = trimURL(inputs["baseURL"] ?? "");
+            const baseURL = rootURL(inputs["baseURL"] ?? "");
             const apiKey = (inputs["apiKey"] ?? "").trim();
             if (!baseURL || !apiKey)
               return { type: "failed" };
@@ -470,13 +581,13 @@ var PlexusProviderPlugin = async (ctx) => {
               log.error(`Plexus URL probe failed at ${baseURL}: ${String(e)}`);
               return { type: "failed" };
             }
-            try {
-              await persistToGlobalConfig(ctx.serverUrl, client, baseURL, apiKey);
-            } catch (e) {
-              log.error(`Failed to persist Plexus config: ${String(e)}`);
-            }
             lastRefresh = null;
-            return { type: "success", provider: PLEXUS_PROVIDER_ID, key: apiKey };
+            return {
+              type: "success",
+              provider: PLEXUS_PROVIDER_ID,
+              key: apiKey,
+              metadata: { [AUTH_METADATA_BASE_URL]: baseURL }
+            };
           }
         }
       ]
@@ -504,6 +615,7 @@ export {
   OPENAI_COMPATIBLE_NPM,
   MODELS_FETCH_TIMEOUT_MS,
   ENV_BASE_URL,
+  ENV_API_URL,
   ENV_API_KEY,
   CONFIG_HOOK_REFRESH_BUDGET_MS
 };

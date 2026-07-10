@@ -16,6 +16,7 @@ const result = await Bun.build({
 	// so pi's virtual module shim can remap them to its bundled copies at load time.
 	external: [
 		"@earendil-works/pi-ai",
+		"@earendil-works/pi-ai/providers/all",
 		"@earendil-works/pi-coding-agent",
 		"node:*",
 	],

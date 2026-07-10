@@ -88,10 +88,10 @@ Then reference the built artifact in `opencode.json`:
 
 ### pi
 
-Run inside pi:
+Run inside pi using the native login flow:
 
 ```
-/plexus login
+/login plexus
 ```
 
 You will be prompted for:
@@ -106,6 +106,8 @@ To force a model refresh:
 /plexus refresh
 ```
 
+Use `/login plexus` for setup and `/logout plexus` to remove stored credentials.
+
 ### OpenCode
 
 Run inside OpenCode:
@@ -114,13 +116,18 @@ Run inside OpenCode:
 /connect
 ```
 
-Select **Plexus** and enter your base URL and API key. Models are loaded immediately and cached for fast startup on subsequent sessions.
+Select **Plexus** and enter your base URL and API key. Models are discovered through OpenCode's provider hook and cached for fast startup on subsequent sessions.
 
-For OpenCode, enter the Plexus API base URL including the trailing `/v1`, for example:
+You may enter either the Plexus root URL or the `/v1` API base URL:
 
 ```text
+https://plexus.example.com
 https://plexus.example.com/v1
 ```
+
+The plugins normalize either form to the Plexus root URL for storage and derive `/v1` paths when calling the API.
+
+OpenCode stores the API key in its native auth store and stores the Plexus base URL as auth metadata on that connection. Existing `provider.plexus.options.plexusBaseURL` config is still honored as a fallback.
 
 The OpenCode plugin respects each model's `preferred_api` value and routes models through the matching SDK/API shape:
 
@@ -132,9 +139,11 @@ The OpenCode plugin respects each model's `preferred_api` value and routes model
 You can also pre-configure via environment variables:
 
 ```sh
-export PLEXUS_BASE_URL=https://plexus.example.com/v1
+export PLEXUS_API_URL=https://plexus.example.com
 export PLEXUS_API_KEY=your-api-key
 ```
+
+`PLEXUS_BASE_URL` is also accepted for compatibility; `PLEXUS_API_URL` wins when both are set.
 
 ---
 
@@ -150,7 +159,7 @@ export PLEXUS_API_KEY=your-api-key
   plexus.log                   # extension activity log
 ```
 
-The API key is stored in pi's own credential store (`auth.json`) — never in a separate file.
+The API key is stored through pi's own auth storage. `PLEXUS_API_URL` or `PLEXUS_BASE_URL` can be used as an environment override.
 
 ### OpenCode
 
@@ -160,7 +169,9 @@ The API key is stored in pi's own credential store (`auth.json`) — never in a 
   models-raw.json              # raw API response (diagnostics)
 ```
 
-The API key is stored in OpenCode's own credential store — never in a separate file.
+The API key is stored through OpenCode's auth flow, and the Plexus base URL is stored as auth metadata. `PLEXUS_API_URL`, `PLEXUS_BASE_URL`, and `PLEXUS_API_KEY` can be used as environment overrides.
+
+Both adapters also accept pi-style environment interpolation in configured strings, such as `${PLEXUS_API_URL}` or `$PLEXUS_API_KEY`. This is useful when checking non-secret config into an agent config file while keeping the actual values in the environment.
 
 ---
 
@@ -183,7 +194,7 @@ packages/
     package.json        # declares pi.extensions entry point
   plexus-opencode/      # OpenCode plugin adapter
     src/
-      plugin.ts         # Plugin export: config hook, auth handler
+      plugin.ts         # Plugin export: config hook, provider hook, auth handler
       mapper.ts         # PlexusApiModel → OpenCode ConfigModel
       cache.ts          # model cache I/O
       config-store.ts   # resolveConfig, persistToGlobalConfig
@@ -195,6 +206,30 @@ packages/
 ```
 
 `plexus-models` has zero imports from any agent framework. Each host adapter imports it via a relative path.
+
+## Plexus model metadata
+
+The `/v1/models` endpoint returns an OpenRouter-style list. These fields drive host behavior:
+
+| Field | Effect |
+|---|---|
+| `preferred_api` | String or array. First recognized value selects the host API dialect. |
+| `supported_parameters` | `reasoning`, `include_reasoning`, or `reasoning_effort` enables reasoning support. |
+| `architecture.input_modalities` | Enables text/image/audio/video/pdf support where the host supports it. |
+| `architecture.output_modalities` | Non-text-only output models are filtered from OpenCode chat providers. |
+| `pricing` | Converted into host per-million-token cost metadata. Plexus returns per-token prices. |
+| `pricing.tiers` | Alternate rates above `input_tokens_above`; mapped to native pi and OpenCode context pricing tiers. |
+| `top_provider` | Supplies context and output token limits when present. |
+| `pi_provider` / `pi_model` | Lets the pi adapter reuse built-in pi compat, headers, and thinking-level metadata. |
+| `pi_options` | pi compat overrides. These win over heuristic and built-in metadata. |
+
+Models with a falsy `id` are skipped. Missing metadata falls back to safe defaults.
+
+## Adapter behavior
+
+- **pi** refreshes on session start and through `/plexus refresh`. It accepts either root URLs or URLs ending in `/v1` and normalizes them before calling Plexus.
+- **OpenCode** seeds the provider from cache or a placeholder model during config loading, then performs live discovery through the `provider.models` hook. If Plexus is slow or unavailable, OpenCode uses the cache and lets the refresh continue in the background.
+- Both adapters convert Plexus's per-token base and tier rates to the per-million-token units expected by their host.
 
 ## Development
 
