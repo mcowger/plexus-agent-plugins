@@ -50,6 +50,9 @@ function adjustBaseUrl(baseUrl, preferredApi) {
   }
 }
 function isChatModel(model) {
+  const inputModalities = model.architecture?.input_modalities;
+  if (inputModalities !== undefined && !inputModalities.includes("text"))
+    return false;
   const outputModalities = model.architecture?.output_modalities;
   if (outputModalities !== undefined)
     return outputModalities.includes("text");

@@ -134,6 +134,22 @@ describe("convertToDescriptor", () => {
 
 		expect(descriptors.map((model) => model.id)).toEqual(["claude-haiku-4-5"]);
 	});
+
+	test("skips models without text input during batch conversion", () => {
+		const descriptors = convertDescriptors(
+			[
+				baseModel,
+				{
+					...baseModel,
+					id: "gpt-4o-mini-transcribe",
+					architecture: { input_modalities: ["audio"], output_modalities: ["text"] },
+				},
+			],
+			"https://plexus.example.com/v1",
+		);
+
+		expect(descriptors.map((model) => model.id)).toEqual(["claude-haiku-4-5"]);
+	});
 });
 
 describe("inferReasoning", () => {

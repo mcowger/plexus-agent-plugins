@@ -74,8 +74,10 @@ export function mapInputModalities(model: PlexusApiModel): ("text" | "image")[] 
 	return result.length > 0 ? result : ["text"];
 }
 
-/** Returns whether a model can produce text suitable for an agent chat session. */
+/** Returns whether a model can accept and produce text for an agent chat session. */
 export function isChatModel(model: Pick<PlexusApiModel, "id" | "architecture">): boolean {
+	const inputModalities = model.architecture?.input_modalities;
+	if (inputModalities !== undefined && !inputModalities.includes("text")) return false;
 	const outputModalities = model.architecture?.output_modalities;
 	if (outputModalities !== undefined) return outputModalities.includes("text");
 	return !NON_CHAT_ID_PATTERN.test(model.id);
