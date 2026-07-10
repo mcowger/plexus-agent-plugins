@@ -6,6 +6,7 @@ export const OPENAI_COMPATIBLE_NPM = "@ai-sdk/openai-compatible"
 export const PLEXUS_BASE_URL_OPTION = "plexusBaseURL"
 
 export const ENV_BASE_URL = "PLEXUS_BASE_URL"
+export const ENV_API_URL = "PLEXUS_API_URL"
 export const ENV_API_KEY = "PLEXUS_API_KEY"
 
 export const MODELS_FETCH_TIMEOUT_MS = 10_000

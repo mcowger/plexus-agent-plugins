@@ -20,6 +20,17 @@ export interface PlexusModelPricing {
 	input_cache_read?: string;
 	/** Cost per cache-write token (decimal string). */
 	input_cache_write?: string;
+	/** Alternate per-token rates selected by total input-token thresholds. */
+	tiers?: PlexusModelPricingTier[];
+}
+
+export interface PlexusModelPricingTier {
+	/** Tier applies when total input usage exceeds this threshold. */
+	input_tokens_above: number;
+	prompt?: string;
+	completion?: string;
+	input_cache_read?: string;
+	input_cache_write?: string;
 }
 
 export interface PlexusTopProvider {
@@ -92,6 +103,13 @@ export interface PlexusModelDescriptor {
 		output: number;
 		cacheRead: number;
 		cacheWrite: number;
+		tiers?: Array<{
+			inputTokensAbove: number;
+			input: number;
+			output: number;
+			cacheRead: number;
+			cacheWrite: number;
+		}>;
 	};
 	contextWindow: number;
 	maxTokens: number;

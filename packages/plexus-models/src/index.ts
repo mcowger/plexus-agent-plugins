@@ -6,8 +6,11 @@ export type {
 	PlexusModelArchitecture,
 	PlexusModelDescriptor,
 	PlexusModelPricing,
+	PlexusModelPricingTier,
 	PlexusTopProvider,
 } from "./types.ts";
+
+export type { OpenAICompletionsThinkingFormat } from "./convert.ts";
 
 // Model fetching and conversion
 export {

@@ -2,6 +2,18 @@ import type { PlexusApiModel, PlexusModelDescriptor } from "./types.ts";
 
 const REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
 
+export type OpenAICompletionsThinkingFormat =
+	| "openai"
+	| "openrouter"
+	| "deepseek"
+	| "together"
+	| "zai"
+	| "qwen"
+	| "chat-template"
+	| "qwen-chat-template"
+	| "string-thinking"
+	| "ant-ling";
+
 const API_DIALECT_MAP: Record<string, string> = {
 	chat_completions: "openai-completions",
 	"openai-completions": "openai-completions",
@@ -85,6 +97,24 @@ function resolveMaxTokens(model: PlexusApiModel, contextWindow: number): number 
 	return v != null && v > 0 ? v : contextWindow;
 }
 
+function resolvePricingTiers(model: PlexusApiModel): PlexusModelDescriptor["cost"]["tiers"] {
+	const pricing = model.pricing;
+	if (!pricing?.tiers) return undefined;
+
+	const tiers = pricing.tiers.flatMap((tier) => {
+		if (!Number.isFinite(tier.input_tokens_above) || tier.input_tokens_above < 0) return [];
+		return [{
+			inputTokensAbove: tier.input_tokens_above,
+			input: parsePrice(tier.prompt ?? pricing.prompt),
+			output: parsePrice(tier.completion ?? pricing.completion),
+			cacheRead: parsePrice(tier.input_cache_read ?? pricing.input_cache_read),
+			cacheWrite: parsePrice(tier.input_cache_write ?? pricing.input_cache_write),
+		}];
+	});
+
+	return tiers.length > 0 ? tiers : undefined;
+}
+
 /**
  * Converts a single PlexusApiModel into a PlexusModelDescriptor.
  * Does NOT populate compat or thinkingLevelMap — those are reserved for host packages.
@@ -94,6 +124,7 @@ export function convertToDescriptor(raw: PlexusApiModel, baseUrl: string): Plexu
 	const adjustedBaseUrl = adjustBaseUrl(baseUrl, preferredApi);
 	const contextWindow = resolveContextWindow(raw);
 	const maxTokens = resolveMaxTokens(raw, contextWindow);
+	const tiers = resolvePricingTiers(raw);
 
 	const descriptor: PlexusModelDescriptor = {
 		id: raw.id,
@@ -108,6 +139,7 @@ export function convertToDescriptor(raw: PlexusApiModel, baseUrl: string): Plexu
 			output: parsePrice(raw.pricing?.completion),
 			cacheRead: parsePrice(raw.pricing?.input_cache_read),
 			cacheWrite: parsePrice(raw.pricing?.input_cache_write),
+			...(tiers !== undefined ? { tiers } : {}),
 		},
 		contextWindow,
 		maxTokens,
@@ -194,7 +226,7 @@ export function detectOpenAICompletionsCompat(
 		maxTokensField = "max_tokens";
 	}
 
-	let thinkingFormat: "deepseek" | "zai" | "openrouter" | "openai" = "openai";
+	let thinkingFormat: OpenAICompletionsThinkingFormat = "openai";
 	if (isDeepSeek) thinkingFormat = "deepseek";
 	else if (isZai) thinkingFormat = "zai";
 	else if (isOpenRouter) thinkingFormat = "openrouter";
@@ -252,11 +284,11 @@ export async function fetchPlexusModels(
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
 	try {
+		const headers: Record<string, string> = { Accept: "application/json" };
+		if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
 		const res = await fetch(modelsUrl, {
-			headers: {
-				Authorization: `Bearer ${apiKey}`,
-				Accept: "application/json",
-			},
+			headers,
 			signal: controller.signal,
 		});
 		if (!res.ok) {

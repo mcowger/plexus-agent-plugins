@@ -1,4 +1,5 @@
 import type { OpenAICompletionsCompat } from "@earendil-works/pi-ai";
+import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import {
 	convertDescriptors,
 	detectOpenAICompletionsCompat,
@@ -14,31 +15,56 @@ import {
  *
  * Compat resolution (openai-completions only):
  *   1. Start with heuristically-detected flags from detectOpenAICompletionsCompat
- *   2. Merge in pi_options from the Plexus server (server wins on any overlap)
+ *   2. Merge in compat from pi_provider/pi_model when present
+ *   3. Merge in pi_options from the Plexus server (server wins on any overlap)
  * Other API dialects leave compat undefined so the host auto-detects.
  *
- * thinkingLevelMap is left undefined — no registry lookup is performed here.
+ * thinkingLevelMap and headers are copied from pi_provider/pi_model when present.
  */
 export function descriptorToPiModel(descriptor: PlexusModelDescriptor) {
+	let builtinModel: ReturnType<typeof getBuiltinModel> | undefined;
+	if (descriptor.piProvider && descriptor.piModel) {
+		try {
+			builtinModel = getBuiltinModel(descriptor.piProvider as never, descriptor.piModel as never);
+		} catch {
+			builtinModel = undefined;
+		}
+	}
+
 	const cost = {
 		input: descriptor.cost.input * 1_000_000,
 		output: descriptor.cost.output * 1_000_000,
 		cacheRead: descriptor.cost.cacheRead * 1_000_000,
 		cacheWrite: descriptor.cost.cacheWrite * 1_000_000,
+		...(descriptor.cost.tiers
+			? {
+				tiers: descriptor.cost.tiers.map((tier) => ({
+					inputTokensAbove: tier.inputTokensAbove,
+					input: tier.input * 1_000_000,
+					output: tier.output * 1_000_000,
+					cacheRead: tier.cacheRead * 1_000_000,
+					cacheWrite: tier.cacheWrite * 1_000_000,
+				})),
+			}
+			: {}),
 	};
 
 	// Compat applies only to openai-completions; other dialects auto-detect from URL
 	let compat: OpenAICompletionsCompat | undefined;
 	if (descriptor.preferredApi === "openai-completions") {
-		const heuristic = detectOpenAICompletionsCompat(descriptor.provider, descriptor.baseUrl);
+		const heuristic = detectOpenAICompletionsCompat(
+			descriptor.piProvider ?? descriptor.provider,
+			descriptor.baseUrl,
+		);
 		// pi_options override heuristics — the Plexus server knows best
-		const merged = descriptor.piOptions
-			? { ...heuristic, ...descriptor.piOptions }
-			: heuristic;
+		const builtinCompat = builtinModel?.compat as Record<string, unknown> | undefined;
+		const merged = { ...heuristic, ...(builtinCompat ?? {}), ...(descriptor.piOptions ?? {}) };
 		compat = merged as OpenAICompletionsCompat;
 	} else if (descriptor.piOptions) {
 		// For non-openai-completions dialects that still carry pi_options, pass them through
 		compat = descriptor.piOptions as OpenAICompletionsCompat;
+	} else if (builtinModel?.compat) {
+		compat = builtinModel.compat as OpenAICompletionsCompat;
 	}
 
 	return {
@@ -51,6 +77,10 @@ export function descriptorToPiModel(descriptor: PlexusModelDescriptor) {
 		cost,
 		contextWindow: descriptor.contextWindow,
 		maxTokens: descriptor.maxTokens,
+		...(builtinModel?.thinkingLevelMap !== undefined
+			? { thinkingLevelMap: builtinModel.thinkingLevelMap }
+			: {}),
+		...(builtinModel?.headers !== undefined ? { headers: builtinModel.headers } : {}),
 		...(compat !== undefined ? { compat } : {}),
 	} as const;
 }

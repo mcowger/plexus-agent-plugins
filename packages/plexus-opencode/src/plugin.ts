@@ -1,7 +1,8 @@
 import type { Plugin } from "@opencode-ai/plugin"
+import type { Auth, Model as OpenCodeModel, Provider as OpenCodeProvider } from "@opencode-ai/sdk/v2"
 import { fetchPlexusModels } from "../../plexus-models/src/index.ts"
 import { readCachedModels, writeCache } from "./cache.ts"
-import { resolveConfig, persistToGlobalConfig } from "./config-store.ts"
+import { AUTH_METADATA_BASE_URL, resolveConfig } from "./config-store.ts"
 import { createLogger } from "./log.ts"
 import { buildModels, type ConfigModel } from "./mapper.ts"
 import {
@@ -13,7 +14,7 @@ import {
   PLEXUS_PROVIDER_NAME,
   REFRESH_TTL_MS,
 } from "./constants.ts"
-import { apiBase, modelsUrl, trimURL } from "./url.ts"
+import { apiBase, modelsUrl, rootURL, trimURL } from "./url.ts"
 
 // ---------------------------------------------------------------------------
 // In-process TTL cache for model refresh
@@ -29,6 +30,98 @@ type RaceResult<T> =
   | { status: "resolved"; value: T }
   | { status: "rejected"; error: unknown }
   | { status: "timed-out" }
+
+function toRuntimeCapabilities(model: ConfigModel): OpenCodeModel["capabilities"] {
+  const input = new Set(model.modalities.input)
+  const output = new Set(model.modalities.output)
+
+  return {
+    temperature: model.temperature ?? false,
+    reasoning: model.reasoning ?? false,
+    attachment: model.attachment ?? false,
+    toolcall: model.tool_call ?? false,
+    input: {
+      text: input.has("text"),
+      audio: input.has("audio"),
+      image: input.has("image"),
+      video: input.has("video"),
+      pdf: input.has("pdf"),
+    },
+    output: {
+      text: output.has("text"),
+      audio: output.has("audio"),
+      image: output.has("image"),
+      video: output.has("video"),
+      pdf: output.has("pdf"),
+    },
+    interleaved: false,
+  }
+}
+
+function toRuntimeModels(
+  models: Record<string, ConfigModel>,
+  provider: OpenCodeProvider,
+): Record<string, OpenCodeModel> {
+  const result: Record<string, OpenCodeModel> = {}
+  const providerNpm = typeof provider.options?.["npm"] === "string"
+    ? provider.options["npm"]
+    : OPENAI_COMPATIBLE_NPM
+  const providerApi = typeof provider.options?.[PLEXUS_BASE_URL_OPTION] === "string"
+    ? apiBase(provider.options[PLEXUS_BASE_URL_OPTION])
+    : ""
+
+  for (const [id, model] of Object.entries(models)) {
+    result[id] = {
+      id: model.id,
+      providerID: provider.id,
+      api: {
+        id: provider.id,
+        url: model.provider?.api ?? providerApi,
+        npm: model.provider?.npm ?? providerNpm,
+      },
+      name: model.name,
+      capabilities: toRuntimeCapabilities(model),
+      cost: {
+        input: model.cost?.input ?? 0,
+        output: model.cost?.output ?? 0,
+        cache: {
+          read: model.cost?.cache_read ?? 0,
+          write: model.cost?.cache_write ?? 0,
+        },
+        ...(model.pricingTiers
+          ? {
+              tiers: model.pricingTiers.map((tier) => ({
+                input: tier.input,
+                output: tier.output,
+                cache: { read: tier.cacheRead, write: tier.cacheWrite },
+                tier: { type: "context" as const, size: tier.inputTokensAbove },
+              })),
+            }
+          : {}),
+      },
+      limit: model.limit,
+      status: "active",
+      options: {},
+      headers: {},
+      release_date: "",
+    }
+  }
+
+  return result
+}
+
+function toConfigModels(models: Record<string, ConfigModel>): Record<string, ConfigModel> {
+  return Object.fromEntries(
+    Object.entries(models).map(([id, model]) => {
+      const { pricingTiers: _pricingTiers, ...configModel } = model
+      return [id, configModel]
+    }),
+  )
+}
+
+function authMetadata(auth: Auth | undefined): Record<string, string> | undefined {
+  return auth?.type === "api" ? auth.metadata : undefined
+}
 
 /**
  * Awaits `promise` for at most `timeoutMs`. If it doesn't settle in time,
@@ -187,7 +280,7 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
         // Always seed at least one model so OpenCode doesn't prune the provider
         // before /connect runs. The placeholder is replaced once a live fetch
         // succeeds or a real cache exists.
-        models: existingModels ?? cachedAsync ?? {
+        models: existingModels ?? (cachedAsync ? toConfigModels(cachedAsync) : null) ?? {
           [PLACEHOLDER_MODEL_ID]: {
             id: PLACEHOLDER_MODEL_ID,
             name: "Plexus (run /connect to configure)",
@@ -201,39 +294,7 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
       delete mergedOptions["baseURL"]
 
       if (baseURL) {
-        // Give the live refresh a short budget to complete inline (covers
-        // the common "already warm" case where refreshModels resolves from
-        // the in-memory TTL cache almost instantly). If it doesn't finish in
-        // time, fall back to cache/placeholder immediately and let the
-        // refresh keep running in the background — startup must not block
-        // on a slow or unreachable Plexus server.
-        const refreshPromise = refreshModels(client, baseURL, log, apiKey)
-        const race = await raceWithTimeout(refreshPromise, CONFIG_HOOK_REFRESH_BUDGET_MS)
-
-        if (race.status === "resolved") {
-          // User-defined model overrides in opencode.json win on a per-id basis
-          merged["models"] = mergeModelMaps(race.value, existingModels)
-          log.info(`Loaded ${Object.keys(race.value).length} plexus models from ${baseURL}`)
-        } else if (race.status === "rejected") {
-          log.warn(`Live model refresh failed, using cache: ${String(race.error)}`)
-          if (cachedAsync) {
-            merged["models"] = mergeModelMaps(cachedAsync, existingModels)
-          }
-        } else {
-          log.info(
-            `Live model refresh still pending after ${CONFIG_HOOK_REFRESH_BUDGET_MS}ms; using cache and continuing in background`,
-          )
-          if (cachedAsync) {
-            merged["models"] = mergeModelMaps(cachedAsync, existingModels)
-          }
-          // Let it finish in the background; refreshModels() already caches
-          // the result in lastRefresh and writes it to disk. Swallow errors
-          // here — they're logged inside refreshModels' caller paths only
-          // when awaited, so log explicitly for the background case.
-          refreshPromise.catch((e) => {
-            log.warn(`Background plexus model refresh failed: ${String(e)}`)
-          })
-        }
+        log.info("Plexus baseURL configured; live discovery delegated to provider.models hook")
       } else {
         log.info("Plexus baseURL not configured; skipping live refresh")
       }
@@ -256,6 +317,43 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
       cfg.provider[PLEXUS_PROVIDER_ID] = merged as never
     },
 
+    provider: {
+      id: PLEXUS_PROVIDER_ID,
+      models: async (provider, hookCtx) => {
+        const authKey = hookCtx.auth?.type === "api" ? hookCtx.auth.key : undefined
+        const { baseURL, apiKey } = resolveConfig(provider as never, authMetadata(hookCtx.auth))
+        const key = authKey ?? apiKey
+
+        if (!baseURL) {
+          log.info("Provider hook skipped live refresh; baseURL missing")
+          const cached = await readCachedModels(client)
+          return cached ? toRuntimeModels(cached, provider) : {}
+        }
+
+        const refreshPromise = refreshModels(client, baseURL, log, key)
+        const race = await raceWithTimeout(refreshPromise, CONFIG_HOOK_REFRESH_BUDGET_MS)
+
+        if (race.status === "resolved") {
+          log.info(`Provider hook loaded ${Object.keys(race.value).length} plexus models from ${baseURL}`)
+          return toRuntimeModels(race.value, provider)
+        }
+
+        const cached = await readCachedModels(client)
+        if (race.status === "rejected") {
+          log.warn(`Provider hook live refresh failed, using cache: ${String(race.error)}`)
+        } else {
+          log.info(
+            `Provider hook refresh still pending after ${CONFIG_HOOK_REFRESH_BUDGET_MS}ms; using cache and continuing in background`,
+          )
+          refreshPromise.catch((e) => {
+            log.warn(`Background plexus model refresh failed: ${String(e)}`)
+          })
+        }
+
+        return cached ? toRuntimeModels(cached, provider) : {}
+      },
+    },
+
     auth: {
       provider: PLEXUS_PROVIDER_ID,
 
@@ -264,7 +362,8 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
       async loader(getAuth, providerInfo) {
         const auth = await getAuth()
 
-        const { baseURL, apiKey } = resolveConfig(providerInfo as never)
+        const authMetadataValue = auth?.type === "api" ? auth.metadata : undefined
+        const { baseURL, apiKey } = resolveConfig(providerInfo as never, authMetadataValue)
         const key =
           (auth?.type === "api" ? (auth as { type: string; key: string }).key : undefined) ??
           apiKey
@@ -292,7 +391,7 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
             },
           ],
           async authorize(inputs: Record<string, string> = {}) {
-            const baseURL = trimURL(inputs["baseURL"] ?? "")
+            const baseURL = rootURL(inputs["baseURL"] ?? "")
             const apiKey = (inputs["apiKey"] ?? "").trim()
 
             if (!baseURL || !apiKey) return { type: "failed" as const }
@@ -306,17 +405,15 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
               return { type: "failed" as const }
             }
 
-            try {
-              await persistToGlobalConfig(ctx.serverUrl, client, baseURL, apiKey)
-            } catch (e) {
-              log.error(`Failed to persist Plexus config: ${String(e)}`)
-              // Don't fail auth just because config persistence failed
-            }
-
             // Force the next config() call to fetch fresh models
             lastRefresh = null
 
-            return { type: "success" as const, provider: PLEXUS_PROVIDER_ID, key: apiKey }
+            return {
+              type: "success" as const,
+              provider: PLEXUS_PROVIDER_ID,
+              key: apiKey,
+              metadata: { [AUTH_METADATA_BASE_URL]: baseURL },
+            }
           },
         },
       ],

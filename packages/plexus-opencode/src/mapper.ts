@@ -2,6 +2,14 @@ import { adjustBaseUrl, mapPreferredApi, type PlexusApiModel } from "../../plexu
 
 type Modality = "text" | "audio" | "image" | "video" | "pdf"
 
+export interface ConfigPricingTier {
+  inputTokensAbove: number
+  input: number
+  output: number
+  cacheRead: number
+  cacheWrite: number
+}
+
 /** Subset of ProviderConfig.models value that OpenCode expects. */
 export interface ConfigModel {
   id: string
@@ -20,6 +28,7 @@ export interface ConfigModel {
     cache_read?: number
     cache_write?: number
   }
+  pricingTiers?: ConfigPricingTier[]
   limit: {
     context: number
     output: number
@@ -32,6 +41,7 @@ export interface ConfigModel {
 
 const REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"])
 const DEFAULT_CONTEXT = 8192
+const PER_TOKEN_TO_PER_MILLION = 1_000_000
 
 function resolveModelProvider(
   model: PlexusApiModel,
@@ -57,7 +67,25 @@ function resolveModelProvider(
 function parsePrice(value: string | undefined): number {
   if (!value) return 0
   const n = parseFloat(value)
-  return Number.isNaN(n) ? 0 : n
+  return Number.isFinite(n) && n >= 0 ? n * PER_TOKEN_TO_PER_MILLION : 0
+}
+
+function buildPricingTiers(model: PlexusApiModel): ConfigPricingTier[] | undefined {
+  const pricing = model.pricing
+  if (!pricing?.tiers) return undefined
+
+  const tiers = pricing.tiers.flatMap((tier) => {
+    if (!Number.isFinite(tier.input_tokens_above) || tier.input_tokens_above < 0) return []
+    return [{
+      inputTokensAbove: tier.input_tokens_above,
+      input: parsePrice(tier.prompt ?? pricing.prompt),
+      output: parsePrice(tier.completion ?? pricing.completion),
+      cacheRead: parsePrice(tier.input_cache_read ?? pricing.input_cache_read),
+      cacheWrite: parsePrice(tier.input_cache_write ?? pricing.input_cache_write),
+    }]
+  })
+
+  return tiers.length > 0 ? tiers : undefined
 }
 
 /**
@@ -139,6 +167,7 @@ export function buildModels(models: PlexusApiModel[], baseURL: string): Record<s
     const cacheReadPrice = parsePrice(m.pricing?.input_cache_read)
     const cacheWritePrice = parsePrice(m.pricing?.input_cache_write)
     const hasCachePricing = cacheReadPrice > 0 || cacheWritePrice > 0
+    const pricingTiers = buildPricingTiers(m)
 
     const hasNonTextInput = inputModalities.some((mod) => mod !== "text")
     const provider = resolveModelProvider(m, baseURL)
@@ -170,6 +199,7 @@ export function buildModels(models: PlexusApiModel[], baseURL: string): Record<s
       ...(params.some((p) => REASONING_PARAMS.has(p)) ? { reasoning: true } : {}),
       ...(params.includes("temperature") ? { temperature: true } : {}),
       ...(hasNonTextInput ? { attachment: true } : {}),
+      ...(pricingTiers ? { pricingTiers } : {}),
     }
 
     result[m.id] = entry
