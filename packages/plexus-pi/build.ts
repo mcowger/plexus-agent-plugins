@@ -15,8 +15,7 @@ const result = await Bun.build({
 	// Bundle plexus-models inline; keep @earendil-works/* and node:* external
 	// so pi's virtual module shim can remap them to its bundled copies at load time.
 	external: [
-		"@earendil-works/pi-ai",
-		"@earendil-works/pi-ai/providers/all",
+		"@earendil-works/pi-ai/compat",
 		"@earendil-works/pi-coding-agent",
 		"node:*",
 	],

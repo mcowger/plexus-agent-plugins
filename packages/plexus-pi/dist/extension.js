@@ -399,12 +399,12 @@ async function writeLogLine(message, data) {
 }
 
 // src/mapper.ts
-import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
+import { getModel } from "@earendil-works/pi-ai/compat";
 function descriptorToPiModel(descriptor) {
   let builtinModel;
   if (descriptor.piProvider && descriptor.piModel) {
     try {
-      builtinModel = getBuiltinModel(descriptor.piProvider, descriptor.piModel);
+      builtinModel = getModel(descriptor.piProvider, descriptor.piModel);
     } catch {
       builtinModel = undefined;
     }
