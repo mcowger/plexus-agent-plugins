@@ -54,11 +54,11 @@ function toRuntimeCapabilities(model: ConfigModel): OpenCodeModel["capabilities"
       video: output.has("video"),
       pdf: output.has("pdf"),
     },
-    interleaved: false,
+    interleaved: model.interleaved ?? false,
   }
 }
 
-function toRuntimeModels(
+export function toRuntimeModels(
   models: Record<string, ConfigModel>,
   provider: OpenCodeProvider,
 ): Record<string, OpenCodeModel> {
@@ -75,7 +75,10 @@ function toRuntimeModels(
       id: model.id,
       providerID: provider.id,
       api: {
-        id: provider.id,
+        // This is the upstream model ID sent on the wire, not the provider ID.
+        // OpenCode also keys its native GPT/Claude/Gemini/DeepSeek compatibility
+        // and variant generation from api.id.
+        id: model.id,
         url: model.provider?.api ?? providerApi,
         npm: model.provider?.npm ?? providerNpm,
       },
@@ -103,7 +106,10 @@ function toRuntimeModels(
       status: "active",
       options: {},
       headers: {},
-      release_date: "",
+      release_date: model.release_date ?? "",
+      // Deliberately omit variants. OpenCode populates its current native
+      // variants after provider hooks run, using api.id, api.npm, release_date,
+      // reasoning capability, output limit, and interleaved metadata above.
     }
   }
 

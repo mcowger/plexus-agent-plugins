@@ -229,6 +229,8 @@ Models with a falsy `id` are skipped. Missing metadata falls back to safe defaul
 
 - **pi** refreshes on session start and through `/plexus refresh`. It accepts either root URLs or URLs ending in `/v1` and normalizes them before calling Plexus.
 - **OpenCode** seeds the provider from cache or a placeholder model during config loading, then performs live discovery through the `provider.models` hook. If Plexus is slow or unavailable, OpenCode uses the cache and lets the refresh continue in the background.
+- OpenCode models retain their upstream model ID, SDK dialect, release date, and reasoning metadata so OpenCode can generate its native GPT, Claude, Gemini, and OpenAI-compatible variants and apply its current request transforms. DeepSeek models also preserve `reasoning_content` across tool-call turns.
+- OpenCode uses a 250K-token context window when Plexus supplies no context metadata; its output fallback remains 20% of that window.
 - Both adapters convert Plexus's per-token base and tier rates to the per-million-token units expected by their host.
 
 ## Development

@@ -29,6 +29,10 @@ export interface ConfigModel {
     cache_write?: number
   }
   pricingTiers?: ConfigPricingTier[]
+  release_date?: string
+  interleaved?: true | {
+    field: "reasoning" | "reasoning_content" | "reasoning_details"
+  }
   limit: {
     context: number
     output: number
@@ -40,7 +44,7 @@ export interface ConfigModel {
 }
 
 const REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"])
-const DEFAULT_CONTEXT = 8192
+const DEFAULT_CONTEXT = 250_000
 const PER_TOKEN_TO_PER_MILLION = 1_000_000
 
 function resolveModelProvider(
@@ -102,6 +106,25 @@ function mapModality(m: string): Modality | null {
     case "pdf": return "pdf"
     default: return null
   }
+}
+
+function releaseDate(created: number | undefined): string | undefined {
+  if (typeof created !== "number" || !Number.isFinite(created) || created <= 0) return undefined
+  const date = new Date(created * 1000)
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString().slice(0, 10)
+}
+
+function interleavedReasoning(
+  model: PlexusApiModel,
+  preferredApi: string,
+): ConfigModel["interleaved"] | undefined {
+  // OpenCode's OpenAI-compatible message transformer uses this metadata to
+  // preserve reasoning_content across tool-call turns. DeepSeek requires the
+  // field to be present on every replayed assistant message.
+  if (preferredApi === "openai-completions" && model.id.toLowerCase().includes("deepseek")) {
+    return { field: "reasoning_content" }
+  }
+  return undefined
 }
 
 function buildInputModalities(model: PlexusApiModel): Modality[] {
@@ -170,7 +193,10 @@ export function buildModels(models: PlexusApiModel[], baseURL: string): Record<s
     const pricingTiers = buildPricingTiers(m)
 
     const hasNonTextInput = inputModalities.some((mod) => mod !== "text")
+    const preferredApi = mapPreferredApi(m.preferred_api)
     const provider = resolveModelProvider(m, baseURL)
+    const created = releaseDate(m.created)
+    const interleaved = interleavedReasoning(m, preferredApi)
 
     const entry: ConfigModel = {
       id: m.id,
@@ -200,6 +226,8 @@ export function buildModels(models: PlexusApiModel[], baseURL: string): Record<s
       ...(params.includes("temperature") ? { temperature: true } : {}),
       ...(hasNonTextInput ? { attachment: true } : {}),
       ...(pricingTiers ? { pricingTiers } : {}),
+      ...(created ? { release_date: created } : {}),
+      ...(interleaved ? { interleaved } : {}),
     }
 
     result[m.id] = entry
