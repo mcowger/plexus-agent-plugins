@@ -103,13 +103,23 @@ function fallbackDir() {
 function getDir() {
   return fallbackDir();
 }
+function filterCachedModels(models) {
+  return Object.fromEntries(Object.entries(models).filter(([, model]) => isChatModel({
+    id: model.id,
+    name: model.name,
+    architecture: {
+      input_modalities: model.modalities.input,
+      output_modalities: model.modalities.output
+    }
+  })));
+}
 async function readCachedModels(_client) {
   try {
     const dir = getDir();
     const content = await readFile(join(dir, CACHE_FILE), "utf8");
     const parsed = JSON.parse(content);
     if (parsed && typeof parsed.models === "object" && !Array.isArray(parsed.models)) {
-      return parsed.models;
+      return filterCachedModels(parsed.models);
     }
     return null;
   } catch {

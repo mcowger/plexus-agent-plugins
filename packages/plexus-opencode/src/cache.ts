@@ -3,7 +3,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import type { PluginInput } from "@opencode-ai/plugin"
 import type { ConfigModel } from "./mapper.ts"
-import type { PlexusApiResponse } from "../../plexus-models/src/index.ts"
+import { isChatModel, type PlexusApiResponse } from "../../plexus-models/src/index.ts"
 
 const PLUGIN_SUBDIR = join("plugins", "plexus")
 const CACHE_FILE = "models-cache.json"
@@ -34,6 +34,25 @@ interface ModelCache {
   timestamp: number
 }
 
+/**
+ * Re-filter cached entries so caches written by older plugin versions cannot
+ * reintroduce endpoint-specific models into OpenCode's static model listing.
+ */
+export function filterCachedModels(
+  models: Record<string, ConfigModel>,
+): Record<string, ConfigModel> {
+  return Object.fromEntries(
+    Object.entries(models).filter(([, model]) => isChatModel({
+      id: model.id,
+      name: model.name,
+      architecture: {
+        input_modalities: model.modalities.input,
+        output_modalities: model.modalities.output,
+      },
+    })),
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Async helpers (homedir-resolved path, used after await)
 // ---------------------------------------------------------------------------
@@ -53,7 +72,7 @@ export async function readCachedModels(
     const content = await readFile(join(dir, CACHE_FILE), "utf8")
     const parsed = JSON.parse(content) as ModelCache
     if (parsed && typeof parsed.models === "object" && !Array.isArray(parsed.models)) {
-      return parsed.models
+      return filterCachedModels(parsed.models)
     }
     return null
   } catch {
