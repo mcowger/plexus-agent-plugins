@@ -221,7 +221,7 @@ function createLogger(client) {
 
 // src/mapper.ts
 var REASONING_PARAMS2 = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
-var DEFAULT_CONTEXT = 8192;
+var DEFAULT_CONTEXT = 250000;
 var PER_TOKEN_TO_PER_MILLION = 1e6;
 function resolveModelProvider(model, baseURL) {
   const preferredApi = mapPreferredApi(model.preferred_api);
@@ -279,6 +279,18 @@ function mapModality(m) {
       return null;
   }
 }
+function releaseDate(created) {
+  if (typeof created !== "number" || !Number.isFinite(created) || created <= 0)
+    return;
+  const date = new Date(created * 1000);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString().slice(0, 10);
+}
+function interleavedReasoning(model, preferredApi) {
+  if (preferredApi === "openai-completions" && model.id.toLowerCase().includes("deepseek")) {
+    return { field: "reasoning_content" };
+  }
+  return;
+}
 function buildInputModalities(model) {
   const raw = model.architecture?.input_modalities ?? [];
   const mapped = raw.map(mapModality).filter((m) => m !== null);
@@ -316,7 +328,10 @@ function buildModels(models, baseURL) {
     const hasCachePricing = cacheReadPrice > 0 || cacheWritePrice > 0;
     const pricingTiers = buildPricingTiers(m);
     const hasNonTextInput = inputModalities.some((mod) => mod !== "text");
+    const preferredApi = mapPreferredApi(m.preferred_api);
     const provider = resolveModelProvider(m, baseURL);
+    const created = releaseDate(m.created);
+    const interleaved = interleavedReasoning(m, preferredApi);
     const entry = {
       id: m.id,
       name: m.name ?? m.id,
@@ -340,7 +355,9 @@ function buildModels(models, baseURL) {
       ...params.some((p) => REASONING_PARAMS2.has(p)) ? { reasoning: true } : {},
       ...params.includes("temperature") ? { temperature: true } : {},
       ...hasNonTextInput ? { attachment: true } : {},
-      ...pricingTiers ? { pricingTiers } : {}
+      ...pricingTiers ? { pricingTiers } : {},
+      ...created ? { release_date: created } : {},
+      ...interleaved ? { interleaved } : {}
     };
     result[m.id] = entry;
   }
@@ -372,7 +389,7 @@ function toRuntimeCapabilities(model) {
       video: output.has("video"),
       pdf: output.has("pdf")
     },
-    interleaved: false
+    interleaved: model.interleaved ?? false
   };
 }
 function toRuntimeModels(models, provider) {
@@ -384,7 +401,7 @@ function toRuntimeModels(models, provider) {
       id: model.id,
       providerID: provider.id,
       api: {
-        id: provider.id,
+        id: model.id,
         url: model.provider?.api ?? providerApi,
         npm: model.provider?.npm ?? providerNpm
       },
@@ -410,7 +427,7 @@ function toRuntimeModels(models, provider) {
       status: "active",
       options: {},
       headers: {},
-      release_date: ""
+      release_date: model.release_date ?? ""
     };
   }
   return result;
@@ -602,6 +619,7 @@ var plugin2 = {
 };
 var src_default = plugin2;
 export {
+  toRuntimeModels,
   src_default as default,
   buildModels,
   REFRESH_TTL_MS,
