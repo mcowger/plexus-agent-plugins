@@ -2,6 +2,11 @@ import type { PlexusApiModel, PlexusModelDescriptor } from "./types.ts";
 
 const REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
 
+// Identifiers and API hints commonly used for endpoint-specific models that
+// cannot be used by chat-oriented agent hosts.
+const NON_CHAT_PATTERN =
+	/(?:^|[\W_])(?:embed(?:ding|dings)?|transcri(?:be[ds]?|ptions?)|whisper|speech[\W_]*to[\W_]*text|stt|text[\W_]*to[\W_]*speech|tts|image[\W_]*(?:gen(?:eration)?|\d+)|diffusion|dall[\W_]*e|stable[\W_]*diffusion|sdxl|dream)(?:$|[\W_])/i;
+
 export type OpenAICompletionsThinkingFormat =
 	| "openai"
 	| "openrouter"
@@ -153,13 +158,37 @@ export function convertToDescriptor(raw: PlexusApiModel, baseUrl: string): Plexu
 }
 
 /**
- * Batch-converts an array of PlexusApiModel, silently skipping entries with falsy ids.
+ * Returns whether a Plexus model can be presented as a chat model. Explicit
+ * non-text output metadata wins; endpoint API hints and identifiers provide a
+ * fallback for embedding, transcription, speech, and image-generation models.
+ */
+export function isChatModel(model: PlexusApiModel): boolean {
+	if (!model.id) return false;
+
+	const outputModalities = model.architecture?.output_modalities;
+	if (outputModalities !== undefined && !outputModalities.includes("text")) return false;
+
+	const modality = model.architecture?.modality;
+	if (modality?.includes("->")) {
+		const output = modality.split("->").at(-1) ?? "";
+		if (!output.toLowerCase().includes("text")) return false;
+	}
+
+	const apiHints = Array.isArray(model.preferred_api)
+		? model.preferred_api.join(" ")
+		: (model.preferred_api ?? "");
+	return !NON_CHAT_PATTERN.test(`${model.id} ${model.name ?? ""} ${apiHints}`);
+}
+
+/**
+ * Batch-converts chat-capable PlexusApiModel entries, silently skipping entries
+ * with falsy ids and endpoint-specific non-chat models.
  * Output order matches input order minus skipped entries.
  */
 export function convertDescriptors(models: PlexusApiModel[], baseUrl: string): PlexusModelDescriptor[] {
 	const result: PlexusModelDescriptor[] = [];
 	for (const m of models) {
-		if (!m.id) continue;
+		if (!isChatModel(m)) continue;
 		result.push(convertToDescriptor(m, baseUrl));
 	}
 	return result;

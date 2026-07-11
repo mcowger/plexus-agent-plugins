@@ -38,6 +38,20 @@ describe("OpenCode model mapping", () => {
     })
   })
 
+  test("filters embedding and transcription endpoint models", () => {
+    const models = buildModels(
+      [
+        { id: "chat-model" },
+        { id: "text-embedding-3-small" },
+        { id: "whisper-large-v3" },
+        { id: "opaque-transcriber", preferred_api: "audio_transcriptions" },
+      ],
+      "https://plexus.example.com/v1",
+    )
+
+    expect(Object.keys(models)).toEqual(["chat-model"])
+  })
+
   test("preserves model identity and quirk metadata for OpenCode native transforms", () => {
     const mapped = buildModels(
       [{

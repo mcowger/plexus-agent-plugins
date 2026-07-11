@@ -49,6 +49,18 @@ This bundles both host packages. Each `build.ts` produces a single output file t
 
 `dist/` artifacts are committed. A lefthook pre-commit hook runs the build automatically whenever source files under any `packages/*/src/` are staged. Run `bun install` once after cloning to install the hook.
 
+## Release and publishing
+
+Publishing is automated by `.github/workflows/publish.yaml` and is triggered by pushing a `v*` Git tag. **Never run `npm publish` manually.**
+
+To release, use the release script with the desired semantic version:
+
+```sh
+bun scripts/release.ts 1.2.3
+```
+
+The script requires a clean `main` branch, pulls the latest `origin/main`, synchronizes package versions, creates the release commit and annotated `v1.2.3` tag, and pushes both. The pushed tag triggers GitHub Actions, which builds and publishes all plugin packages to npm using trusted publishing.
+
 ## How compat works (plexus-pi)
 
 `detectOpenAICompletionsCompat(providerName, baseUrl)` in `convert.ts` heuristically detects the upstream provider from the provider name and base URL hostname, and returns a full `OpenAICompletionsCompat`-shaped object.

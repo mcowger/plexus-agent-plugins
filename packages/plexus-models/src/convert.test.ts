@@ -5,6 +5,7 @@ import {
 	convertToDescriptor,
 	fetchPlexusModels,
 	inferReasoning,
+	isChatModel,
 	mapPreferredApi,
 } from "./convert.ts";
 import type { PlexusApiModel } from "./types.ts";
@@ -120,6 +121,43 @@ describe("convertToDescriptor", () => {
 		);
 
 		expect(descriptors.map((model) => model.id)).toEqual(["claude-haiku-4-5"]);
+	});
+});
+
+describe("isChatModel", () => {
+	test("rejects embedding and transcription models by identifier", () => {
+		expect(isChatModel({ id: "text-embedding-3-small" })).toBe(false);
+		expect(isChatModel({ id: "gpt-4o-mini-transcribe" })).toBe(false);
+		expect(isChatModel({ id: "whisper-large-v3" })).toBe(false);
+	});
+
+	test("rejects endpoint-specific preferred API hints", () => {
+		expect(isChatModel({ id: "opaque-model", preferred_api: "embeddings" })).toBe(false);
+		expect(isChatModel({ id: "opaque-model", preferred_api: "audio_transcriptions" })).toBe(false);
+	});
+
+	test("rejects non-text output and preserves multimodal chat models", () => {
+		expect(isChatModel({
+			id: "image-model",
+			architecture: { output_modalities: ["image"] },
+		})).toBe(false);
+		expect(isChatModel({
+			id: "multimodal-chat",
+			architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
+		})).toBe(true);
+	});
+
+	test("batch conversion excludes non-chat models", () => {
+		const descriptors = convertDescriptors(
+			[
+				{ id: "chat-model" },
+				{ id: "text-embedding-3-large" },
+				{ id: "audio-model", preferred_api: "audio_transcriptions" },
+			],
+			"https://plexus.example.com/v1",
+		);
+
+		expect(descriptors.map((model) => model.id)).toEqual(["chat-model"]);
 	});
 });
 

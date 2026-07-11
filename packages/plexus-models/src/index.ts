@@ -21,6 +21,7 @@ export {
 	detectOpenAICompletionsCompat,
 	fetchPlexusModels,
 	inferReasoning,
+	isChatModel,
 	mapInputModalities,
 	mapPreferredApi,
 } from "./convert.ts";

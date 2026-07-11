@@ -1,6 +1,7 @@
 // @bun
 // ../plexus-models/src/convert.ts
 var REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
+var NON_CHAT_PATTERN = /(?:^|[\W_])(?:embed(?:ding|dings)?|transcri(?:be[ds]?|ptions?)|whisper|speech[\W_]*to[\W_]*text|stt|text[\W_]*to[\W_]*speech|tts|image[\W_]*(?:gen(?:eration)?|\d+)|diffusion|dall[\W_]*e|stable[\W_]*diffusion|sdxl|dream)(?:$|[\W_])/i;
 var API_DIALECT_MAP = {
   chat_completions: "openai-completions",
   "openai-completions": "openai-completions",
@@ -113,10 +114,25 @@ function convertToDescriptor(raw, baseUrl) {
     descriptor.piOptions = raw.pi_options;
   return descriptor;
 }
+function isChatModel(model) {
+  if (!model.id)
+    return false;
+  const outputModalities = model.architecture?.output_modalities;
+  if (outputModalities !== undefined && !outputModalities.includes("text"))
+    return false;
+  const modality = model.architecture?.modality;
+  if (modality?.includes("->")) {
+    const output = modality.split("->").at(-1) ?? "";
+    if (!output.toLowerCase().includes("text"))
+      return false;
+  }
+  const apiHints = Array.isArray(model.preferred_api) ? model.preferred_api.join(" ") : model.preferred_api ?? "";
+  return !NON_CHAT_PATTERN.test(`${model.id} ${model.name ?? ""} ${apiHints}`);
+}
 function convertDescriptors(models, baseUrl) {
   const result = [];
   for (const m of models) {
-    if (!m.id)
+    if (!isChatModel(m))
       continue;
     result.push(convertToDescriptor(m, baseUrl));
   }

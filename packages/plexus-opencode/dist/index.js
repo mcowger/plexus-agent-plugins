@@ -16,6 +16,7 @@ var PLACEHOLDER_MODEL_ID = "plexus-unconfigured";
 
 // ../plexus-models/src/convert.ts
 var REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
+var NON_CHAT_PATTERN = /(?:^|[\W_])(?:embed(?:ding|dings)?|transcri(?:be[ds]?|ptions?)|whisper|speech[\W_]*to[\W_]*text|stt|text[\W_]*to[\W_]*speech|tts|image[\W_]*(?:gen(?:eration)?|\d+)|diffusion|dall[\W_]*e|stable[\W_]*diffusion|sdxl|dream)(?:$|[\W_])/i;
 var API_DIALECT_MAP = {
   chat_completions: "openai-completions",
   "openai-completions": "openai-completions",
@@ -47,6 +48,21 @@ function adjustBaseUrl(baseUrl, preferredApi) {
     default:
       return stripped;
   }
+}
+function isChatModel(model) {
+  if (!model.id)
+    return false;
+  const outputModalities = model.architecture?.output_modalities;
+  if (outputModalities !== undefined && !outputModalities.includes("text"))
+    return false;
+  const modality = model.architecture?.modality;
+  if (modality?.includes("->")) {
+    const output = modality.split("->").at(-1) ?? "";
+    if (!output.toLowerCase().includes("text"))
+      return false;
+  }
+  const apiHints = Array.isArray(model.preferred_api) ? model.preferred_api.join(" ") : model.preferred_api ?? "";
+  return !NON_CHAT_PATTERN.test(`${model.id} ${model.name ?? ""} ${apiHints}`);
 }
 var DEFAULT_MODELS_FETCH_TIMEOUT_MS = 1e4;
 async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_FETCH_TIMEOUT_MS) {
@@ -296,7 +312,6 @@ function buildInputModalities(model) {
   const mapped = raw.map(mapModality).filter((m) => m !== null);
   return mapped.length > 0 ? [...new Set(mapped)] : ["text"];
 }
-var NON_CHAT_ID_PATTERN = /embedding|embed|tts|whisper|image-[0-9]|image\b.*gen|diffusion|dall-e|stable-diff|sdxl|dream/i;
 function buildOutputModalities(model) {
   const raw = model.architecture?.output_modalities;
   if (raw !== undefined) {
@@ -305,14 +320,12 @@ function buildOutputModalities(model) {
     const mapped = raw.map(mapModality).filter((m) => m !== null);
     return mapped.length > 0 ? [...new Set(mapped)] : ["text"];
   }
-  if (NON_CHAT_ID_PATTERN.test(model.id))
-    return null;
   return ["text"];
 }
 function buildModels(models, baseURL) {
   const result = {};
   for (const m of models) {
-    if (!m.id)
+    if (!isChatModel(m))
       continue;
     const outputModalities = buildOutputModalities(m);
     if (outputModalities === null)
