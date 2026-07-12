@@ -1,5 +1,4 @@
 import type { Plugin } from "@opencode-ai/plugin"
-import type { Part } from "@opencode-ai/sdk"
 import type { Auth, Model as OpenCodeModel, Provider as OpenCodeProvider } from "@opencode-ai/sdk/v2"
 import { fetchPlexusModels } from "../../plexus-models/src/index.ts"
 import { readCachedModels, writeCache } from "./cache.ts"
@@ -371,7 +370,7 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
       },
     },
 
-    "command.execute.before": async (input, output) => {
+    "command.execute.before": async (input) => {
       if (input.command !== PLEXUS_REFRESH_COMMAND) return
 
       const configResponse = await client.config.get()
@@ -384,26 +383,23 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
       const { baseURL, apiKey } = resolveConfig(provider as never, storedAuth?.metadata)
       const key = storedAuth?.key ?? apiKey
 
-      // OpenCode fills in id/sessionID/messageID after this hook runs, so the
-      // runtime shape here is TextPartInput ({ type, text }), not the full
-      // Part the SDK's Hooks type declares.
-      const textPart = (text: string): Part => ({ type: "text" as const, text, synthetic: true }) as never
-
       if (!baseURL) {
-        output.parts = [textPart("Plexus refresh failed: no baseURL configured. Run /connect first.")]
-        return
+        throw new Error("Plexus refresh failed: no baseURL configured. Run /connect first.")
       }
 
+      let models: Record<string, ConfigModel>
       try {
-        const models = await refreshModels(client, baseURL, log, key, true)
-        output.parts = [
-          textPart(
-            `Plexus models refreshed: ${Object.keys(models).length} models fetched from ${baseURL} and cached. Restart OpenCode to pick up the new model list.`,
-          ),
-        ]
+        models = await refreshModels(client, baseURL, log, key, true)
       } catch (e) {
-        output.parts = [textPart(`Plexus refresh failed: ${String(e)}. Existing cache left untouched.`)]
+        throw new Error(`Plexus refresh failed: ${String(e)}. Existing cache left untouched.`)
       }
+
+      // OpenCode has no handled/cancelled result for command hooks. Throwing
+      // surfaces this message as a toast and stops before prompt(), so the
+      // command is neither persisted nor sent to the model.
+      throw new Error(
+        `Plexus models refreshed: ${Object.keys(models).length} models fetched from ${baseURL} and cached. Restart OpenCode to pick up the new model list.`,
+      )
     },
 
     auth: {

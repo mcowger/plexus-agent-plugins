@@ -610,7 +610,7 @@ var PlexusProviderPlugin = async (ctx) => {
         return cached ? toRuntimeModels(cached, provider) : {};
       }
     },
-    "command.execute.before": async (input, output) => {
+    "command.execute.before": async (input) => {
       if (input.command !== PLEXUS_REFRESH_COMMAND)
         return;
       const configResponse = await client.config.get();
@@ -618,19 +618,16 @@ var PlexusProviderPlugin = async (ctx) => {
       const storedAuth = await readStoredAuth();
       const { baseURL, apiKey } = resolveConfig(provider, storedAuth?.metadata);
       const key = storedAuth?.key ?? apiKey;
-      const textPart = (text) => ({ type: "text", text, synthetic: true });
       if (!baseURL) {
-        output.parts = [textPart("Plexus refresh failed: no baseURL configured. Run /connect first.")];
-        return;
+        throw new Error("Plexus refresh failed: no baseURL configured. Run /connect first.");
       }
+      let models;
       try {
-        const models = await refreshModels(client, baseURL, log, key, true);
-        output.parts = [
-          textPart(`Plexus models refreshed: ${Object.keys(models).length} models fetched from ${baseURL} and cached. Restart OpenCode to pick up the new model list.`)
-        ];
+        models = await refreshModels(client, baseURL, log, key, true);
       } catch (e) {
-        output.parts = [textPart(`Plexus refresh failed: ${String(e)}. Existing cache left untouched.`)];
+        throw new Error(`Plexus refresh failed: ${String(e)}. Existing cache left untouched.`);
       }
+      throw new Error(`Plexus models refreshed: ${Object.keys(models).length} models fetched from ${baseURL} and cached. Restart OpenCode to pick up the new model list.`);
     },
     auth: {
       provider: PLEXUS_PROVIDER_ID,
