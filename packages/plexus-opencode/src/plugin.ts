@@ -1,8 +1,9 @@
 import type { Plugin } from "@opencode-ai/plugin"
+import type { Part } from "@opencode-ai/sdk"
 import type { Auth, Model as OpenCodeModel, Provider as OpenCodeProvider } from "@opencode-ai/sdk/v2"
 import { fetchPlexusModels } from "../../plexus-models/src/index.ts"
 import { readCachedModels, writeCache } from "./cache.ts"
-import { AUTH_METADATA_BASE_URL, resolveConfig } from "./config-store.ts"
+import { AUTH_METADATA_BASE_URL, readStoredAuth, resolveConfig } from "./config-store.ts"
 import { createLogger } from "./log.ts"
 import { buildModels, type ConfigModel } from "./mapper.ts"
 import {
@@ -12,6 +13,7 @@ import {
   PLEXUS_BASE_URL_OPTION,
   PLEXUS_PROVIDER_ID,
   PLEXUS_PROVIDER_NAME,
+  PLEXUS_REFRESH_COMMAND,
   REFRESH_TTL_MS,
 } from "./constants.ts"
 import { apiBase, modelsUrl, rootURL, trimURL } from "./url.ts"
@@ -199,8 +201,9 @@ function refreshModels(
   baseURL: string,
   log: ReturnType<typeof createLogger>,
   apiKey?: string,
+  force = false,
 ): Promise<Record<string, ConfigModel>> {
-  if (lastRefresh && Date.now() - lastRefresh.at < REFRESH_TTL_MS) {
+  if (!force && lastRefresh && Date.now() - lastRefresh.at < REFRESH_TTL_MS) {
     log.info(`Using in-memory plexus model cache (${Object.keys(lastRefresh.models).length} models)`)
     return Promise.resolve(lastRefresh.models)
   }
@@ -300,9 +303,17 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
       delete mergedOptions["baseURL"]
 
       if (baseURL) {
-        log.info("Plexus baseURL configured; live discovery delegated to provider.models hook")
+        log.info("Plexus baseURL configured; run /plexus-refresh to force a live model refresh")
       } else {
         log.info("Plexus baseURL not configured; skipping live refresh")
+      }
+
+      // Register the /plexus-refresh command, unless the user already defined
+      // one of the same name in opencode.json.
+      cfg.command ??= {}
+      cfg.command[PLEXUS_REFRESH_COMMAND] ??= {
+        template: "Refreshing Plexus models from the live server...",
+        description: "Force a live refresh of Plexus models and rewrite the on-disk cache",
       }
 
       // Sanity log a few common IDs so we can confirm the final merged config
@@ -358,6 +369,41 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
 
         return cached ? toRuntimeModels(cached, provider) : {}
       },
+    },
+
+    "command.execute.before": async (input, output) => {
+      if (input.command !== PLEXUS_REFRESH_COMMAND) return
+
+      const configResponse = await client.config.get()
+      const provider = configResponse.data?.provider?.[PLEXUS_PROVIDER_ID]
+
+      // command.execute.before has no auth/getAuth accessor (unlike
+      // provider.auth.loader), so credentials stored via /connect are read
+      // straight from OpenCode's auth.json — see readStoredAuth().
+      const storedAuth = await readStoredAuth()
+      const { baseURL, apiKey } = resolveConfig(provider as never, storedAuth?.metadata)
+      const key = storedAuth?.key ?? apiKey
+
+      // OpenCode fills in id/sessionID/messageID after this hook runs, so the
+      // runtime shape here is TextPartInput ({ type, text }), not the full
+      // Part the SDK's Hooks type declares.
+      const textPart = (text: string): Part => ({ type: "text" as const, text, synthetic: true }) as never
+
+      if (!baseURL) {
+        output.parts = [textPart("Plexus refresh failed: no baseURL configured. Run /connect first.")]
+        return
+      }
+
+      try {
+        const models = await refreshModels(client, baseURL, log, key, true)
+        output.parts = [
+          textPart(
+            `Plexus models refreshed: ${Object.keys(models).length} models fetched from ${baseURL} and cached. Restart OpenCode to pick up the new model list.`,
+          ),
+        ]
+      } catch (e) {
+        output.parts = [textPart(`Plexus refresh failed: ${String(e)}. Existing cache left untouched.`)]
+      }
     },
 
     auth: {

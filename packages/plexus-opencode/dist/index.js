@@ -13,6 +13,7 @@ var MODELS_FETCH_TIMEOUT_MS = 1e4;
 var REFRESH_TTL_MS = 60000;
 var CONFIG_HOOK_REFRESH_BUDGET_MS = 3000;
 var PLACEHOLDER_MODEL_ID = "plexus-unconfigured";
+var PLEXUS_REFRESH_COMMAND = "plexus-refresh";
 
 // ../plexus-models/src/convert.ts
 var REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
@@ -140,6 +141,11 @@ async function writeCache(_client, models, raw) {
   } catch {}
 }
 
+// src/config-store.ts
+import { readFile as readFile2 } from "fs/promises";
+import { homedir as homedir2 } from "os";
+import { join as join2 } from "path";
+
 // src/url.ts
 function trimURL(s) {
   return s.trim().replace(/\/+$/, "");
@@ -165,6 +171,21 @@ function modelsUrl(baseURL) {
 var ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 var ENV_VAR_NAME_PREFIX_RE = /^[A-Za-z_][A-Za-z0-9_]*/;
 var AUTH_METADATA_BASE_URL = "plexusBaseURL";
+async function readStoredAuth() {
+  const dataHome = process.env.XDG_DATA_HOME || join2(homedir2(), ".local", "share");
+  const file = join2(dataHome, "opencode", "auth.json");
+  try {
+    const content = await readFile2(file, "utf8");
+    const parsed = JSON.parse(content);
+    const entry = parsed[PLEXUS_PROVIDER_ID];
+    if (typeof entry === "object" && entry !== null && entry.type === "api" && typeof entry.key === "string") {
+      return entry;
+    }
+    return;
+  } catch {
+    return;
+  }
+}
 function resolveConfigTemplate(value) {
   let result = "";
   let index = 0;
@@ -476,8 +497,8 @@ function raceWithTimeout(promise, timeoutMs) {
     });
   });
 }
-function refreshModels(client, baseURL, log, apiKey) {
-  if (lastRefresh && Date.now() - lastRefresh.at < REFRESH_TTL_MS) {
+function refreshModels(client, baseURL, log, apiKey, force = false) {
+  if (!force && lastRefresh && Date.now() - lastRefresh.at < REFRESH_TTL_MS) {
     log.info(`Using in-memory plexus model cache (${Object.keys(lastRefresh.models).length} models)`);
     return Promise.resolve(lastRefresh.models);
   }
@@ -540,10 +561,15 @@ var PlexusProviderPlugin = async (ctx) => {
       const mergedOptions = merged["options"];
       delete mergedOptions["baseURL"];
       if (baseURL) {
-        log.info("Plexus baseURL configured; live discovery delegated to provider.models hook");
+        log.info("Plexus baseURL configured; run /plexus-refresh to force a live model refresh");
       } else {
         log.info("Plexus baseURL not configured; skipping live refresh");
       }
+      cfg.command ??= {};
+      cfg.command[PLEXUS_REFRESH_COMMAND] ??= {
+        template: "Refreshing Plexus models from the live server...",
+        description: "Force a live refresh of Plexus models and rewrite the on-disk cache"
+      };
       try {
         const mergedModels = merged["models"];
         for (const id of ["gemini-3.5-flash", "claude-haiku-4-5", "small-fast"]) {
@@ -582,6 +608,28 @@ var PlexusProviderPlugin = async (ctx) => {
           });
         }
         return cached ? toRuntimeModels(cached, provider) : {};
+      }
+    },
+    "command.execute.before": async (input, output) => {
+      if (input.command !== PLEXUS_REFRESH_COMMAND)
+        return;
+      const configResponse = await client.config.get();
+      const provider = configResponse.data?.provider?.[PLEXUS_PROVIDER_ID];
+      const storedAuth = await readStoredAuth();
+      const { baseURL, apiKey } = resolveConfig(provider, storedAuth?.metadata);
+      const key = storedAuth?.key ?? apiKey;
+      const textPart = (text) => ({ type: "text", text, synthetic: true });
+      if (!baseURL) {
+        output.parts = [textPart("Plexus refresh failed: no baseURL configured. Run /connect first.")];
+        return;
+      }
+      try {
+        const models = await refreshModels(client, baseURL, log, key, true);
+        output.parts = [
+          textPart(`Plexus models refreshed: ${Object.keys(models).length} models fetched from ${baseURL} and cached. Restart OpenCode to pick up the new model list.`)
+        ];
+      } catch (e) {
+        output.parts = [textPart(`Plexus refresh failed: ${String(e)}. Existing cache left untouched.`)];
       }
     },
     auth: {
@@ -647,6 +695,7 @@ export {
   buildModels,
   REFRESH_TTL_MS,
   PlexusProviderPlugin,
+  PLEXUS_REFRESH_COMMAND,
   PLEXUS_PROVIDER_NAME,
   PLEXUS_PROVIDER_ID,
   PLEXUS_PLUGIN_ID,

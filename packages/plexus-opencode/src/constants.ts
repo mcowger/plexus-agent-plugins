@@ -21,3 +21,8 @@ export const CONFIG_HOOK_REFRESH_BUDGET_MS = 3_000
 /** Sentinel model written when no baseURL is configured yet, so the provider
  *  survives OpenCode's "zero-models → delete" pruning and appears in /connect. */
 export const PLACEHOLDER_MODEL_ID = "plexus-unconfigured"
+
+/** Name of the slash command that forces a live model refresh and rewrites
+ *  the on-disk cache. Registered via cfg.command and handled in the
+ *  "command.execute.before" hook. */
+export const PLEXUS_REFRESH_COMMAND = "plexus-refresh"

@@ -75,9 +75,9 @@ The pi mapper resolves compat in this order:
 
 ## How model refresh works (plexus-opencode)
 
-The OpenCode plugin seeds `cfg.provider.plexus.models` from the on-disk cache or a placeholder model so the provider survives startup and appears in `/connect` before the user has configured it.
+OpenCode's `provider.models` hook only fires for providers already present in its models.dev-derived database, which custom providers like Plexus never are — so it cannot be used for live discovery. Instead, the plugin's `config()` hook seeds `cfg.provider.plexus.models` once at startup from the on-disk cache (or a placeholder model, so the provider survives startup and appears in `/connect` before the user has configured it).
 
-Live discovery runs through OpenCode's `provider.models` hook. The hook reads the Plexus base URL from native auth metadata (falling back to env/config), fetches Plexus models with a short inline budget, falls back to cache if Plexus is slow or unavailable, and lets an in-flight refresh finish in the background. The mapper emits model-level provider overrides so each Plexus model can use the API package implied by `preferred_api`.
+To refresh models against the live Plexus server, run the `/plexus-refresh` command. It's registered via `cfg.command` and handled in a `"command.execute.before"` hook. That hook has no `auth`/`getAuth` accessor (unlike `provider.auth.loader`), so credentials stored via `/connect` are read straight from OpenCode's on-disk `auth.json` (`readStoredAuth()` in `config-store.ts`, honoring `XDG_DATA_HOME`) and merged with env vars / `opencode.json` via `resolveConfig()`. The hook then force-fetches models bypassing the in-memory TTL cache and, on a valid response, rewrites the on-disk cache. Because OpenCode has no lightweight way to hot-reload a custom provider's model list mid-session, an OpenCode restart is required afterward to see the refreshed models in the picker. The mapper emits model-level provider overrides so each Plexus model can use the API package implied by `preferred_api`.
 
 ## Auth flow
 

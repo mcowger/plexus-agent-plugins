@@ -116,7 +116,11 @@ Run inside OpenCode:
 /connect
 ```
 
-Select **Plexus** and enter your base URL and API key. Models are discovered through OpenCode's provider hook and cached for fast startup on subsequent sessions.
+Select **Plexus** and enter your base URL and API key. OpenCode has no live model-discovery hook for custom providers, so the model list is seeded from the on-disk cache at startup. Run `/plexus-refresh` to force a live fetch from Plexus and rewrite the cache, then restart OpenCode to pick up the refreshed list:
+
+```
+/plexus-refresh
+```
 
 You may enter either the Plexus root URL or the `/v1` API base URL:
 
@@ -197,7 +201,7 @@ packages/
       plugin.ts         # Plugin export: config hook, provider hook, auth handler
       mapper.ts         # PlexusApiModel → OpenCode ConfigModel
       cache.ts          # model cache I/O
-      config-store.ts   # resolveConfig, persistToGlobalConfig
+      config-store.ts   # resolveConfig, readStoredAuth
       log.ts            # logger via OpenCode SDK
       constants.ts      # provider ID, env var names, timeouts
       url.ts            # URL helpers (trimURL, apiBase, modelsUrl)
@@ -228,7 +232,7 @@ Models with a falsy `id` are skipped. Missing metadata falls back to safe defaul
 ## Adapter behavior
 
 - **pi** refreshes on session start and through `/plexus refresh`. It accepts either root URLs or URLs ending in `/v1` and normalizes them before calling Plexus.
-- **OpenCode** seeds the provider from cache or a placeholder model during config loading, then performs live discovery through the `provider.models` hook. If Plexus is slow or unavailable, OpenCode uses the cache and lets the refresh continue in the background.
+- **OpenCode** seeds the provider from the on-disk cache (or a placeholder model) once, during config loading — OpenCode's `provider.models` hook never fires for custom providers, so there is no live discovery at startup. Run `/plexus-refresh` to force a live fetch and rewrite the cache; because OpenCode has no way to hot-reload a custom provider's model list mid-session, a restart is required afterward to see the refreshed models in the picker.
 - OpenCode models retain their upstream model ID, SDK dialect, release date, and reasoning metadata so OpenCode can generate its native GPT, Claude, Gemini, and OpenAI-compatible variants and apply its current request transforms. DeepSeek models also preserve `reasoning_content` across tool-call turns.
 - OpenCode uses a 250K-token context window when Plexus supplies no context metadata; its output fallback remains 20% of that window.
 - Both adapters convert Plexus's per-token base and tier rates to the per-million-token units expected by their host.

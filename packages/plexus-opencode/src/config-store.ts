@@ -1,5 +1,8 @@
+import { readFile } from "node:fs/promises"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import type { ProviderConfig } from "@opencode-ai/sdk/v2"
-import { ENV_API_KEY, ENV_API_URL, ENV_BASE_URL, PLEXUS_BASE_URL_OPTION } from "./constants.ts"
+import { ENV_API_KEY, ENV_API_URL, ENV_BASE_URL, PLEXUS_BASE_URL_OPTION, PLEXUS_PROVIDER_ID } from "./constants.ts"
 import { rootURL } from "./url.ts"
 
 const ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
@@ -8,6 +11,45 @@ const ENV_VAR_NAME_PREFIX_RE = /^[A-Za-z_][A-Za-z0-9_]*/
 export const AUTH_METADATA_BASE_URL = "plexusBaseURL"
 
 type AuthMetadata = Record<string, string> | undefined
+
+interface StoredApiAuth {
+  type: "api"
+  key: string
+  metadata?: Record<string, string>
+}
+
+/**
+ * Read the plexus entry from OpenCode's on-disk auth store directly.
+ *
+ * Hooks like "command.execute.before" don't get an `auth`/`getAuth`
+ * accessor the way the `provider.auth.loader` hook does, and there's no
+ * client.auth.get() endpoint — only set/remove. Reading auth.json directly
+ * is the same pattern used by other OpenCode plugins (e.g. opencode-usage-
+ * plugin, opencode-translate) to recover credentials outside the loader
+ * hook, and matches this codebase's existing cache.ts convention of never
+ * routing local file reads through the HTTP client.
+ */
+export async function readStoredAuth(): Promise<StoredApiAuth | undefined> {
+  const dataHome = process.env.XDG_DATA_HOME || join(homedir(), ".local", "share")
+  const file = join(dataHome, "opencode", "auth.json")
+
+  try {
+    const content = await readFile(file, "utf8")
+    const parsed = JSON.parse(content) as Record<string, unknown>
+    const entry = parsed[PLEXUS_PROVIDER_ID]
+    if (
+      typeof entry === "object" &&
+      entry !== null &&
+      (entry as { type?: unknown }).type === "api" &&
+      typeof (entry as { key?: unknown }).key === "string"
+    ) {
+      return entry as StoredApiAuth
+    }
+    return undefined
+  } catch {
+    return undefined
+  }
+}
 
 /** Resolve pi-style "$VAR" / "${VAR}" config templates. */
 export function resolveConfigTemplate(value: string): string | undefined {
