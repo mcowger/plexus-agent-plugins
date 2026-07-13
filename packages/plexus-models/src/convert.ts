@@ -99,7 +99,11 @@ function resolveContextWindow(model: PlexusApiModel): number {
 
 function resolveMaxTokens(model: PlexusApiModel, contextWindow: number): number {
 	const v = model.top_provider?.max_completion_tokens ?? null;
-	return v != null && v > 0 ? v : contextWindow;
+	// Use 32K as a safe default for modern chat models if top_provider value is missing or too low
+	if (v == null || v < 100) {
+		return 32768;
+	}
+	return v;
 }
 
 function resolvePricingTiers(model: PlexusApiModel): PlexusModelDescriptor["cost"]["tiers"] {

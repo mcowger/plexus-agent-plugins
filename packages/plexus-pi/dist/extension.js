@@ -63,7 +63,10 @@ function resolveContextWindow(model) {
 }
 function resolveMaxTokens(model, contextWindow) {
   const v = model.top_provider?.max_completion_tokens ?? null;
-  return v != null && v > 0 ? v : contextWindow;
+  if (v == null || v < 100) {
+    return 32768;
+  }
+  return v;
 }
 function resolvePricingTiers(model) {
   const pricing = model.pricing;
