@@ -1,7 +1,29 @@
 import { describe, expect, test } from "bun:test";
 import { descriptorToPiModel } from "./mapper.ts";
 
-describe("pi pricing mapping", () => {
+describe("descriptorToPiModel", () => {
+	test("retains provider so Pi can select Plexus defaults", () => {
+		const model = descriptorToPiModel({
+			id: "gpt-5.6-luna",
+			name: "GPT-5.6 Luna",
+			preferredApi: "openai-completions",
+			provider: "plexus",
+			baseUrl: "https://plexus.example.com/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+			},
+			contextWindow: 272_000,
+			maxTokens: 32_000,
+		});
+
+		expect(model.provider).toBe("plexus");
+	});
+
 	test("converts descriptor tiers to pi per-million rates", () => {
 		const model = descriptorToPiModel({
 			id: "claude-alias",

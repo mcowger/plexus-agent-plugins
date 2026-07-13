@@ -465,6 +465,7 @@ function descriptorToPiModel(descriptor) {
     id: descriptor.id,
     name: descriptor.name,
     api: descriptor.preferredApi,
+    provider: descriptor.provider,
     baseUrl: descriptor.baseUrl,
     reasoning: descriptor.reasoning,
     input: descriptor.input,
@@ -505,7 +506,7 @@ function plexusExtension(pi) {
     log("session_start", { hasApiKey: !!apiKey, baseUrl });
     if (!apiKey || !baseUrl) {
       log("session_start: no auth configured, skipping refresh");
-      await trySetDefaultModel(pi, startupModels);
+      await trySetDefaultModel(pi, startupModels, ctx);
       return;
     }
     await doRefresh(pi, apiKey, ctx, true);
@@ -561,7 +562,7 @@ function createPlexusLoginProvider(pi) {
         throw new Error("Plexus API key is required.");
       await saveBaseUrl(baseUrl);
       callbacks.onProgress?.("Refreshing Plexus models...");
-      await doRefresh(pi, apiKey, null, false);
+      await doRefresh(pi, apiKey, null, true);
       return {
         access: apiKey,
         refresh: apiKey,
@@ -613,7 +614,8 @@ async function handleSetDefaultModel(pi, ctx, requestedModelId) {
     return;
   }
   await saveDefaultModel(model.id);
-  const active = await pi.setModel(model);
+  const registryModel = ctx.modelRegistry.find(PROVIDER_NAME, model.id) ?? model;
+  const active = await pi.setModel(registryModel);
   ctx.ui.notify(active ? `Default Plexus model set to ${model.id}.` : `Default Plexus model set to ${model.id}; it will be selected when Plexus authentication is available.`, active ? "info" : "warning");
 }
 async function doRefresh(pi, apiKey, ctx, setDefault) {
@@ -643,7 +645,7 @@ async function doRefresh(pi, apiKey, ctx, setDefault) {
     if (ctx)
       ctx.ui.notify(`Refreshed ${piModels.length} Plexus models`, "info");
     if (setDefault)
-      await trySetDefaultModel(pi, piModels);
+      await trySetDefaultModel(pi, piModels, ctx);
   } catch (error) {
     log("doRefresh: failed", { error: String(error) });
     if (ctx) {
@@ -651,7 +653,7 @@ async function doRefresh(pi, apiKey, ctx, setDefault) {
     }
   }
 }
-async function trySetDefaultModel(pi, models) {
+async function trySetDefaultModel(pi, models, ctx) {
   const defaultModelId = getDefaultModel();
   if (!defaultModelId)
     return;
@@ -660,7 +662,8 @@ async function trySetDefaultModel(pi, models) {
     log("trySetDefaultModel: model not found", { defaultModelId });
     return;
   }
-  const ok = await pi.setModel(model);
+  const registryModel = ctx?.modelRegistry.find(PROVIDER_NAME, defaultModelId) ?? model;
+  const ok = await pi.setModel(registryModel);
   log("trySetDefaultModel", { defaultModelId, ok });
 }
 export {

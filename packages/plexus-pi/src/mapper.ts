@@ -73,6 +73,7 @@ export function descriptorToPiModel(descriptor: PlexusModelDescriptor) {
 		id: descriptor.id,
 		name: descriptor.name,
 		api: descriptor.preferredApi,
+		provider: descriptor.provider,
 		baseUrl: descriptor.baseUrl,
 		reasoning: descriptor.reasoning,
 		input: descriptor.input,

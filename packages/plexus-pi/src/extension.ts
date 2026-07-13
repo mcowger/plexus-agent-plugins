@@ -69,7 +69,7 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 
 		if (!apiKey || !baseUrl) {
 			log("session_start: no auth configured, skipping refresh");
-			await trySetDefaultModel(pi, startupModels);
+			await trySetDefaultModel(pi, startupModels, ctx);
 			return;
 		}
 
@@ -141,7 +141,7 @@ function createPlexusLoginProvider(pi: ExtensionAPI): NonNullable<ProviderConfig
 
 			await saveBaseUrl(baseUrl);
 			callbacks.onProgress?.("Refreshing Plexus models...");
-			await doRefresh(pi, apiKey, null, false);
+			await doRefresh(pi, apiKey, null, true);
 
 			return {
 				access: apiKey,
@@ -218,9 +218,9 @@ async function handleSetDefaultModel(
 
 	await saveDefaultModel(model.id);
 	// Apply the choice immediately as well as persisting it for future sessions.
-	// pi.setModel expects a full Model<Api>; the mapped object has that shape.
+	const registryModel = ctx.modelRegistry.find(PROVIDER_NAME, model.id) ?? model;
 	// biome-ignore lint/suspicious/noExplicitAny: pi.setModel generic constraint
-	const active = await pi.setModel(model as any);
+	const active = await pi.setModel(registryModel as any);
 	ctx.ui.notify(
 		active
 			? `Default Plexus model set to ${model.id}.`
@@ -267,7 +267,7 @@ async function doRefresh(
 		log("doRefresh: registered", { count: piModels.length });
 		if (ctx) ctx.ui.notify(`Refreshed ${piModels.length} Plexus models`, "info");
 
-		if (setDefault) await trySetDefaultModel(pi, piModels);
+		if (setDefault) await trySetDefaultModel(pi, piModels, ctx);
 	} catch (error) {
 		log("doRefresh: failed", { error: String(error) });
 		if (ctx) {
@@ -285,6 +285,7 @@ async function doRefresh(
 async function trySetDefaultModel(
 	pi: ExtensionAPI,
 	models: ReturnType<typeof descriptorToPiModel>[],
+	ctx?: ExtensionContext | ExtensionCommandContext | null,
 ): Promise<void> {
 	const defaultModelId = getDefaultModel();
 	if (!defaultModelId) return;
@@ -295,9 +296,8 @@ async function trySetDefaultModel(
 		return;
 	}
 
-	// pi.setModel expects a full Model<Api> but descriptorToPiModel returns a
-	// plain object with the same shape — cast is safe here.
+	const registryModel = ctx?.modelRegistry.find(PROVIDER_NAME, defaultModelId) ?? model;
 	// biome-ignore lint/suspicious/noExplicitAny: pi.setModel generic constraint
-	const ok = await pi.setModel(model as any);
+	const ok = await pi.setModel(registryModel as any);
 	log("trySetDefaultModel", { defaultModelId, ok });
 }
