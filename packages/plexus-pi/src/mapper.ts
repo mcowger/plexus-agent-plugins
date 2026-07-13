@@ -1,5 +1,7 @@
-import type { OpenAICompletionsCompat } from "@earendil-works/pi-ai";
-import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
+// pi exposes only its compatibility entrypoint to extensions. Do not import
+// `providers/all`: the extension loader aliases the package root to compat,
+// which makes that subpath resolve relative to compat.js.
+import { getModel, type OpenAICompletionsCompat } from "@earendil-works/pi-ai/compat";
 import {
 	convertDescriptors,
 	detectOpenAICompletionsCompat,
@@ -22,10 +24,10 @@ import {
  * thinkingLevelMap and headers are copied from pi_provider/pi_model when present.
  */
 export function descriptorToPiModel(descriptor: PlexusModelDescriptor) {
-	let builtinModel: ReturnType<typeof getBuiltinModel> | undefined;
+	let builtinModel: ReturnType<typeof getModel> | undefined;
 	if (descriptor.piProvider && descriptor.piModel) {
 		try {
-			builtinModel = getBuiltinModel(descriptor.piProvider as never, descriptor.piModel as never);
+			builtinModel = getModel(descriptor.piProvider as never, descriptor.piModel as never);
 		} catch {
 			builtinModel = undefined;
 		}
