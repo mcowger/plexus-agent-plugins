@@ -98,12 +98,18 @@ You will be prompted for:
 
 - **Plexus base URL** — e.g. `https://plexus.example.com`
 - **Plexus API key**
-- **Default model** (optional)
 
 To force a model refresh:
 
 ```
 /plexus refresh
+```
+
+Set the model Pi should use by default. With no model ID, Pi opens a selector; you can also pass the exact Plexus model ID directly:
+
+```
+/plexus set-default-model
+/plexus set-default-model claude-sonnet-4-5
 ```
 
 Use `/login plexus` for setup and `/logout plexus` to remove stored credentials.
@@ -157,7 +163,7 @@ export PLEXUS_API_KEY=your-api-key
 
 ```
 ~/.pi/agent/extensions/plexus/
-  config.json                  # base URL and optional default model
+  config.json                  # base URL and optional default model (set via /plexus set-default-model)
   plexus-models-cache.json     # last-fetched model list (startup cache)
   plexus-models-response.json  # raw API response (diagnostics)
   plexus.log                   # extension activity log

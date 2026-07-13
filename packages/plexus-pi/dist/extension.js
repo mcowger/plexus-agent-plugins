@@ -328,6 +328,13 @@ async function saveBaseUrl(baseUrl, defaultModel) {
 `, "utf8");
   cachedConfig = config;
 }
+async function saveDefaultModel(defaultModel) {
+  await mkdir(getConfigDir(), { recursive: true });
+  const config = { ...getConfigSync(), defaultModel };
+  await writeFile(getConfigPath(), `${JSON.stringify(config, null, 2)}
+`, "utf8");
+  cachedConfig = config;
+}
 function getRawBaseUrl() {
   const config = getConfigSync();
   return resolveStringOption(process.env[ENV_API_URL]) ?? resolveStringOption(process.env[ENV_BASE_URL]) ?? resolveStringOption(config.baseUrl) ?? null;
@@ -504,17 +511,38 @@ function plexusExtension(pi) {
     await doRefresh(pi, apiKey, ctx, true);
   });
   pi.registerCommand("plexus", {
-    description: "Plexus provider commands: refresh (setup: /login plexus)",
-    getArgumentCompletions: () => [
-      { value: "refresh", label: "refresh", description: "Refresh Plexus models from the API" }
-    ],
+    description: "Plexus provider commands: refresh, set-default-model (setup: /login plexus)",
+    getArgumentCompletions: (prefix) => {
+      const subcommands = [
+        { value: "refresh", label: "refresh", description: "Refresh Plexus models from the API" },
+        { value: "set-default-model", label: "set-default-model", description: "Choose the model Pi should use by default" }
+      ];
+      if (!prefix.includes(" ")) {
+        return subcommands.filter((command) => command.value.startsWith(prefix));
+      }
+      const [subcommand, ...rest] = prefix.split(/\s+/);
+      if (subcommand !== "set-default-model")
+        return null;
+      const modelPrefix = rest.join(" ");
+      const choices = currentModels.map((model) => ({
+        value: model.id,
+        label: model.name === model.id ? model.id : `${model.name} (${model.id})`
+      }));
+      const filtered = choices.filter((choice) => choice.value.toLowerCase().startsWith(modelPrefix.toLowerCase()));
+      return filtered.length > 0 ? filtered : null;
+    },
     handler: async (args, ctx) => {
-      const sub = args.trim().toLowerCase();
+      const trimmed = args.trim();
+      const sub = trimmed.toLowerCase();
       if (sub === "refresh" || sub === "") {
         await handleRefresh(pi, ctx);
         return;
       }
-      ctx.ui.notify(`Unknown sub-command: "${args}". Use /login plexus for setup or /plexus refresh to refresh models.`, "warning");
+      if (sub === "set-default-model" || sub.startsWith("set-default-model ")) {
+        await handleSetDefaultModel(pi, ctx, trimmed.slice("set-default-model".length).trim());
+        return;
+      }
+      ctx.ui.notify(`Unknown sub-command: "${args}". Use /login plexus, /plexus refresh, or /plexus set-default-model.`, "warning");
     }
   });
 }
@@ -552,7 +580,7 @@ function createPlexusLoginProvider(pi) {
       if (!baseUrl)
         return models;
       const apiBase = baseUrl.trim().replace(/\/+$/, "").endsWith("/v1") ? baseUrl.trim().replace(/\/+$/, "") : `${baseUrl.trim().replace(/\/+$/, "")}/v1`;
-      return models.map((model) => model.provider === PROVIDER_NAME ? { ...model, baseUrl: apiBase } : model);
+      return models.map((model) => model.provider === PROVIDER_NAME ? { ...model, baseUrl: adjustBaseUrl(apiBase, model.api) } : model);
     }
   };
 }
@@ -564,6 +592,29 @@ async function handleRefresh(pi, ctx) {
   }
   ctx.ui.notify("Refreshing Plexus models\u2026", "info");
   await doRefresh(pi, apiKey, ctx, true);
+}
+async function handleSetDefaultModel(pi, ctx, requestedModelId) {
+  let modelId = requestedModelId;
+  if (!modelId) {
+    if (currentModels.length === 0) {
+      ctx.ui.notify("No Plexus models are available. Run /plexus refresh first.", "warning");
+      return;
+    }
+    const choices = currentModels.map((model2) => model2.name === model2.id ? model2.id : `${model2.name} (${model2.id})`);
+    const selected = await ctx.ui.select("Select the Plexus default model:", choices);
+    if (!selected)
+      return;
+    const selectedIndex = choices.indexOf(selected);
+    modelId = currentModels[selectedIndex]?.id ?? "";
+  }
+  const model = currentModels.find((candidate) => candidate.id === modelId);
+  if (!model) {
+    ctx.ui.notify(`Plexus model not found: "${modelId}". Run /plexus refresh and choose a model from the available list.`, "error");
+    return;
+  }
+  await saveDefaultModel(model.id);
+  const active = await pi.setModel(model);
+  ctx.ui.notify(active ? `Default Plexus model set to ${model.id}.` : `Default Plexus model set to ${model.id}; it will be selected when Plexus authentication is available.`, active ? "info" : "warning");
 }
 async function doRefresh(pi, apiKey, ctx, setDefault) {
   const modelsUrl = getModelsUrl();

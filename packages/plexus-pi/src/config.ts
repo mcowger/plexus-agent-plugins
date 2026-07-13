@@ -123,6 +123,13 @@ export async function saveBaseUrl(baseUrl: string, defaultModel?: string): Promi
 	cachedConfig = config;
 }
 
+export async function saveDefaultModel(defaultModel: string): Promise<void> {
+	await mkdir(getConfigDir(), { recursive: true });
+	const config: PlexusConfig = { ...getConfigSync(), defaultModel };
+	await writeFile(getConfigPath(), `${JSON.stringify(config, null, 2)}\n`, "utf8");
+	cachedConfig = config;
+}
+
 export function getRawBaseUrl(): string | null {
 	const config = getConfigSync();
 	return (
