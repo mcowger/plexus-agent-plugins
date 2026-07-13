@@ -15,7 +15,6 @@ import type { Api, OAuthCredentials, OAuthLoginCallbacks } from "@earendil-works
 import { adjustBaseUrl, convertDescriptors, fetchPlexusModels } from "../../plexus-models/src/index.ts";
 import {
 	getBaseUrl,
-	getDefaultModel,
 	getEnvApiKey,
 	getModelsUrl,
 	saveBaseUrl,
@@ -69,11 +68,10 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 
 		if (!apiKey || !baseUrl) {
 			log("session_start: no auth configured, skipping refresh");
-			await trySetDefaultModel(pi, startupModels, ctx);
 			return;
 		}
 
-		await doRefresh(pi, apiKey, ctx, true);
+		await doRefresh(pi, apiKey, ctx);
 	});
 
 	// -------------------------------------------------------------------------
@@ -141,7 +139,7 @@ function createPlexusLoginProvider(pi: ExtensionAPI): NonNullable<ProviderConfig
 
 			await saveBaseUrl(baseUrl);
 			callbacks.onProgress?.("Refreshing Plexus models...");
-			await doRefresh(pi, apiKey, null, true);
+			await doRefresh(pi, apiKey, null);
 
 			return {
 				access: apiKey,
@@ -181,7 +179,7 @@ async function handleRefresh(pi: ExtensionAPI, ctx: ExtensionCommandContext): Pr
 		return;
 	}
 	ctx.ui.notify("Refreshing Plexus models…", "info");
-	await doRefresh(pi, apiKey, ctx, true);
+	await doRefresh(pi, apiKey, ctx);
 }
 
 async function handleSetDefaultModel(
@@ -217,14 +215,15 @@ async function handleSetDefaultModel(
 	}
 
 	await saveDefaultModel(model.id);
-	// Apply the choice immediately as well as persisting it for future sessions.
+	// Apply explicit choices immediately. Session startup never applies this
+	// saved value, so it cannot override the model selected for a new session.
 	const registryModel = ctx.modelRegistry.find(PROVIDER_NAME, model.id) ?? model;
 	// biome-ignore lint/suspicious/noExplicitAny: pi.setModel generic constraint
 	const active = await pi.setModel(registryModel as any);
 	ctx.ui.notify(
 		active
-			? `Default Plexus model set to ${model.id}.`
-			: `Default Plexus model set to ${model.id}; it will be selected when Plexus authentication is available.`,
+			? `Plexus model selected: ${model.id}.`
+			: `Plexus model ${model.id} was saved but could not be selected in this session.`,
 		active ? "info" : "warning",
 	);
 }
@@ -236,7 +235,6 @@ async function doRefresh(
 	pi: ExtensionAPI,
 	apiKey: string,
 	ctx: ExtensionContext | null,
-	setDefault: boolean,
 ): Promise<void> {
 	const modelsUrl = getModelsUrl();
 	const baseUrl = getBaseUrl();
@@ -266,8 +264,6 @@ async function doRefresh(
 
 		log("doRefresh: registered", { count: piModels.length });
 		if (ctx) ctx.ui.notify(`Refreshed ${piModels.length} Plexus models`, "info");
-
-		if (setDefault) await trySetDefaultModel(pi, piModels, ctx);
 	} catch (error) {
 		log("doRefresh: failed", { error: String(error) });
 		if (ctx) {
@@ -277,27 +273,4 @@ async function doRefresh(
 			);
 		}
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Set default model
-// ---------------------------------------------------------------------------
-async function trySetDefaultModel(
-	pi: ExtensionAPI,
-	models: ReturnType<typeof descriptorToPiModel>[],
-	ctx?: ExtensionContext | ExtensionCommandContext | null,
-): Promise<void> {
-	const defaultModelId = getDefaultModel();
-	if (!defaultModelId) return;
-
-	const model = models.find((m) => m.id === defaultModelId);
-	if (!model) {
-		log("trySetDefaultModel: model not found", { defaultModelId });
-		return;
-	}
-
-	const registryModel = ctx?.modelRegistry.find(PROVIDER_NAME, defaultModelId) ?? model;
-	// biome-ignore lint/suspicious/noExplicitAny: pi.setModel generic constraint
-	const ok = await pi.setModel(registryModel as any);
-	log("trySetDefaultModel", { defaultModelId, ok });
 }

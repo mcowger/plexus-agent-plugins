@@ -350,9 +350,6 @@ function getBaseUrl() {
   const raw = getRawBaseUrl();
   return raw ? normalizeApiBase(raw) : null;
 }
-function getDefaultModel() {
-  return getConfigSync().defaultModel ?? null;
-}
 
 // src/cache.ts
 import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
@@ -506,10 +503,9 @@ function plexusExtension(pi) {
     log("session_start", { hasApiKey: !!apiKey, baseUrl });
     if (!apiKey || !baseUrl) {
       log("session_start: no auth configured, skipping refresh");
-      await trySetDefaultModel(pi, startupModels, ctx);
       return;
     }
-    await doRefresh(pi, apiKey, ctx, true);
+    await doRefresh(pi, apiKey, ctx);
   });
   pi.registerCommand("plexus", {
     description: "Plexus provider commands: refresh, set-default-model (setup: /login plexus)",
@@ -562,7 +558,7 @@ function createPlexusLoginProvider(pi) {
         throw new Error("Plexus API key is required.");
       await saveBaseUrl(baseUrl);
       callbacks.onProgress?.("Refreshing Plexus models...");
-      await doRefresh(pi, apiKey, null, true);
+      await doRefresh(pi, apiKey, null);
       return {
         access: apiKey,
         refresh: apiKey,
@@ -592,7 +588,7 @@ async function handleRefresh(pi, ctx) {
     return;
   }
   ctx.ui.notify("Refreshing Plexus models\u2026", "info");
-  await doRefresh(pi, apiKey, ctx, true);
+  await doRefresh(pi, apiKey, ctx);
 }
 async function handleSetDefaultModel(pi, ctx, requestedModelId) {
   let modelId = requestedModelId;
@@ -616,9 +612,9 @@ async function handleSetDefaultModel(pi, ctx, requestedModelId) {
   await saveDefaultModel(model.id);
   const registryModel = ctx.modelRegistry.find(PROVIDER_NAME, model.id) ?? model;
   const active = await pi.setModel(registryModel);
-  ctx.ui.notify(active ? `Default Plexus model set to ${model.id}.` : `Default Plexus model set to ${model.id}; it will be selected when Plexus authentication is available.`, active ? "info" : "warning");
+  ctx.ui.notify(active ? `Plexus model selected: ${model.id}.` : `Plexus model ${model.id} was saved but could not be selected in this session.`, active ? "info" : "warning");
 }
-async function doRefresh(pi, apiKey, ctx, setDefault) {
+async function doRefresh(pi, apiKey, ctx) {
   const modelsUrl = getModelsUrl();
   const baseUrl = getBaseUrl();
   if (!modelsUrl || !baseUrl) {
@@ -644,27 +640,12 @@ async function doRefresh(pi, apiKey, ctx, setDefault) {
     log("doRefresh: registered", { count: piModels.length });
     if (ctx)
       ctx.ui.notify(`Refreshed ${piModels.length} Plexus models`, "info");
-    if (setDefault)
-      await trySetDefaultModel(pi, piModels, ctx);
   } catch (error) {
     log("doRefresh: failed", { error: String(error) });
     if (ctx) {
       ctx.ui.notify(`Refresh failed: ${error instanceof Error ? error.message : String(error)}`, "error");
     }
   }
-}
-async function trySetDefaultModel(pi, models, ctx) {
-  const defaultModelId = getDefaultModel();
-  if (!defaultModelId)
-    return;
-  const model = models.find((m) => m.id === defaultModelId);
-  if (!model) {
-    log("trySetDefaultModel: model not found", { defaultModelId });
-    return;
-  }
-  const registryModel = ctx?.modelRegistry.find(PROVIDER_NAME, defaultModelId) ?? model;
-  const ok = await pi.setModel(registryModel);
-  log("trySetDefaultModel", { defaultModelId, ok });
 }
 export {
   plexusExtension as default

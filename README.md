@@ -105,7 +105,7 @@ To force a model refresh:
 /plexus refresh
 ```
 
-Set the model Pi should use by default. With no model ID, Pi opens a selector; you can also pass the exact Plexus model ID directly:
+Select a Plexus model explicitly for the current session. With no model ID, Pi opens a selector; you can also pass the exact Plexus model ID directly. This explicit choice is not applied automatically when starting a new session:
 
 ```
 /plexus set-default-model
@@ -163,7 +163,7 @@ export PLEXUS_API_KEY=your-api-key
 
 ```
 ~/.pi/agent/extensions/plexus/
-  config.json                  # base URL and optional default model (set via /plexus set-default-model)
+  config.json                  # base URL and model preference metadata
   plexus-models-cache.json     # last-fetched model list (startup cache)
   plexus-models-response.json  # raw API response (diagnostics)
   plexus.log                   # extension activity log
@@ -237,7 +237,7 @@ Models with a falsy `id` are skipped. Missing metadata falls back to safe defaul
 
 ## Adapter behavior
 
-- **pi** refreshes on session start and through `/plexus refresh`. It accepts either root URLs or URLs ending in `/v1` and normalizes them before calling Plexus.
+- **pi** refreshes on session start and through `/plexus refresh`, without changing the model selected for the session. It accepts either root URLs or URLs ending in `/v1` and normalizes them before calling Plexus.
 - **OpenCode** seeds the provider from the on-disk cache (or a placeholder model) once, during config loading — OpenCode's `provider.models` hook never fires for custom providers, so there is no live discovery at startup. Run `/plexus-refresh` to force a live fetch and rewrite the cache; because OpenCode has no way to hot-reload a custom provider's model list mid-session, a restart is required afterward to see the refreshed models in the picker.
 - OpenCode models retain their upstream model ID, SDK dialect, release date, and reasoning metadata so OpenCode can generate its native GPT, Claude, Gemini, and OpenAI-compatible variants and apply its current request transforms. DeepSeek models also preserve `reasoning_content` across tool-call turns.
 - OpenCode uses a 250K-token context window when Plexus supplies no context metadata; its output fallback remains 20% of that window.
