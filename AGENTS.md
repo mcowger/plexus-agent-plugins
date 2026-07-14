@@ -28,6 +28,17 @@ Current host packages:
 |---|---|---|
 | `plexus-pi` | [pi](https://github.com/earendil-works/pi) | `@mcowger/pi-plexus` |
 | `plexus-opencode` | [OpenCode](https://opencode.ai) | `@mcowger/opencode-plexus` |
+| `plexus-oh-my-pi` | [Oh My Pi](https://github.com/can1357/oh-my-pi) | `@mcowger/oh-my-pi-plexus` |
+
+`plexus-oh-my-pi` is a fork-specific adapter, not a variant of `plexus-pi`. Oh My Pi is a fork of pi and ships a legacy-extension compat shim, but its native extension surface has diverged enough that a shared package would be fragile long-term:
+
+- Runtime packages are `@oh-my-pi/pi-coding-agent` / `@oh-my-pi/pi-ai`, not `@earendil-works/*`.
+- The `package.json` extension manifest field is `omp` (Oh My Pi only honors `pi` as a legacy fallback).
+- The built-in model registry lives in a separate `@oh-my-pi/pi-catalog` package (`getBundledModel`) rather than `@earendil-works/pi-ai/compat` (`getModel`).
+- Per-model `thinkingLevelMap` was replaced by a structured `thinking` config on `Model`/`ProviderModelConfig`.
+- The agent config directory defaults to `~/.omp/agent` instead of `~/.pi/agent` (profile-aware via `@oh-my-pi/pi-utils`).
+
+Keep `plexus-pi` and `plexus-oh-my-pi` as separate packages so a change in either fork's extension API doesn't silently break the other.
 
 ## Key invariants
 

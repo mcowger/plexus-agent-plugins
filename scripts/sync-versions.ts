@@ -16,6 +16,7 @@ const root = import.meta.dir.replace(/\/scripts$/, "");
 const PACKAGES = [
 	"packages/plexus-pi",
 	"packages/plexus-opencode",
+	"packages/plexus-oh-my-pi",
 ];
 
 const readJson = async (path: string) => JSON.parse(await Bun.file(path).text());

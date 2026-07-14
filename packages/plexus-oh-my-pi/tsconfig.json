@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "types": [],
+    "paths": {
+      "plexus-models": ["../plexus-models/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

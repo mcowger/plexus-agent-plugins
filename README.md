@@ -8,6 +8,7 @@ Exposes models from a self-hosted [Plexus](https://github.com/mcowger/plexus) AI
 |---|---|---|
 | `plexus-pi` | [pi](https://github.com/earendil-works/pi) | `@mcowger/pi-plexus` |
 | `plexus-opencode` | [OpenCode](https://opencode.ai) | `@mcowger/opencode-plexus` |
+| `plexus-oh-my-pi` | [Oh My Pi](https://github.com/can1357/oh-my-pi) | `@mcowger/oh-my-pi-plexus` |
 
 ## Prerequisites
 
@@ -84,6 +85,41 @@ Then reference the built artifact in `opencode.json`:
 
 ---
 
+### Oh My Pi
+
+Oh My Pi is a fork of pi and is **not** wire-compatible with `plexus-pi` in every respect (different runtime packages, extension manifest field, and built-in model registry — see [AGENTS.md](AGENTS.md)), so it has its own adapter package.
+
+#### Option 1 — npm (recommended)
+
+```sh
+cd ~/.omp/agent/extensions
+npm install @mcowger/oh-my-pi-plexus
+```
+
+#### Option 2 — git clone into the extensions directory
+
+```sh
+git clone https://github.com/mcowger/plexus-agent-plugins ~/.omp/agent/extensions/plexus-agent-plugins
+```
+
+#### Option 3 — git clone anywhere + settings.json
+
+```sh
+git clone https://github.com/mcowger/plexus-agent-plugins ~/code/plexus-agent-plugins
+```
+
+Then register the path in `~/.omp/agent/settings.json`:
+
+```json
+{
+  "extensions": [
+    "~/code/plexus-agent-plugins/packages/plexus-oh-my-pi"
+  ]
+}
+```
+
+---
+
 ## First-time setup
 
 ### pi
@@ -113,6 +149,16 @@ Select a Plexus model explicitly for the current session. With no model ID, Pi o
 ```
 
 Use `/login plexus` for setup and `/logout plexus` to remove stored credentials.
+
+### Oh My Pi
+
+Run inside Oh My Pi using the native login flow:
+
+```
+/login plexus
+```
+
+Same prompts and `/plexus refresh` / `/plexus set-default-model` commands as pi (see above) — `plexus-oh-my-pi` mirrors the pi adapter's behavior, adjusted for Oh My Pi's own runtime packages and built-in model registry.
 
 ### OpenCode
 
@@ -171,6 +217,18 @@ export PLEXUS_API_KEY=your-api-key
 
 The API key is stored through pi's own auth storage. `PLEXUS_API_URL` or `PLEXUS_BASE_URL` can be used as an environment override.
 
+### Oh My Pi
+
+```
+~/.omp/agent/extensions/plexus/
+  config.json                  # base URL and model preference metadata
+  plexus-models-cache.json     # last-fetched model list (startup cache)
+  plexus-models-response.json  # raw API response (diagnostics)
+  plexus.log                   # extension activity log
+```
+
+Same layout as pi, rooted under `~/.omp/agent` instead of `~/.pi/agent` since Oh My Pi resolves its own agent directory.
+
 ### OpenCode
 
 ```
@@ -202,6 +260,14 @@ packages/
       cache.ts          # model cache I/O
       log.ts            # append-only log
     package.json        # declares pi.extensions entry point
+  plexus-oh-my-pi/      # Oh My Pi host adapter (fork of pi; own runtime packages + catalog)
+    src/
+      extension.ts      # entry point: commands, session refresh, auth flow
+      mapper.ts         # PlexusModelDescriptor → Oh My Pi ProviderModelConfig
+      config.ts         # base URL / default model config I/O
+      cache.ts          # model cache I/O
+      log.ts            # append-only log
+    package.json        # declares omp.extensions entry point
   plexus-opencode/      # OpenCode plugin adapter
     src/
       plugin.ts         # Plugin export: config hook, provider hook, auth handler
