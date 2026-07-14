@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { getAgentDir } from "@oh-my-pi/pi-coding-agent";
+import { getAgentDir } from "@oh-my-pi/pi-utils";
 import type { PlexusApiResponse, PlexusModelDescriptor } from "../../plexus-models/src/index.ts";
 
 const getCacheDir = (): string => join(getAgentDir(), "extensions", "plexus");

@@ -27,13 +27,14 @@
 	},
 	"peerDependencies": {
 		"@oh-my-pi/pi-ai": ">=16.5.0",
-		"@oh-my-pi/pi-catalog": ">=16.5.0",
-		"@oh-my-pi/pi-coding-agent": ">=16.5.0"
+		"@oh-my-pi/pi-coding-agent": ">=16.5.0",
+		"@oh-my-pi/pi-utils": ">=16.5.0"
 	},
 	"devDependencies": {
 		"@oh-my-pi/pi-ai": "^16.5.0",
 		"@oh-my-pi/pi-catalog": "^16.5.0",
 		"@oh-my-pi/pi-coding-agent": "^16.5.0",
+		"@oh-my-pi/pi-utils": "^16.5.0",
 		"@types/bun": "latest"
 	},
 	"repository": {

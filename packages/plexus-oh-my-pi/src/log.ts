@@ -1,6 +1,6 @@
 import { mkdir, appendFile } from "node:fs/promises";
 import { join } from "node:path";
-import { getAgentDir } from "@oh-my-pi/pi-coding-agent";
+import { getAgentDir } from "@oh-my-pi/pi-utils";
 
 const getCacheDir = (): string => join(getAgentDir(), "extensions", "plexus");
 const getLogPath = (): string => join(getCacheDir(), "plexus.log");
