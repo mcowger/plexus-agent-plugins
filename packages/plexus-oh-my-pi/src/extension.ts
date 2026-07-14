@@ -29,18 +29,26 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ProviderC
 import type { Api, OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai";
 import { adjustBaseUrl, convertDescriptors, fetchPlexusModels } from "../../plexus-models/src/index.ts";
 import {
+	ENV_API_KEY,
 	getBaseUrl,
 	getEnvApiKey,
 	getModelsUrl,
 	saveBaseUrl,
 	saveDefaultModel,
+	setEnvApiKey,
 } from "./config.ts";
 import { readCachedModelsSync, writeCachedModels, writeRawResponse } from "./cache.ts";
 import { log } from "./log.ts";
 import { descriptorToOhMyPiModel } from "./mapper.ts";
 
 const PROVIDER_NAME = "plexus";
-const PROVIDER_API_KEY_TEMPLATE = "${PLEXUS_API_KEY}";
+// Oh My Pi resolves a provider's static `apiKey` field by looking up
+// Bun.env[value] verbatim (see z00 in @oh-my-pi/pi-coding-agent) — it does
+// NOT expand `${VAR}` syntax. The value here must be the bare env var name,
+// and process.env[ENV_API_KEY] must actually hold the real key (see
+// setEnvApiKey in config.ts) or the literal placeholder string gets sent as
+// the Authorization header.
+const PROVIDER_API_KEY_TEMPLATE = ENV_API_KEY;
 const PLEXUS_CREDENTIAL_EXPIRES_AT = 253_402_300_799_000;
 
 type PlexusCredentials = OAuthCredentials & { plexusBaseUrl?: string };
@@ -86,6 +94,7 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 			return;
 		}
 
+		setEnvApiKey(apiKey);
 		await doRefresh(pi, apiKey, ctx);
 	});
 
@@ -153,6 +162,7 @@ function createPlexusLoginProvider(pi: ExtensionAPI): NonNullable<ProviderConfig
 			if (!apiKey) throw new Error("Plexus API key is required.");
 
 			await saveBaseUrl(baseUrl);
+			setEnvApiKey(apiKey);
 			callbacks.onProgress?.("Refreshing Plexus models...");
 			await doRefresh(pi, apiKey, null);
 
@@ -193,6 +203,7 @@ async function handleRefresh(pi: ExtensionAPI, ctx: ExtensionCommandContext): Pr
 		ctx.ui.notify("No Plexus API key configured. Run /login plexus first.", "error");
 		return;
 	}
+	setEnvApiKey(apiKey);
 	ctx.ui.notify("Refreshing Plexus models…", "info");
 	await doRefresh(pi, apiKey, ctx);
 }
