@@ -57,7 +57,7 @@ function resolveModelProvider(
   baseURL: string,
 ): { npm?: string; api?: string } {
   const preferredApi = mapPreferredApi(model.preferred_api)
-  const api = adjustBaseUrl(baseURL, preferredApi)
+  const api = adjustBaseUrl(baseURL, preferredApi, "versioned")
 
   switch (preferredApi) {
     case "anthropic-messages":

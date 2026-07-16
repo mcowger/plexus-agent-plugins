@@ -39,11 +39,11 @@ function mapPreferredApi(raw) {
   }
   return "openai-completions";
 }
-function adjustBaseUrl(baseUrl, preferredApi) {
+function adjustBaseUrl(baseUrl, preferredApi, anthropicBaseStyle = "root") {
   const stripped = baseUrl.replace(/\/+$/, "");
   switch (preferredApi) {
     case "anthropic-messages":
-      return stripped.endsWith("/v1") ? stripped.slice(0, -3) : stripped;
+      return anthropicBaseStyle === "root" && stripped.endsWith("/v1") ? stripped.slice(0, -3) : stripped;
     case "google-generative-ai":
       return stripped.endsWith("/v1") ? `${stripped.slice(0, -3)}/v1beta` : stripped;
     default:
@@ -272,7 +272,7 @@ var DEFAULT_CONTEXT = 250000;
 var PER_TOKEN_TO_PER_MILLION = 1e6;
 function resolveModelProvider(model, baseURL) {
   const preferredApi = mapPreferredApi(model.preferred_api);
-  const api = adjustBaseUrl(baseURL, preferredApi);
+  const api = adjustBaseUrl(baseURL, preferredApi, "versioned");
   switch (preferredApi) {
     case "anthropic-messages":
       return { npm: "@ai-sdk/anthropic", api };

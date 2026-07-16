@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { descriptorToPiModel } from "./mapper.ts";
+import { convertToPiModels, descriptorToPiModel } from "./mapper.ts";
 
 describe("descriptorToPiModel", () => {
 	test("retains provider so Pi can select Plexus defaults", () => {
@@ -22,6 +22,25 @@ describe("descriptorToPiModel", () => {
 		});
 
 		expect(model.provider).toBe("plexus");
+	});
+
+	test("maps each API dialect to the base expected by pi", () => {
+		const models = convertToPiModels(
+			[
+				{ id: "chat", preferred_api: "chat_completions" },
+				{ id: "responses", preferred_api: "responses" },
+				{ id: "messages", preferred_api: "messages" },
+				{ id: "gemini", preferred_api: "gemini" },
+			],
+			"https://plexus.example.com/v1",
+		);
+
+		expect(Object.fromEntries(models.map((model) => [model.id, model.baseUrl]))).toEqual({
+			chat: "https://plexus.example.com/v1",
+			responses: "https://plexus.example.com/v1",
+			messages: "https://plexus.example.com",
+			gemini: "https://plexus.example.com/v1beta",
+		});
 	});
 
 	test("converts descriptor tiers to pi per-million rates", () => {

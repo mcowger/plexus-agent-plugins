@@ -30,7 +30,7 @@ describe("OpenCode model mapping", () => {
     })
     expect(models.claude?.provider).toEqual({
       npm: "@ai-sdk/anthropic",
-      api: "https://plexus.example.com",
+      api: "https://plexus.example.com/v1",
     })
     expect(models.gemini?.provider).toEqual({
       npm: "@ai-sdk/google",

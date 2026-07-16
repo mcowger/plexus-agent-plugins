@@ -34,6 +34,12 @@ describe("adjustBaseUrl", () => {
 			"https://plexus.example.com",
 		);
 	});
+
+	test("preserves /v1 for AI SDK anthropic clients", () => {
+		expect(adjustBaseUrl("https://plexus.example.com/v1", "anthropic-messages", "versioned")).toBe(
+			"https://plexus.example.com/v1",
+		);
+	});
 });
 
 describe("mapPreferredApi", () => {

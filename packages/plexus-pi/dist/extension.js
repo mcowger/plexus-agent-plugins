@@ -23,11 +23,11 @@ function mapPreferredApi(raw) {
   }
   return "openai-completions";
 }
-function adjustBaseUrl(baseUrl, preferredApi) {
+function adjustBaseUrl(baseUrl, preferredApi, anthropicBaseStyle = "root") {
   const stripped = baseUrl.replace(/\/+$/, "");
   switch (preferredApi) {
     case "anthropic-messages":
-      return stripped.endsWith("/v1") ? stripped.slice(0, -3) : stripped;
+      return anthropicBaseStyle === "root" && stripped.endsWith("/v1") ? stripped.slice(0, -3) : stripped;
     case "google-generative-ai":
       return stripped.endsWith("/v1") ? `${stripped.slice(0, -3)}/v1beta` : stripped;
     default:
