@@ -29,8 +29,8 @@
 		"@earendil-works/pi-coding-agent": ">=0.80.8"
 	},
 	"devDependencies": {
-		"@earendil-works/pi-ai": "^0.80.8",
-		"@earendil-works/pi-coding-agent": "^0.80.8",
+		"@earendil-works/pi-ai": "^0.80.9",
+		"@earendil-works/pi-coding-agent": "^0.80.9",
 		"@types/bun": "latest"
 	},
 	"repository": {

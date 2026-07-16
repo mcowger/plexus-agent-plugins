@@ -447,14 +447,29 @@ var PROVIDER_API_KEY_TEMPLATE = "${PLEXUS_API_KEY}";
 var PLEXUS_CREDENTIAL_EXPIRES_AT = 253402300799000;
 var PLACEHOLDER_BASE_URL = "http://localhost/v1";
 var currentModels = [];
-function plexusExtension(pi) {
+async function plexusExtension(pi) {
   const envApiKey = getEnvApiKey();
-  log("startup", { baseUrl: getBaseUrl(), hasEnvApiKey: !!envApiKey });
+  const startupBaseUrl = getBaseUrl();
+  const modelsUrl = getModelsUrl();
+  log("startup", { baseUrl: startupBaseUrl, hasEnvApiKey: !!envApiKey });
+  let startupModels = [];
+  if (envApiKey && modelsUrl && startupBaseUrl && process.env.PI_OFFLINE === undefined) {
+    try {
+      const { models: apiModels, raw } = await fetchPlexusModels(envApiKey, modelsUrl);
+      startupModels = convertDescriptors(apiModels, startupBaseUrl).map(descriptorToPiModel);
+      currentModels = startupModels;
+      await writeRawResponse(raw);
+      log("startup: fetched", { count: startupModels.length });
+    } catch (error) {
+      log("startup: fetch failed", { error: String(error) });
+    }
+  }
   pi.registerProvider(PROVIDER_NAME, {
     api: "openai-completions",
     ...envApiKey ? { apiKey: PROVIDER_API_KEY_TEMPLATE } : {},
     authHeader: true,
-    baseUrl: getBaseUrl() ?? PLACEHOLDER_BASE_URL,
+    baseUrl: startupBaseUrl ?? PLACEHOLDER_BASE_URL,
+    models: startupModels,
     refreshModels: refreshPlexusModels,
     oauth: createPlexusLoginProvider()
   });
@@ -499,20 +514,29 @@ async function refreshPlexusModels(context) {
   const modelsUrl = getModelsUrl();
   const apiKey = credentialApiKey(context.credential) ?? getEnvApiKey() ?? undefined;
   if (!context.allowNetwork || !apiKey || !modelsUrl || !baseUrl) {
+    if (currentModels.length > 0) {
+      await context.store.write({ models: currentModels, checkedAt: Date.now() });
+      return currentModels;
+    }
     const restored = await restoreStoredModels(context);
     if (restored)
       return restored;
     throw new Error(!modelsUrl || !baseUrl ? "Plexus base URL not configured. Run /login plexus first." : "No Plexus API key configured. Run /login plexus first.");
   }
-  const { models: apiModels, raw } = await fetchPlexusModels(apiKey, modelsUrl);
-  const piModels = convertDescriptors(apiModels, baseUrl).map(descriptorToPiModel);
-  await Promise.all([
-    context.store.write({ models: piModels, checkedAt: Date.now() }),
-    writeRawResponse(raw)
-  ]);
-  currentModels = piModels;
-  log("refreshModels: fetched", { count: piModels.length });
-  return piModels;
+  try {
+    const { models: apiModels, raw } = await fetchPlexusModels(apiKey, modelsUrl);
+    const piModels = convertDescriptors(apiModels, baseUrl).map(descriptorToPiModel);
+    await Promise.all([
+      context.store.write({ models: piModels, checkedAt: Date.now() }),
+      writeRawResponse(raw)
+    ]);
+    currentModels = piModels;
+    log("refreshModels: fetched", { count: piModels.length });
+    return piModels;
+  } catch (error) {
+    log("refreshModels: fetch failed", { error: String(error) });
+    throw error;
+  }
 }
 async function restoreStoredModels(context) {
   const stored = await context.store.read();
