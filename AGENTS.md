@@ -98,9 +98,13 @@ The auth flow is the responsibility of each host adapter, but the pattern is con
 2. Extension/plugin prompts for base URL and API key.
 3. Base URL is accepted as either the Plexus root or `/v1` API base, then stored as the canonical root URL in the agent's native config/auth metadata store.
 4. API key is stored in the host agent's own credential store.
-5. On every session start or provider-model hook invocation, the key is retrieved and used to refresh the model list.
+5. The model list is refreshed against the live Plexus server using that key — the trigger is host-specific (see the per-host refresh sections).
 
 The pi adapter registers a native pi login provider so `/login plexus` prompts for the Plexus URL and API key through pi's standard login UI.
+
+## How model refresh works (plexus-pi)
+
+pi's `ModelRuntime` (v0.80.8+) drives discovery through the provider's `refreshModels(context)` hook: at startup, after `/login`, when `/model` opens, and on `pi update --models`. The hook receives the resolved credential (OAuth or the `PLEXUS_API_KEY` env template) and a per-provider `context.store` persisted by pi in `models-store.json`, which replaces the adapter's own model cache. On network/auth failure the runtime re-invokes the hook with `allowNetwork: false`, and the adapter answers from `context.store`. The env-var `apiKey` template is registered only when `PLEXUS_API_KEY` is set, because pi's credential resolution throws on unresolvable templates during refresh while providers without an api-key auth are skipped silently. `/plexus refresh` delegates to `modelRegistry.refresh()`, which re-runs every provider's `refreshModels` hook. The legacy OAuth `modifyModels` projection is kept to rewrite per-model base URLs from the stored credential when a restored catalog predates a base-URL change.
 
 ## Adding a new host
 

@@ -1,6 +1,7 @@
 // pi exposes only its compatibility entrypoint to extensions. Do not import
 // `providers/all`: the extension loader aliases the package root to compat,
 // which makes that subpath resolve relative to compat.js.
+import type { Api } from "@earendil-works/pi-ai";
 import { getModel, type OpenAICompletionsCompat } from "@earendil-works/pi-ai/compat";
 import {
 	convertDescriptors,
@@ -72,7 +73,7 @@ export function descriptorToPiModel(descriptor: PlexusModelDescriptor) {
 	return {
 		id: descriptor.id,
 		name: descriptor.name,
-		api: descriptor.preferredApi,
+		api: descriptor.preferredApi as Api,
 		provider: descriptor.provider,
 		baseUrl: descriptor.baseUrl,
 		reasoning: descriptor.reasoning,

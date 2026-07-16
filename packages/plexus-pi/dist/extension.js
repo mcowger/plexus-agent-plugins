@@ -352,45 +352,11 @@ function getBaseUrl() {
 }
 
 // src/cache.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
 import { mkdir as mkdir2, writeFile as writeFile2 } from "fs/promises";
 import { join as join2 } from "path";
 import { getAgentDir as getAgentDir2 } from "@earendil-works/pi-coding-agent";
 var getCacheDir = () => join2(getAgentDir2(), "extensions", "plexus");
-var getModelsCachePath = () => join2(getCacheDir(), "plexus-models-cache.json");
 var getRawResponsePath = () => join2(getCacheDir(), "plexus-models-response.json");
-function parseCacheData(raw) {
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-      return null;
-    const obj = parsed;
-    if (!Array.isArray(obj["models"]))
-      return null;
-    return {
-      models: obj["models"],
-      timestamp: typeof obj["timestamp"] === "number" ? obj["timestamp"] : 0
-    };
-  } catch {
-    return null;
-  }
-}
-function readCachedModelsSync() {
-  try {
-    const p = getModelsCachePath();
-    if (!existsSync2(p))
-      return null;
-    return parseCacheData(readFileSync2(p, "utf8"));
-  } catch {
-    return null;
-  }
-}
-async function writeCachedModels(models) {
-  await mkdir2(getCacheDir(), { recursive: true });
-  const payload = { models, timestamp: Date.now() };
-  await writeFile2(getModelsCachePath(), `${JSON.stringify(payload, null, 2)}
-`, "utf8");
-}
 async function writeRawResponse(data) {
   await mkdir2(getCacheDir(), { recursive: true });
   await writeFile2(getRawResponsePath(), `${JSON.stringify(data, null, 2)}
@@ -479,33 +445,18 @@ function descriptorToPiModel(descriptor) {
 var PROVIDER_NAME = "plexus";
 var PROVIDER_API_KEY_TEMPLATE = "${PLEXUS_API_KEY}";
 var PLEXUS_CREDENTIAL_EXPIRES_AT = 253402300799000;
+var PLACEHOLDER_BASE_URL = "http://localhost/v1";
 var currentModels = [];
 function plexusExtension(pi) {
-  const cached = readCachedModelsSync();
-  const startupBaseUrl = getBaseUrl() ?? "http://localhost/v1";
-  const startupModels = cached?.models.map(descriptorToPiModel) ?? [];
-  log("startup", {
-    cachedModelCount: startupModels.length,
-    startupBaseUrl
-  });
+  const envApiKey = getEnvApiKey();
+  log("startup", { baseUrl: getBaseUrl(), hasEnvApiKey: !!envApiKey });
   pi.registerProvider(PROVIDER_NAME, {
     api: "openai-completions",
-    apiKey: PROVIDER_API_KEY_TEMPLATE,
+    ...envApiKey ? { apiKey: PROVIDER_API_KEY_TEMPLATE } : {},
     authHeader: true,
-    baseUrl: startupBaseUrl,
-    models: startupModels,
-    oauth: createPlexusLoginProvider(pi)
-  });
-  currentModels = startupModels;
-  pi.on("session_start", async (_event, ctx) => {
-    const apiKey = await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME) ?? getEnvApiKey();
-    const baseUrl = getBaseUrl();
-    log("session_start", { hasApiKey: !!apiKey, baseUrl });
-    if (!apiKey || !baseUrl) {
-      log("session_start: no auth configured, skipping refresh");
-      return;
-    }
-    await doRefresh(pi, apiKey, ctx);
+    baseUrl: getBaseUrl() ?? PLACEHOLDER_BASE_URL,
+    refreshModels: refreshPlexusModels,
+    oauth: createPlexusLoginProvider()
   });
   pi.registerCommand("plexus", {
     description: "Plexus provider commands: refresh, set-default-model (setup: /login plexus)",
@@ -532,7 +483,7 @@ function plexusExtension(pi) {
       const trimmed = args.trim();
       const sub = trimmed.toLowerCase();
       if (sub === "refresh" || sub === "") {
-        await handleRefresh(pi, ctx);
+        await handleRefresh(ctx);
         return;
       }
       if (sub === "set-default-model" || sub.startsWith("set-default-model ")) {
@@ -543,7 +494,43 @@ function plexusExtension(pi) {
     }
   });
 }
-function createPlexusLoginProvider(pi) {
+async function refreshPlexusModels(context) {
+  const baseUrl = getBaseUrl();
+  const modelsUrl = getModelsUrl();
+  const apiKey = credentialApiKey(context.credential) ?? getEnvApiKey() ?? undefined;
+  if (!context.allowNetwork || !apiKey || !modelsUrl || !baseUrl) {
+    const restored = await restoreStoredModels(context);
+    if (restored)
+      return restored;
+    throw new Error(!modelsUrl || !baseUrl ? "Plexus base URL not configured. Run /login plexus first." : "No Plexus API key configured. Run /login plexus first.");
+  }
+  const { models: apiModels, raw } = await fetchPlexusModels(apiKey, modelsUrl);
+  const piModels = convertDescriptors(apiModels, baseUrl).map(descriptorToPiModel);
+  await Promise.all([
+    context.store.write({ models: piModels, checkedAt: Date.now() }),
+    writeRawResponse(raw)
+  ]);
+  currentModels = piModels;
+  log("refreshModels: fetched", { count: piModels.length });
+  return piModels;
+}
+async function restoreStoredModels(context) {
+  const stored = await context.store.read();
+  if (!stored || stored.models.length === 0)
+    return;
+  const models = stored.models;
+  currentModels = models;
+  log("refreshModels: restored from store", { count: models.length });
+  return models;
+}
+function credentialApiKey(credential) {
+  if (!credential)
+    return;
+  if (credential.type === "api_key")
+    return credential.key || undefined;
+  return String(credential.access || credential.refresh || "") || undefined;
+}
+function createPlexusLoginProvider() {
   return {
     name: "Plexus",
     async login(callbacks) {
@@ -557,8 +544,6 @@ function createPlexusLoginProvider(pi) {
       if (!apiKey)
         throw new Error("Plexus API key is required.");
       await saveBaseUrl(baseUrl);
-      callbacks.onProgress?.("Refreshing Plexus models...");
-      await doRefresh(pi, apiKey, null);
       return {
         access: apiKey,
         refresh: apiKey,
@@ -581,14 +566,15 @@ function createPlexusLoginProvider(pi) {
     }
   };
 }
-async function handleRefresh(pi, ctx) {
-  const apiKey = await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME) ?? getEnvApiKey();
+async function handleRefresh(ctx) {
+  const apiKey = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER_NAME);
   if (!apiKey) {
     ctx.ui.notify("No Plexus API key configured. Run /login plexus first.", "error");
     return;
   }
   ctx.ui.notify("Refreshing Plexus models\u2026", "info");
-  await doRefresh(pi, apiKey, ctx);
+  await ctx.modelRegistry.refresh();
+  ctx.ui.notify(currentModels.length > 0 ? `Refreshed ${currentModels.length} Plexus models` : "Refresh finished but no Plexus models are available. Check the Plexus server and /login plexus.", currentModels.length > 0 ? "info" : "warning");
 }
 async function handleSetDefaultModel(pi, ctx, requestedModelId) {
   let modelId = requestedModelId;
@@ -613,39 +599,6 @@ async function handleSetDefaultModel(pi, ctx, requestedModelId) {
   const registryModel = ctx.modelRegistry.find(PROVIDER_NAME, model.id) ?? model;
   const active = await pi.setModel(registryModel);
   ctx.ui.notify(active ? `Plexus model selected: ${model.id}.` : `Plexus model ${model.id} was saved but could not be selected in this session.`, active ? "info" : "warning");
-}
-async function doRefresh(pi, apiKey, ctx) {
-  const modelsUrl = getModelsUrl();
-  const baseUrl = getBaseUrl();
-  if (!modelsUrl || !baseUrl) {
-    if (ctx)
-      ctx.ui.notify("Plexus base URL not configured. Run /login plexus first.", "warning");
-    log("doRefresh: no base URL configured");
-    return;
-  }
-  try {
-    const { models: apiModels, raw } = await fetchPlexusModels(apiKey, modelsUrl);
-    const descriptors = convertDescriptors(apiModels, baseUrl);
-    const piModels = descriptors.map(descriptorToPiModel);
-    await Promise.all([writeCachedModels(descriptors), writeRawResponse(raw)]);
-    currentModels = piModels;
-    pi.registerProvider(PROVIDER_NAME, {
-      api: "openai-completions",
-      apiKey: PROVIDER_API_KEY_TEMPLATE,
-      authHeader: true,
-      baseUrl,
-      models: piModels,
-      oauth: createPlexusLoginProvider(pi)
-    });
-    log("doRefresh: registered", { count: piModels.length });
-    if (ctx)
-      ctx.ui.notify(`Refreshed ${piModels.length} Plexus models`, "info");
-  } catch (error) {
-    log("doRefresh: failed", { error: String(error) });
-    if (ctx) {
-      ctx.ui.notify(`Refresh failed: ${error instanceof Error ? error.message : String(error)}`, "error");
-    }
-  }
 }
 export {
   plexusExtension as default

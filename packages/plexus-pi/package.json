@@ -25,12 +25,12 @@
 		"build": "bun run build.ts"
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-ai": ">=0.80.6",
-		"@earendil-works/pi-coding-agent": ">=0.80.6"
+		"@earendil-works/pi-ai": ">=0.80.8",
+		"@earendil-works/pi-coding-agent": ">=0.80.8"
 	},
 	"devDependencies": {
-		"@earendil-works/pi-ai": "^0.80.6",
-		"@earendil-works/pi-coding-agent": "^0.80.6",
+		"@earendil-works/pi-ai": "^0.80.8",
+		"@earendil-works/pi-coding-agent": "^0.80.8",
 		"@types/bun": "latest"
 	},
 	"repository": {
