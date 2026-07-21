@@ -4,11 +4,10 @@
  * Auth: API key is stored by pi's credential store (persisted in auth.json).
  *       It may also be pre-seeded via the PLEXUS_API_KEY env var.
  *
- * Model discovery: the async factory fetches the catalog at startup when
- *       PLEXUS_API_KEY is set (pi registers extension providers only after its
- *       initial network refresh, so the refreshModels hook runs offline at
- *       startup). Ongoing refreshes go through the refreshModels hook
- *       (/login, /model, /plexus refresh), persisted in pi's models-store.json.
+ * Model discovery: Pi 0.81+ registers extension providers before its deferred
+ *       startup network refresh. Discovery therefore goes through
+ *       refreshModels for startup, /login, /model, and /plexus refresh, and is
+ *       persisted in pi's models-store.json.
  *
  * Commands:
  *   /login plexus   — set base URL and API key using pi's native login UI
@@ -52,29 +51,11 @@ type PlexusCredentials = OAuthCredentials & { plexusBaseUrl?: string };
 // Keep the current model list in module scope so setDefaultModel can reference it.
 let currentModels: ProviderModelConfig[] = [];
 
-export default async function plexusExtension(pi: ExtensionAPI): Promise<void> {
+export default function plexusExtension(pi: ExtensionAPI): void {
 	const envApiKey = getEnvApiKey();
 	const startupBaseUrl = getBaseUrl();
-	const modelsUrl = getModelsUrl();
 
 	log("startup", { baseUrl: startupBaseUrl, hasEnvApiKey: !!envApiKey });
-
-	// pi registers extension providers after the runtime's initial network
-	// refresh, so refreshModels only ever runs offline at startup. Fetch here
-	// instead (pi awaits async factories) when credentials are available
-	// without the stored OAuth credential, i.e. via the env var.
-	let startupModels: ProviderModelConfig[] = [];
-	if (envApiKey && modelsUrl && startupBaseUrl && process.env.PI_OFFLINE === undefined) {
-		try {
-			const { models: apiModels, raw } = await fetchPlexusModels(envApiKey, modelsUrl);
-			startupModels = convertDescriptors(apiModels, startupBaseUrl).map(descriptorToPiModel);
-			currentModels = startupModels;
-			await writeRawResponse(raw);
-			log("startup: fetched", { count: startupModels.length });
-		} catch (error) {
-			log("startup: fetch failed", { error: String(error) });
-		}
-	}
 
 	pi.registerProvider(PROVIDER_NAME, {
 		api: "openai-completions" as Api,
@@ -84,7 +65,7 @@ export default async function plexusExtension(pi: ExtensionAPI): Promise<void> {
 		...(envApiKey ? { apiKey: PROVIDER_API_KEY_TEMPLATE } : {}),
 		authHeader: true,
 		baseUrl: startupBaseUrl ?? PLACEHOLDER_BASE_URL,
-		models: startupModels,
+		models: [],
 		refreshModels: refreshPlexusModels,
 		oauth: createPlexusLoginProvider(),
 	});
@@ -148,10 +129,8 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 	const apiKey = credentialApiKey(context.credential) ?? getEnvApiKey() ?? undefined;
 
 	if (!context.allowNetwork || !apiKey || !modelsUrl || !baseUrl) {
-		// Prefer models fetched earlier this session (startup or a prior
-		// network refresh); they are always at least as fresh as the store.
-		// Persist them so future offline sessions can restore them — the
-		// startup factory fetch has no store access of its own.
+		// Prefer models fetched earlier this session; they are always at least
+		// as fresh as the store. Persist them for future offline sessions.
 		if (currentModels.length > 0) {
 			await context.store.write({ models: currentModels as unknown as Model<Api>[], checkedAt: Date.now() });
 			return currentModels;

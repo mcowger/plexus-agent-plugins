@@ -13,6 +13,7 @@ Exposes models from a self-hosted [Plexus](https://github.com/mcowger/plexus) AI
 ## Prerequisites
 
 - A running Plexus instance
+- pi 0.81.0 or later (for `plexus-pi`)
 
 ## Installation
 

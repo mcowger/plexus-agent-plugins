@@ -447,29 +447,16 @@ var PROVIDER_API_KEY_TEMPLATE = "${PLEXUS_API_KEY}";
 var PLEXUS_CREDENTIAL_EXPIRES_AT = 253402300799000;
 var PLACEHOLDER_BASE_URL = "http://localhost/v1";
 var currentModels = [];
-async function plexusExtension(pi) {
+function plexusExtension(pi) {
   const envApiKey = getEnvApiKey();
   const startupBaseUrl = getBaseUrl();
-  const modelsUrl = getModelsUrl();
   log("startup", { baseUrl: startupBaseUrl, hasEnvApiKey: !!envApiKey });
-  let startupModels = [];
-  if (envApiKey && modelsUrl && startupBaseUrl && process.env.PI_OFFLINE === undefined) {
-    try {
-      const { models: apiModels, raw } = await fetchPlexusModels(envApiKey, modelsUrl);
-      startupModels = convertDescriptors(apiModels, startupBaseUrl).map(descriptorToPiModel);
-      currentModels = startupModels;
-      await writeRawResponse(raw);
-      log("startup: fetched", { count: startupModels.length });
-    } catch (error) {
-      log("startup: fetch failed", { error: String(error) });
-    }
-  }
   pi.registerProvider(PROVIDER_NAME, {
     api: "openai-completions",
     ...envApiKey ? { apiKey: PROVIDER_API_KEY_TEMPLATE } : {},
     authHeader: true,
     baseUrl: startupBaseUrl ?? PLACEHOLDER_BASE_URL,
-    models: startupModels,
+    models: [],
     refreshModels: refreshPlexusModels,
     oauth: createPlexusLoginProvider()
   });
