@@ -515,6 +515,43 @@ function createGeminiToolCallIdFixer() {
   return { onContext, onBeforeProviderRequest };
 }
 
+// src/gemini-malformed-retry.ts
+var MALFORMED_LEAK_PATTERN = /(?:print\()?call:\s*default_api[.:]|default_api\.\w+\s*\(/;
+var MALFORMED_DIAGNOSTIC_PATTERN = /\bmalformed[\s_-]?function[\s_-]?call\b/i;
+var NORMALIZED_PREFIX = "MALFORMED_FUNCTION_CALL:";
+var NORMALIZED_MESSAGE = `${NORMALIZED_PREFIX} Gemini emitted a malformed tool call (its internal ` + `function-call syntax leaked as text). This is a transient model failure \u2014 ` + `please retry your request.`;
+function hasLeakedFunctionCall(content) {
+  if (!Array.isArray(content))
+    return false;
+  for (const block of content) {
+    if (block?.type === "text" && typeof block.text === "string" && MALFORMED_LEAK_PATTERN.test(block.text)) {
+      return true;
+    }
+  }
+  return false;
+}
+function hasToolCall(content) {
+  return Array.isArray(content) && content.some((block) => block?.type === "toolCall");
+}
+function normalizeMalformedFunctionCall(message, providerName) {
+  if (!message || message.role !== "assistant" || message.provider !== providerName || message.stopReason !== "error") {
+    return;
+  }
+  if (typeof message.errorMessage === "string" && message.errorMessage.startsWith(NORMALIZED_PREFIX)) {
+    return;
+  }
+  if (hasToolCall(message.content))
+    return;
+  const via = hasLeakedFunctionCall(message.content) ? "leak" : typeof message.errorMessage === "string" && MALFORMED_DIAGNOSTIC_PATTERN.test(message.errorMessage) ? "diagnostic" : undefined;
+  if (!via)
+    return;
+  log("gemini-malformed-retry: retagged MALFORMED_FUNCTION_CALL for retry", {
+    model: message.model,
+    via
+  });
+  return { message: { ...message, errorMessage: NORMALIZED_MESSAGE } };
+}
+
 // src/extension.ts
 var PROVIDER_NAME = "plexus";
 var PROVIDER_API_KEY_TEMPLATE = "${PLEXUS_API_KEY}";
@@ -532,6 +569,7 @@ function plexusExtension(pi) {
   pi.on("before_provider_request", (event) => {
     return geminiToolCallIdFixer.onBeforeProviderRequest(event.payload);
   });
+  pi.on("message_end", (event) => normalizeMalformedFunctionCall(event.message, PROVIDER_NAME));
   pi.registerProvider(PROVIDER_NAME, {
     api: "openai-completions",
     ...envApiKey ? { apiKey: PROVIDER_API_KEY_TEMPLATE } : {},

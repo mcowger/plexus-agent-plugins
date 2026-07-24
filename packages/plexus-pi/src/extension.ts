@@ -41,6 +41,7 @@ import { writeRawResponse } from "./cache.ts";
 import { log } from "./log.ts";
 import { descriptorToPiModel } from "./mapper.ts";
 import { createGeminiToolCallIdFixer } from "./gemini-toolcall-id.ts";
+import { normalizeMalformedFunctionCall } from "./gemini-malformed-retry.ts";
 
 const PROVIDER_NAME = "plexus";
 const PROVIDER_API_KEY_TEMPLATE = "${PLEXUS_API_KEY}";
@@ -66,6 +67,12 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	pi.on("before_provider_request", (event) => {
 		return geminiToolCallIdFixer.onBeforeProviderRequest(event.payload);
 	});
+
+	// Retag Gemini MALFORMED_FUNCTION_CALL failures (which pi flattens to a generic
+	// non-retryable "An unknown error occurred") so pi's native agent-turn retry
+	// recognizes them as transient and retries. Scoped to this provider's own
+	// error turns; pi drops the failed message before retrying, so no duplication.
+	pi.on("message_end", (event) => normalizeMalformedFunctionCall(event.message, PROVIDER_NAME));
 
 	pi.registerProvider(PROVIDER_NAME, {
 		api: "openai-completions" as Api,
