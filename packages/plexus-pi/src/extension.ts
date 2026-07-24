@@ -40,6 +40,7 @@ import {
 import { writeRawResponse } from "./cache.ts";
 import { log } from "./log.ts";
 import { descriptorToPiModel } from "./mapper.ts";
+import { createGeminiToolCallIdFixer } from "./gemini-toolcall-id.ts";
 
 const PROVIDER_NAME = "plexus";
 const PROVIDER_API_KEY_TEMPLATE = "${PLEXUS_API_KEY}";
@@ -56,6 +57,15 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	const startupBaseUrl = getBaseUrl();
 
 	log("startup", { baseUrl: startupBaseUrl, hasEnvApiKey: !!envApiKey });
+
+	// Restore Gemini 3.x tool-call correlation IDs that pi's serializer drops.
+	const geminiToolCallIdFixer = createGeminiToolCallIdFixer();
+	pi.on("context", (event) => {
+		geminiToolCallIdFixer.onContext(event.messages);
+	});
+	pi.on("before_provider_request", (event) => {
+		return geminiToolCallIdFixer.onBeforeProviderRequest(event.payload);
+	});
 
 	pi.registerProvider(PROVIDER_NAME, {
 		api: "openai-completions" as Api,

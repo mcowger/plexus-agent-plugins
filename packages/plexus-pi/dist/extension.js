@@ -441,6 +441,80 @@ function descriptorToPiModel(descriptor) {
   };
 }
 
+// src/gemini-toolcall-id.ts
+var GEMINI_3_PATTERN = /gemini-(?:live-)?3(?:\.\d+)?[-.]/i;
+var GEMINI_3_ALIASES = new Set(["gemini-flash-latest", "gemini-flash-lite-latest"]);
+function isGemini3Model(modelId) {
+  return GEMINI_3_ALIASES.has(modelId) || GEMINI_3_PATTERN.test(modelId);
+}
+function createGeminiToolCallIdFixer() {
+  let functionCallIds = [];
+  let functionResponseIds = [];
+  function onContext(messages) {
+    const calls = [];
+    const responses = [];
+    for (const msg of messages) {
+      if (msg.role === "assistant" && Array.isArray(msg.content)) {
+        for (const block of msg.content) {
+          if (block?.type === "toolCall" && typeof block.id === "string") {
+            calls.push(block.id);
+          }
+        }
+      } else if (msg.role === "toolResult" && typeof msg.toolCallId === "string") {
+        responses.push({ id: msg.toolCallId, name: msg.toolName ?? "" });
+      }
+    }
+    functionCallIds = calls;
+    functionResponseIds = responses;
+  }
+  function onBeforeProviderRequest(payload) {
+    const google = payload;
+    if (!google || typeof google !== "object" || !Array.isArray(google.contents)) {
+      return payload;
+    }
+    if (typeof google.model !== "string" || !isGemini3Model(google.model)) {
+      return payload;
+    }
+    let callCursor = 0;
+    let responseCursor = 0;
+    let missing = 0;
+    for (const content of google.contents) {
+      if (!Array.isArray(content?.parts))
+        continue;
+      for (const part of content.parts) {
+        if (part.functionCall && part.functionCall.id === undefined) {
+          const id = functionCallIds[callCursor++];
+          if (id !== undefined) {
+            part.functionCall.id = id;
+          } else {
+            missing++;
+          }
+        } else if (part.functionResponse && part.functionResponse.id === undefined) {
+          const entry = functionResponseIds[responseCursor++];
+          if (entry !== undefined) {
+            part.functionResponse.id = entry.id;
+            if (part.functionResponse.name === undefined && entry.name) {
+              part.functionResponse.name = entry.name;
+            }
+          } else {
+            missing++;
+          }
+        }
+      }
+    }
+    if (missing > 0) {
+      log("gemini-toolcall-id: fewer captured ids than parts", {
+        model: google.model,
+        missing,
+        capturedCalls: functionCallIds.length,
+        capturedResponses: functionResponseIds.length
+      });
+    }
+    return payload;
+  }
+  return { onContext, onBeforeProviderRequest };
+}
+
 // src/extension.ts
 var PROVIDER_NAME = "plexus";
 var PROVIDER_API_KEY_TEMPLATE = "${PLEXUS_API_KEY}";
@@ -451,6 +525,13 @@ function plexusExtension(pi) {
   const envApiKey = getEnvApiKey();
   const startupBaseUrl = getBaseUrl();
   log("startup", { baseUrl: startupBaseUrl, hasEnvApiKey: !!envApiKey });
+  const geminiToolCallIdFixer = createGeminiToolCallIdFixer();
+  pi.on("context", (event) => {
+    geminiToolCallIdFixer.onContext(event.messages);
+  });
+  pi.on("before_provider_request", (event) => {
+    return geminiToolCallIdFixer.onBeforeProviderRequest(event.payload);
+  });
   pi.registerProvider(PROVIDER_NAME, {
     api: "openai-completions",
     ...envApiKey ? { apiKey: PROVIDER_API_KEY_TEMPLATE } : {},

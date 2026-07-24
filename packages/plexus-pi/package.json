@@ -1,6 +1,6 @@
 {
 	"name": "@mcowger/pi-plexus",
-	"version": "1.3.5",
+	"version": "1.3.6",
 	"description": "Plexus AI proxy plugin for the pi coding agent",
 	"type": "module",
 	"files": [
