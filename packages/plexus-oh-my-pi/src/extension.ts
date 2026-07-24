@@ -26,8 +26,8 @@
 
 // Type-only — erased at runtime, never resolved by the module loader
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ProviderConfig } from "@oh-my-pi/pi-coding-agent";
-import type { Api, OAuthCredentials, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai";
-import { adjustBaseUrl, convertDescriptors, fetchPlexusModels } from "../../plexus-models/src/index.ts";
+import type { Api, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai";
+import { convertDescriptors, fetchPlexusModels } from "../../plexus-models/src/index.ts";
 import {
 	ENV_API_KEY,
 	getBaseUrl,
@@ -35,24 +35,17 @@ import {
 	getModelsUrl,
 	saveBaseUrl,
 	saveDefaultModel,
-	setEnvApiKey,
 } from "./config.ts";
 import { readCachedModelsSync, writeCachedModels, writeRawResponse } from "./cache.ts";
 import { log } from "./log.ts";
 import { descriptorToOhMyPiModel } from "./mapper.ts";
 
 const PROVIDER_NAME = "plexus";
-// Oh My Pi resolves a provider's static `apiKey` field by looking up
-// Bun.env[value] verbatim (see z00 in @oh-my-pi/pi-coding-agent) — it does
-// NOT expand `${VAR}` syntax. The value here must be the bare env var name,
-// and process.env[ENV_API_KEY] must actually hold the real key (see
-// setEnvApiKey in config.ts) or the literal placeholder string gets sent as
-// the Authorization header.
-const PROVIDER_API_KEY_TEMPLATE = ENV_API_KEY;
-const PLEXUS_CREDENTIAL_EXPIRES_AT = 253_402_300_799_000;
-
-type PlexusCredentials = OAuthCredentials & { plexusBaseUrl?: string };
-
+export function getProviderApiKeyConfig(): Pick<ProviderConfig, "apiKey" | "authHeader"> {
+	// OMP resolves provider env references through Bun.env and treats an
+	// unknown name as a literal key. Check the same source before registering it.
+	return Bun.env[ENV_API_KEY]?.trim() ? { apiKey: ENV_API_KEY, authHeader: true } : {};
+}
 // Keep the current model list in module scope so setDefaultModel can reference it.
 let currentModels: ReturnType<typeof descriptorToOhMyPiModel>[] = [];
 
@@ -72,8 +65,7 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 
 	pi.registerProvider(PROVIDER_NAME, {
 		api: "openai-completions" as Api,
-		apiKey: PROVIDER_API_KEY_TEMPLATE,
-		authHeader: true,
+		...getProviderApiKeyConfig(),
 		baseUrl: startupBaseUrl,
 		models: startupModels,
 		oauth: createPlexusLoginProvider(pi),
@@ -94,7 +86,6 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 			return;
 		}
 
-		setEnvApiKey(apiKey);
 		await doRefresh(pi, apiKey, ctx);
 	});
 
@@ -151,7 +142,7 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 function createPlexusLoginProvider(pi: ExtensionAPI): NonNullable<ProviderConfig["oauth"]> {
 	return {
 		name: "Plexus",
-		async login(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
+		async login(callbacks: OAuthLoginCallbacks): Promise<string> {
 			const baseUrl = (await callbacks.onPrompt({
 				message: "Plexus base URL",
 				placeholder: "https://plexus.example.com",
@@ -162,34 +153,10 @@ function createPlexusLoginProvider(pi: ExtensionAPI): NonNullable<ProviderConfig
 			if (!apiKey) throw new Error("Plexus API key is required.");
 
 			await saveBaseUrl(baseUrl);
-			setEnvApiKey(apiKey);
 			callbacks.onProgress?.("Refreshing Plexus models...");
 			await doRefresh(pi, apiKey, null);
 
-			return {
-				access: apiKey,
-				refresh: apiKey,
-				expires: PLEXUS_CREDENTIAL_EXPIRES_AT,
-				plexusBaseUrl: baseUrl,
-			} satisfies PlexusCredentials;
-		},
-		async refreshToken(credentials: OAuthCredentials): Promise<OAuthCredentials> {
-			return { ...credentials, expires: PLEXUS_CREDENTIAL_EXPIRES_AT };
-		},
-		getApiKey(credentials: OAuthCredentials): string {
-			return String(credentials.access || credentials.refresh || "");
-		},
-		modifyModels(models, credentials) {
-			const baseUrl = (credentials as PlexusCredentials).plexusBaseUrl;
-			if (!baseUrl) return models;
-			const apiBase = baseUrl.trim().replace(/\/+$/, "").endsWith("/v1")
-				? baseUrl.trim().replace(/\/+$/, "")
-				: `${baseUrl.trim().replace(/\/+$/, "")}/v1`;
-			return models.map((model) => (
-				model.provider === PROVIDER_NAME
-					? { ...model, baseUrl: adjustBaseUrl(apiBase, model.api) }
-					: model
-			));
+			return apiKey;
 		},
 	};
 }
@@ -203,7 +170,6 @@ async function handleRefresh(pi: ExtensionAPI, ctx: ExtensionCommandContext): Pr
 		ctx.ui.notify("No Plexus API key configured. Run /login plexus first.", "error");
 		return;
 	}
-	setEnvApiKey(apiKey);
 	ctx.ui.notify("Refreshing Plexus models…", "info");
 	await doRefresh(pi, apiKey, ctx);
 }
@@ -281,8 +247,7 @@ async function doRefresh(
 		currentModels = ohMyPiModels;
 		pi.registerProvider(PROVIDER_NAME, {
 			api: "openai-completions" as Api,
-			apiKey: PROVIDER_API_KEY_TEMPLATE,
-			authHeader: true,
+			...getProviderApiKeyConfig(),
 			baseUrl,
 			models: ohMyPiModels,
 			oauth: createPlexusLoginProvider(pi),

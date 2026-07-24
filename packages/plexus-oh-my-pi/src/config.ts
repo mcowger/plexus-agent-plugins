@@ -146,13 +146,6 @@ export function getEnvApiKey(): string | null {
 	return resolveStringOption(process.env[ENV_API_KEY]) ?? null;
 }
 
-/** Oh My Pi resolves a provider's static apiKey field via process.env lookup
- *  by bare var name. Call this whenever the real key becomes known (login,
- *  session_start) so that lookup returns the actual secret. */
-export function setEnvApiKey(apiKey: string): void {
-	process.env[ENV_API_KEY] = apiKey;
-}
-
 /** Returns <baseUrl>/v1/models, or null. */
 export function getModelsUrl(): string | null {
 	const raw = getRawBaseUrl();
