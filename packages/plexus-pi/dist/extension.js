@@ -307,22 +307,28 @@ function detectOpenAICompletionsCompat(providerName, baseUrl) {
   return compat;
 }
 var DEFAULT_MODELS_FETCH_TIMEOUT_MS = 1e4;
-async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_FETCH_TIMEOUT_MS) {
+async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_FETCH_TIMEOUT_MS, etag) {
   const controller = new AbortController;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const headers = { Accept: "application/json" };
     if (apiKey)
       headers.Authorization = `Bearer ${apiKey}`;
+    if (etag)
+      headers["If-None-Match"] = etag;
     const res = await fetch(modelsUrl, {
       headers,
       signal: controller.signal
     });
+    if (res.status === 304) {
+      return { models: [], notModified: true };
+    }
     if (!res.ok) {
       throw new Error(`Plexus models fetch failed: ${res.status} ${res.statusText}`);
     }
     const raw = await res.json();
-    return { models: raw.data ?? [], raw };
+    const responseEtag = res.headers.get("etag") ?? undefined;
+    return { models: raw.data ?? [], raw, etag: responseEtag };
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       throw new Error(`Plexus models fetch timed out after ${timeoutMs}ms`);
@@ -464,15 +470,35 @@ function getSuppressedModels() {
 }
 
 // src/cache.ts
-import { mkdir as mkdir2, writeFile as writeFile2 } from "fs/promises";
+import { mkdir as mkdir2, writeFile as writeFile2, readFile } from "fs/promises";
+import { existsSync as existsSync2 } from "fs";
 import { join as join2 } from "path";
 import { getAgentDir as getAgentDir2 } from "@earendil-works/pi-coding-agent";
 var getCacheDir = () => join2(getAgentDir2(), "extensions", "plexus");
 var getRawResponsePath = () => join2(getCacheDir(), "plexus-models-response.json");
+var getEtagPath = () => join2(getCacheDir(), "plexus-models-etag.txt");
 async function writeRawResponse(data) {
   await mkdir2(getCacheDir(), { recursive: true });
   await writeFile2(getRawResponsePath(), `${JSON.stringify(data, null, 2)}
 `, "utf8");
+}
+async function readCachedEtag() {
+  try {
+    const p = getEtagPath();
+    if (!existsSync2(p))
+      return;
+    return (await readFile(p, "utf8")).trim();
+  } catch {
+    return;
+  }
+}
+async function writeCachedEtag(etag) {
+  if (!etag)
+    return;
+  try {
+    await mkdir2(getCacheDir(), { recursive: true });
+    await writeFile2(getEtagPath(), etag, "utf8");
+  } catch {}
 }
 
 // src/log.ts
@@ -732,6 +758,7 @@ async function refreshPlexusModels(context) {
   const modelsUrl = getModelsUrl();
   const apiKey = credentialApiKey(context.credential) ?? getEnvApiKey() ?? undefined;
   const suppress = getSuppressedModels();
+  const storedEtag = await readCachedEtag();
   if (!context.allowNetwork || !apiKey || !modelsUrl || !baseUrl) {
     if (currentModels.length > 0) {
       const filteredCurrent = currentModels.filter((m) => !isModelSuppressed({ id: m.id, name: m.name }, suppress));
@@ -745,11 +772,18 @@ async function refreshPlexusModels(context) {
     throw new Error(!modelsUrl || !baseUrl ? "Plexus base URL not configured. Run /login plexus first." : "No Plexus API key configured. Run /login plexus first.");
   }
   try {
-    const { models: apiModels, raw } = await fetchPlexusModels(apiKey, modelsUrl);
+    const { models: apiModels, raw, etag, notModified } = await fetchPlexusModels(apiKey, modelsUrl, undefined, storedEtag);
+    if (notModified) {
+      log("refreshModels: not modified", { etag: storedEtag });
+      const restored = await restoreStoredModels(context);
+      if (restored)
+        return restored;
+    }
     const piModels = convertDescriptors(apiModels, baseUrl, suppress).map(descriptorToPiModel);
     await Promise.all([
       context.store.write({ models: piModels, checkedAt: Date.now() }),
-      writeRawResponse(raw)
+      writeCachedEtag(etag),
+      raw ? writeRawResponse(raw) : Promise.resolve()
     ]);
     currentModels = piModels;
     log("refreshModels: fetched", { count: piModels.length });

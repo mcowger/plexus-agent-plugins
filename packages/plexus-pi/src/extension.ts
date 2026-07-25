@@ -38,7 +38,7 @@ import {
 	saveBaseUrl,
 	saveDefaultModel,
 } from "./config.ts";
-import { writeRawResponse } from "./cache.ts";
+import { readCachedEtag, writeCachedEtag, writeRawResponse } from "./cache.ts";
 import { log } from "./log.ts";
 import { descriptorToPiModel } from "./mapper.ts";
 import { createGeminiToolCallIdFixer } from "./gemini-toolcall-id.ts";
@@ -147,6 +147,8 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 	const apiKey = credentialApiKey(context.credential) ?? getEnvApiKey() ?? undefined;
 	const suppress = getSuppressedModels();
 
+	const storedEtag = await readCachedEtag();
+
 	if (!context.allowNetwork || !apiKey || !modelsUrl || !baseUrl) {
 		// Prefer models fetched earlier this session; they are always at least
 		// as fresh as the store. Persist them for future offline sessions.
@@ -168,12 +170,20 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 	}
 
 	try {
-		const { models: apiModels, raw } = await fetchPlexusModels(apiKey, modelsUrl);
+		const { models: apiModels, raw, etag, notModified } = await fetchPlexusModels(apiKey, modelsUrl, undefined, storedEtag);
+
+		if (notModified) {
+			log("refreshModels: not modified", { etag: storedEtag });
+			const restored = await restoreStoredModels(context);
+			if (restored) return restored;
+		}
+
 		const piModels = convertDescriptors(apiModels, baseUrl, suppress).map(descriptorToPiModel);
 
 		await Promise.all([
 			context.store.write({ models: piModels, checkedAt: Date.now() }),
-			writeRawResponse(raw),
+			writeCachedEtag(etag),
+			raw ? writeRawResponse(raw) : Promise.resolve(),
 		]);
 
 		currentModels = piModels;

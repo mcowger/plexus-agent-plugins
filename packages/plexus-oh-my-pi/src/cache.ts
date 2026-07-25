@@ -11,6 +11,7 @@ const getRawResponsePath = (): string => join(getCacheDir(), "plexus-models-resp
 interface ModelCache {
 	models: PlexusModelDescriptor[];
 	timestamp: number;
+	etag?: string;
 }
 
 function parseCacheData(raw: string): ModelCache | null {
@@ -22,6 +23,7 @@ function parseCacheData(raw: string): ModelCache | null {
 		return {
 			models: obj["models"] as PlexusModelDescriptor[],
 			timestamp: typeof obj["timestamp"] === "number" ? obj["timestamp"] : 0,
+			etag: typeof obj["etag"] === "string" ? obj["etag"] : undefined,
 		};
 	} catch {
 		return null;
@@ -45,9 +47,9 @@ export function readCachedModelsSync(): ModelCache | null {
 /**
  * Writes the model list to the cache file. Creates directory if absent.
  */
-export async function writeCachedModels(models: PlexusModelDescriptor[]): Promise<void> {
+export async function writeCachedModels(models: PlexusModelDescriptor[], etag?: string): Promise<void> {
 	await mkdir(getCacheDir(), { recursive: true });
-	const payload: ModelCache = { models, timestamp: Date.now() };
+	const payload: ModelCache = { models, timestamp: Date.now(), etag };
 	await writeFile(getModelsCachePath(), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 

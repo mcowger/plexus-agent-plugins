@@ -418,22 +418,30 @@ export async function fetchPlexusModels(
 	apiKey: string,
 	modelsUrl: string,
 	timeoutMs: number = DEFAULT_MODELS_FETCH_TIMEOUT_MS,
-): Promise<{ models: PlexusApiModel[]; raw: import("./types.ts").PlexusApiResponse }> {
+	etag?: string,
+): Promise<{ models: PlexusApiModel[]; raw?: import("./types.ts").PlexusApiResponse; etag?: string; notModified?: boolean }> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
 	try {
 		const headers: Record<string, string> = { Accept: "application/json" };
 		if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+		if (etag) headers["If-None-Match"] = etag;
 
 		const res = await fetch(modelsUrl, {
 			headers,
 			signal: controller.signal,
 		});
+		
+		if (res.status === 304) {
+			return { models: [], notModified: true };
+		}
+		
 		if (!res.ok) {
 			throw new Error(`Plexus models fetch failed: ${res.status} ${res.statusText}`);
 		}
 		const raw = (await res.json()) as import("./types.ts").PlexusApiResponse;
-		return { models: raw.data ?? [], raw };
+		const responseEtag = res.headers.get("etag") ?? undefined;
+		return { models: raw.data ?? [], raw, etag: responseEtag };
 	} catch (err) {
 		if (err instanceof Error && err.name === "AbortError") {
 			throw new Error(`Plexus models fetch timed out after ${timeoutMs}ms`);

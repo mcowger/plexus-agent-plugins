@@ -32,6 +32,7 @@ function getDir(): string {
 interface ModelCache {
   models: Record<string, ConfigModel>
   timestamp: number
+  etag?: string
 }
 
 /**
@@ -71,13 +72,16 @@ export function filterCachedModels(
 export async function readCachedModels(
   _client: PluginInput["client"],
   suppress?: string | string[] | null,
-): Promise<Record<string, ConfigModel> | null> {
+): Promise<{ models: Record<string, ConfigModel>; etag?: string } | null> {
   try {
     const dir = getDir()
     const content = await readFile(join(dir, CACHE_FILE), "utf8")
     const parsed = JSON.parse(content) as ModelCache
     if (parsed && typeof parsed.models === "object" && !Array.isArray(parsed.models)) {
-      return filterCachedModels(parsed.models, suppress)
+      return {
+        models: filterCachedModels(parsed.models, suppress),
+        etag: typeof parsed.etag === "string" ? parsed.etag : undefined,
+      }
     }
     return null
   } catch {
@@ -95,12 +99,13 @@ export async function writeCache(
   _client: PluginInput["client"],
   models: Record<string, ConfigModel>,
   raw?: PlexusApiResponse,
+  etag?: string,
 ): Promise<void> {
   try {
     const dir = getDir()
     await mkdir(dir, { recursive: true })
 
-    const cache: ModelCache = { models, timestamp: Date.now() }
+    const cache: ModelCache = { models, timestamp: Date.now(), etag }
     await writeFile(join(dir, CACHE_FILE), JSON.stringify(cache, null, 2) + "\n", "utf8")
 
     if (raw !== undefined) {

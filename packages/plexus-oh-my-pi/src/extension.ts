@@ -242,12 +242,20 @@ async function doRefresh(
 	}
 
 	try {
-		const { models: apiModels, raw } = await fetchPlexusModels(apiKey, modelsUrl);
+		const cached = readCachedModelsSync();
+		const { models: apiModels, raw, etag, notModified } = await fetchPlexusModels(apiKey, modelsUrl, undefined, cached?.etag);
+		
+		if (notModified) {
+			log("doRefresh: not modified", { etag: cached?.etag });
+			if (ctx) ctx.ui.notify(`Refreshed ${currentModels.length} Plexus models (not modified)`, "info");
+			return;
+		}
+
 		const suppressPatterns = getSuppressedModels();
 		const descriptors = convertDescriptors(apiModels, baseUrl, suppressPatterns);
 		const ohMyPiModels = descriptors.map(descriptorToOhMyPiModel);
 
-		await Promise.all([writeCachedModels(descriptors), writeRawResponse(raw)]);
+		await Promise.all([writeCachedModels(descriptors, etag), raw ? writeRawResponse(raw) : Promise.resolve()]);
 
 		currentModels = ohMyPiModels;
 		pi.registerProvider(PROVIDER_NAME, {

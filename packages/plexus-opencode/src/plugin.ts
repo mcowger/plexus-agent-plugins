@@ -218,7 +218,15 @@ function refreshModels(
     // the unauthenticated model list still works. It is internally bounded by
     // an AbortController timeout, so this can't hang indefinitely.
     const url = modelsUrl(baseURL)
-    const { models: apiModels, raw } = await fetchPlexusModels(apiKey ?? "", url)
+    const cached = await readCachedModels(client, suppress)
+    const { models: apiModels, raw, etag, notModified } = await fetchPlexusModels(apiKey ?? "", url, undefined, cached?.etag)
+    
+    if (notModified && cached?.models) {
+      log.info(`Plexus models not modified (etag: ${cached.etag})`)
+      lastRefresh = { at: Date.now(), models: cached.models }
+      return cached.models
+    }
+
     const built = buildModels(apiModels, apiBase(baseURL), suppress)
     for (const [id, model] of Object.entries(built)) {
       const providerNpm = model.provider?.npm ?? OPENAI_COMPATIBLE_NPM
@@ -227,7 +235,7 @@ function refreshModels(
     }
     lastRefresh = { at: Date.now(), models: built }
     // fire-and-forget
-    writeCache(client, built, raw).catch(() => {})
+    writeCache(client, built, raw, etag).catch(() => {})
     return built
   }
 
@@ -275,7 +283,7 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
       // to pay for a blocking sync file read here.
       const cachedAsync = await readCachedModels(client, suppress)
       if (cachedAsync) {
-        log.info(`Loaded plexus cache with ${Object.keys(cachedAsync).length} models`)
+        log.info(`Loaded plexus cache with ${Object.keys(cachedAsync.models).length} models`)
       }
 
       const effectiveExistingModels = existingModels ? filterCachedModels(existingModels, suppress) : null
@@ -292,7 +300,7 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
         // Always seed at least one model so OpenCode doesn't prune the provider
         // before /connect runs. The placeholder is replaced once a live fetch
         // succeeds or a real cache exists.
-        models: (effectiveExistingModels && Object.keys(effectiveExistingModels).length > 0 ? effectiveExistingModels : null) ?? (cachedAsync ? toConfigModels(cachedAsync) : null) ?? {
+        models: (effectiveExistingModels && Object.keys(effectiveExistingModels).length > 0 ? effectiveExistingModels : null) ?? (cachedAsync ? toConfigModels(cachedAsync.models) : null) ?? {
           [PLACEHOLDER_MODEL_ID]: {
             id: PLACEHOLDER_MODEL_ID,
             name: "Plexus (run /connect to configure)",
@@ -348,7 +356,7 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
         if (!baseURL) {
           log.info("Provider hook skipped live refresh; baseURL missing")
           const cached = await readCachedModels(client, suppress)
-          return cached ? toRuntimeModels(cached, provider) : {}
+          return cached ? toRuntimeModels(cached.models, provider) : {}
         }
 
         const refreshPromise = refreshModels(client, baseURL, log, key, false, suppress)
@@ -371,7 +379,7 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
           })
         }
 
-        return cached ? toRuntimeModels(cached, provider) : {}
+        return cached ? toRuntimeModels(cached.models, provider) : {}
       },
     },
 

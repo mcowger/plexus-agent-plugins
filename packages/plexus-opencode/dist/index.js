@@ -120,22 +120,28 @@ function isChatModel(model) {
   return !NON_CHAT_PATTERN.test(`${model.id} ${model.name ?? ""} ${apiHints}`);
 }
 var DEFAULT_MODELS_FETCH_TIMEOUT_MS = 1e4;
-async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_FETCH_TIMEOUT_MS) {
+async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_FETCH_TIMEOUT_MS, etag) {
   const controller = new AbortController;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const headers = { Accept: "application/json" };
     if (apiKey)
       headers.Authorization = `Bearer ${apiKey}`;
+    if (etag)
+      headers["If-None-Match"] = etag;
     const res = await fetch(modelsUrl, {
       headers,
       signal: controller.signal
     });
+    if (res.status === 304) {
+      return { models: [], notModified: true };
+    }
     if (!res.ok) {
       throw new Error(`Plexus models fetch failed: ${res.status} ${res.statusText}`);
     }
     const raw = await res.json();
-    return { models: raw.data ?? [], raw };
+    const responseEtag = res.headers.get("etag") ?? undefined;
+    return { models: raw.data ?? [], raw, etag: responseEtag };
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       throw new Error(`Plexus models fetch timed out after ${timeoutMs}ms`);
@@ -178,18 +184,21 @@ async function readCachedModels(_client, suppress) {
     const content = await readFile(join(dir, CACHE_FILE), "utf8");
     const parsed = JSON.parse(content);
     if (parsed && typeof parsed.models === "object" && !Array.isArray(parsed.models)) {
-      return filterCachedModels(parsed.models, suppress);
+      return {
+        models: filterCachedModels(parsed.models, suppress),
+        etag: typeof parsed.etag === "string" ? parsed.etag : undefined
+      };
     }
     return null;
   } catch {
     return null;
   }
 }
-async function writeCache(_client, models, raw) {
+async function writeCache(_client, models, raw, etag) {
   try {
     const dir = getDir();
     await mkdir(dir, { recursive: true });
-    const cache = { models, timestamp: Date.now() };
+    const cache = { models, timestamp: Date.now(), etag };
     await writeFile(join(dir, CACHE_FILE), JSON.stringify(cache, null, 2) + `
 `, "utf8");
     if (raw !== undefined) {
@@ -581,7 +590,13 @@ function refreshModels(client, baseURL, log, apiKey, force = false, suppress) {
     return inFlightRefresh;
   const run = async () => {
     const url = modelsUrl(baseURL);
-    const { models: apiModels, raw } = await fetchPlexusModels(apiKey ?? "", url);
+    const cached = await readCachedModels(client, suppress);
+    const { models: apiModels, raw, etag, notModified } = await fetchPlexusModels(apiKey ?? "", url, undefined, cached?.etag);
+    if (notModified && cached?.models) {
+      log.info(`Plexus models not modified (etag: ${cached.etag})`);
+      lastRefresh = { at: Date.now(), models: cached.models };
+      return cached.models;
+    }
     const built = buildModels(apiModels, apiBase(baseURL), suppress);
     for (const [id, model] of Object.entries(built)) {
       const providerNpm = model.provider?.npm ?? OPENAI_COMPATIBLE_NPM;
@@ -589,7 +604,7 @@ function refreshModels(client, baseURL, log, apiKey, force = false, suppress) {
       log.info(`Model mapping ${id}: npm=${providerNpm} api=${providerApi}`);
     }
     lastRefresh = { at: Date.now(), models: built };
-    writeCache(client, built, raw).catch(() => {});
+    writeCache(client, built, raw, etag).catch(() => {});
     return built;
   };
   inFlightRefresh = run().finally(() => {
@@ -614,7 +629,7 @@ var PlexusProviderPlugin = async (ctx) => {
       }
       const cachedAsync = await readCachedModels(client, suppress);
       if (cachedAsync) {
-        log.info(`Loaded plexus cache with ${Object.keys(cachedAsync).length} models`);
+        log.info(`Loaded plexus cache with ${Object.keys(cachedAsync.models).length} models`);
       }
       const effectiveExistingModels = existingModels ? filterCachedModels(existingModels, suppress) : null;
       const merged = {
@@ -626,7 +641,7 @@ var PlexusProviderPlugin = async (ctx) => {
           ...baseURL ? { [PLEXUS_BASE_URL_OPTION]: baseURL } : {},
           ...apiKey ? { apiKey } : {}
         },
-        models: (effectiveExistingModels && Object.keys(effectiveExistingModels).length > 0 ? effectiveExistingModels : null) ?? (cachedAsync ? toConfigModels(cachedAsync) : null) ?? {
+        models: (effectiveExistingModels && Object.keys(effectiveExistingModels).length > 0 ? effectiveExistingModels : null) ?? (cachedAsync ? toConfigModels(cachedAsync.models) : null) ?? {
           [PLACEHOLDER_MODEL_ID]: {
             id: PLACEHOLDER_MODEL_ID,
             name: "Plexus (run /connect to configure)",
@@ -668,7 +683,7 @@ var PlexusProviderPlugin = async (ctx) => {
         if (!baseURL) {
           log.info("Provider hook skipped live refresh; baseURL missing");
           const cached2 = await readCachedModels(client, suppress);
-          return cached2 ? toRuntimeModels(cached2, provider) : {};
+          return cached2 ? toRuntimeModels(cached2.models, provider) : {};
         }
         const refreshPromise = refreshModels(client, baseURL, log, key, false, suppress);
         const race = await raceWithTimeout(refreshPromise, CONFIG_HOOK_REFRESH_BUDGET_MS);
@@ -685,7 +700,7 @@ var PlexusProviderPlugin = async (ctx) => {
             log.warn(`Background plexus model refresh failed: ${String(e)}`);
           });
         }
-        return cached ? toRuntimeModels(cached, provider) : {};
+        return cached ? toRuntimeModels(cached.models, provider) : {};
       }
     },
     "command.execute.before": async (input) => {
