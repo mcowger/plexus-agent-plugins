@@ -52,6 +52,20 @@ describe("OpenCode model mapping", () => {
     expect(Object.keys(models)).toEqual(["chat-model"])
   })
 
+  test("suppresses models matching suppression patterns", () => {
+    const models = buildModels(
+      [
+        { id: "gpt-4o" },
+        { id: "gpt-3.5-turbo" },
+        { id: "claude-2.0" },
+      ],
+      "https://plexus.example.com/v1",
+      ["gpt-3.5*", "claude-2*"],
+    )
+
+    expect(Object.keys(models)).toEqual(["gpt-4o"])
+  })
+
   test("preserves model identity and quirk metadata for OpenCode native transforms", () => {
     const mapped = buildModels(
       [{

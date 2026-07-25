@@ -9,12 +9,66 @@ var PLEXUS_BASE_URL_OPTION = "plexusBaseURL";
 var ENV_BASE_URL = "PLEXUS_BASE_URL";
 var ENV_API_URL = "PLEXUS_API_URL";
 var ENV_API_KEY = "PLEXUS_API_KEY";
+var ENV_SUPPRESS_MODELS = "PLEXUS_SUPPRESS_MODELS";
+var ENV_SUPPRESSED_MODELS = "PLEXUS_SUPPRESSED_MODELS";
+var ENV_EXCLUDE_MODELS = "PLEXUS_EXCLUDE_MODELS";
+var ENV_IGNORE_MODELS = "PLEXUS_IGNORE_MODELS";
+var PLEXUS_SUPPRESS_MODELS_OPTION = "suppressModels";
 var MODELS_FETCH_TIMEOUT_MS = 1e4;
 var REFRESH_TTL_MS = 60000;
 var CONFIG_HOOK_REFRESH_BUDGET_MS = 3000;
 var PLACEHOLDER_MODEL_ID = "plexus-unconfigured";
 var PLEXUS_REFRESH_COMMAND = "plexus-refresh";
 
+// ../plexus-models/src/suppress.ts
+function parseSuppressionPatterns(raw) {
+  if (!raw)
+    return [];
+  const items = Array.isArray(raw) ? raw : raw.split(/[\n,;]+/);
+  return items.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+function getEnvSuppressedModels() {
+  const env = typeof process !== "undefined" && process?.env ? process.env : {};
+  const raw = env.PLEXUS_SUPPRESS_MODELS ?? env.PLEXUS_EXCLUDE_MODELS;
+  return parseSuppressionPatterns(raw);
+}
+function isModelSuppressed(model, patterns) {
+  const envPatterns = getEnvSuppressedModels();
+  const explicitPatterns = parseSuppressionPatterns(patterns);
+  const allPatterns = [...envPatterns, ...explicitPatterns];
+  if (allPatterns.length === 0)
+    return false;
+  const id = model.id.toLowerCase();
+  const name = (model.name ?? "").toLowerCase();
+  const shortId = id.includes("/") ? id.split("/").pop() : id.includes(":") ? id.split(":").pop() : id;
+  for (const pattern of allPatterns) {
+    if (matchesPattern(id, name, shortId, pattern)) {
+      return true;
+    }
+  }
+  return false;
+}
+function matchesPattern(id, name, shortId, pattern) {
+  const p = pattern.toLowerCase();
+  if (p.startsWith("regex:")) {
+    try {
+      const re = new RegExp(pattern.slice(6), "i");
+      return re.test(id) || re.test(name) || re.test(shortId);
+    } catch {
+      return false;
+    }
+  }
+  if (p.includes("*") || p.includes("?")) {
+    const regexStr = "^" + p.replace(/([.+^${}()|[\]\\])/g, "\\$1").replace(/\*/g, ".*").replace(/\?/g, ".") + "$";
+    try {
+      const re = new RegExp(regexStr, "i");
+      return re.test(id) || re.test(name) || re.test(shortId);
+    } catch {
+      return false;
+    }
+  }
+  return id === p || name === p || shortId === p;
+}
 // ../plexus-models/src/convert.ts
 var REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
 var NON_CHAT_PATTERN = /(?:^|[\W_])(?:embed(?:ding|dings)?|transcri(?:be[ds]?|ptions?)|whisper|speech[\W_]*to[\W_]*text|stt|text[\W_]*to[\W_]*speech|tts|image[\W_]*(?:gen(?:eration)?|\d+)|diffusion|dall[\W_]*e|stable[\W_]*diffusion|sdxl|dream)(?:$|[\W_])/i;
@@ -104,23 +158,27 @@ function fallbackDir() {
 function getDir() {
   return fallbackDir();
 }
-function filterCachedModels(models) {
-  return Object.fromEntries(Object.entries(models).filter(([, model]) => isChatModel({
-    id: model.id,
-    name: model.name,
-    architecture: {
-      input_modalities: model.modalities.input,
-      output_modalities: model.modalities.output
-    }
-  })));
+function filterCachedModels(models, suppress) {
+  return Object.fromEntries(Object.entries(models).filter(([, model]) => {
+    if (isModelSuppressed({ id: model.id, name: model.name }, suppress))
+      return false;
+    return isChatModel({
+      id: model.id,
+      name: model.name,
+      architecture: {
+        input_modalities: model.modalities.input,
+        output_modalities: model.modalities.output
+      }
+    });
+  }));
 }
-async function readCachedModels(_client) {
+async function readCachedModels(_client, suppress) {
   try {
     const dir = getDir();
     const content = await readFile(join(dir, CACHE_FILE), "utf8");
     const parsed = JSON.parse(content);
     if (parsed && typeof parsed.models === "object" && !Array.isArray(parsed.models)) {
-      return filterCachedModels(parsed.models);
+      return filterCachedModels(parsed.models, suppress);
     }
     return null;
   } catch {
@@ -249,9 +307,24 @@ function resolveConfig(provider, authMetadata) {
   const optBaseURL = resolveStringOption(provider?.options?.[PLEXUS_BASE_URL_OPTION]);
   const legacyBaseURL = resolveStringOption(provider?.options?.baseURL);
   const optApiKey = resolveStringOption(provider?.options?.apiKey);
+  const optSuppress = provider?.options?.["suppressModels"] ?? provider?.options?.["suppress"] ?? provider?.options?.["suppress_models"];
+  const envSuppress = getEnvSuppressedModels();
+  const configSuppress = parseSuppressionPatterns(optSuppress);
+  const suppressModels = [...envSuppress, ...configSuppress];
   const baseURL = (envBaseURL ? rootURL(envBaseURL) : undefined) || (authBaseURL ? rootURL(authBaseURL) : undefined) || (optBaseURL ? rootURL(optBaseURL) : undefined) || (legacyBaseURL ? rootURL(legacyBaseURL) : undefined) || undefined;
   const apiKey = (envApiKey ? envApiKey.trim() : undefined) || optApiKey || undefined;
-  return { baseURL: baseURL || undefined, apiKey: apiKey || undefined };
+  return {
+    baseURL: baseURL || undefined,
+    apiKey: apiKey || undefined,
+    ...suppressModels.length > 0 ? { suppressModels } : {}
+  };
+}
+function getSuppressedModels(provider) {
+  const envSuppressed = getEnvSuppressedModels();
+  const providerObj = provider ?? {};
+  const providerOptions = typeof providerObj["options"] === "object" && providerObj["options"] !== null ? providerObj["options"] : {};
+  const optSuppressed = parseSuppressionPatterns(providerOptions["suppressModels"] ?? providerOptions["suppress"] ?? providerObj["suppressModels"] ?? providerObj["suppress"]);
+  return [...envSuppressed, ...optSuppressed];
 }
 
 // src/log.ts
@@ -353,10 +426,12 @@ function buildOutputModalities(model) {
   }
   return ["text"];
 }
-function buildModels(models, baseURL) {
+function buildModels(models, baseURL, suppress) {
   const result = {};
   for (const m of models) {
     if (!isChatModel(m))
+      continue;
+    if (isModelSuppressed(m, suppress))
       continue;
     const outputModalities = buildOutputModalities(m);
     if (outputModalities === null)
@@ -497,7 +572,7 @@ function raceWithTimeout(promise, timeoutMs) {
     });
   });
 }
-function refreshModels(client, baseURL, log, apiKey, force = false) {
+function refreshModels(client, baseURL, log, apiKey, force = false, suppress) {
   if (!force && lastRefresh && Date.now() - lastRefresh.at < REFRESH_TTL_MS) {
     log.info(`Using in-memory plexus model cache (${Object.keys(lastRefresh.models).length} models)`);
     return Promise.resolve(lastRefresh.models);
@@ -507,7 +582,7 @@ function refreshModels(client, baseURL, log, apiKey, force = false) {
   const run = async () => {
     const url = modelsUrl(baseURL);
     const { models: apiModels, raw } = await fetchPlexusModels(apiKey ?? "", url);
-    const built = buildModels(apiModels, apiBase(baseURL));
+    const built = buildModels(apiModels, apiBase(baseURL), suppress);
     for (const [id, model] of Object.entries(built)) {
       const providerNpm = model.provider?.npm ?? OPENAI_COMPATIBLE_NPM;
       const providerApi = model.provider?.api ?? "(missing)";
@@ -531,15 +606,17 @@ var PlexusProviderPlugin = async (ctx) => {
       const existing = cfg.provider[PLEXUS_PROVIDER_ID] ?? {};
       const existingOptions = typeof existing["options"] === "object" && existing["options"] !== null ? existing["options"] : {};
       const existingModels = typeof existing["models"] === "object" && existing["models"] !== null ? existing["models"] : null;
+      const suppress = getSuppressedModels(existing);
       const { baseURL, apiKey } = resolveConfig(existing);
       log.info(`Resolved plexus config: baseURL=${baseURL ?? "(missing)"} apiKey=${apiKey ? "present" : "missing"}`);
       if (typeof existingOptions["baseURL"] === "string") {
         log.warn(`Ignoring legacy provider.options.baseURL=${String(existingOptions["baseURL"])}`);
       }
-      const cachedAsync = await readCachedModels(client);
+      const cachedAsync = await readCachedModels(client, suppress);
       if (cachedAsync) {
         log.info(`Loaded plexus cache with ${Object.keys(cachedAsync).length} models`);
       }
+      const effectiveExistingModels = existingModels ? filterCachedModels(existingModels, suppress) : null;
       const merged = {
         ...existing,
         name: existing["name"] ?? PLEXUS_PROVIDER_NAME,
@@ -549,7 +626,7 @@ var PlexusProviderPlugin = async (ctx) => {
           ...baseURL ? { [PLEXUS_BASE_URL_OPTION]: baseURL } : {},
           ...apiKey ? { apiKey } : {}
         },
-        models: existingModels ?? (cachedAsync ? toConfigModels(cachedAsync) : null) ?? {
+        models: (effectiveExistingModels && Object.keys(effectiveExistingModels).length > 0 ? effectiveExistingModels : null) ?? (cachedAsync ? toConfigModels(cachedAsync) : null) ?? {
           [PLACEHOLDER_MODEL_ID]: {
             id: PLACEHOLDER_MODEL_ID,
             name: "Plexus (run /connect to configure)",
@@ -584,21 +661,22 @@ var PlexusProviderPlugin = async (ctx) => {
     provider: {
       id: PLEXUS_PROVIDER_ID,
       models: async (provider, hookCtx) => {
+        const suppress = getSuppressedModels(provider);
         const authKey = hookCtx.auth?.type === "api" ? hookCtx.auth.key : undefined;
         const { baseURL, apiKey } = resolveConfig(provider, authMetadata(hookCtx.auth));
         const key = authKey ?? apiKey;
         if (!baseURL) {
           log.info("Provider hook skipped live refresh; baseURL missing");
-          const cached2 = await readCachedModels(client);
+          const cached2 = await readCachedModels(client, suppress);
           return cached2 ? toRuntimeModels(cached2, provider) : {};
         }
-        const refreshPromise = refreshModels(client, baseURL, log, key);
+        const refreshPromise = refreshModels(client, baseURL, log, key, false, suppress);
         const race = await raceWithTimeout(refreshPromise, CONFIG_HOOK_REFRESH_BUDGET_MS);
         if (race.status === "resolved") {
           log.info(`Provider hook loaded ${Object.keys(race.value).length} plexus models from ${baseURL}`);
           return toRuntimeModels(race.value, provider);
         }
-        const cached = await readCachedModels(client);
+        const cached = await readCachedModels(client, suppress);
         if (race.status === "rejected") {
           log.warn(`Provider hook live refresh failed, using cache: ${String(race.error)}`);
         } else {
@@ -615,6 +693,7 @@ var PlexusProviderPlugin = async (ctx) => {
         return;
       const configResponse = await client.config.get();
       const provider = configResponse.data?.provider?.[PLEXUS_PROVIDER_ID];
+      const suppress = getSuppressedModels(provider);
       const storedAuth = await readStoredAuth();
       const { baseURL, apiKey } = resolveConfig(provider, storedAuth?.metadata);
       const key = storedAuth?.key ?? apiKey;
@@ -623,7 +702,7 @@ var PlexusProviderPlugin = async (ctx) => {
       }
       let models;
       try {
-        models = await refreshModels(client, baseURL, log, key, true);
+        models = await refreshModels(client, baseURL, log, key, true, suppress);
       } catch (e) {
         throw new Error(`Plexus refresh failed: ${String(e)}. Existing cache left untouched.`);
       }
@@ -692,6 +771,7 @@ export {
   buildModels,
   REFRESH_TTL_MS,
   PlexusProviderPlugin,
+  PLEXUS_SUPPRESS_MODELS_OPTION,
   PLEXUS_REFRESH_COMMAND,
   PLEXUS_PROVIDER_NAME,
   PLEXUS_PROVIDER_ID,
@@ -701,6 +781,10 @@ export {
   PLACEHOLDER_MODEL_ID,
   OPENAI_COMPATIBLE_NPM,
   MODELS_FETCH_TIMEOUT_MS,
+  ENV_SUPPRESS_MODELS,
+  ENV_SUPPRESSED_MODELS,
+  ENV_IGNORE_MODELS,
+  ENV_EXCLUDE_MODELS,
   ENV_BASE_URL,
   ENV_API_URL,
   ENV_API_KEY,

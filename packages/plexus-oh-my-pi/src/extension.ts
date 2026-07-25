@@ -27,12 +27,13 @@
 // Type-only — erased at runtime, never resolved by the module loader
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ProviderConfig } from "@oh-my-pi/pi-coding-agent";
 import type { Api, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai";
-import { convertDescriptors, fetchPlexusModels } from "../../plexus-models/src/index.ts";
+import { convertDescriptors, fetchPlexusModels, isModelSuppressed } from "../../plexus-models/src/index.ts";
 import {
 	ENV_API_KEY,
 	getBaseUrl,
 	getEnvApiKey,
 	getModelsUrl,
+	getSuppressedModels,
 	saveBaseUrl,
 	saveDefaultModel,
 } from "./config.ts";
@@ -55,8 +56,11 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	// We don't have the API key yet (async), so we skip refresh here.
 	// -------------------------------------------------------------------------
 	const cached = readCachedModelsSync();
+	const suppressPatterns = getSuppressedModels();
 	const startupBaseUrl = getBaseUrl() ?? "http://localhost/v1";
-	const startupModels = cached?.models.map(descriptorToOhMyPiModel) ?? [];
+	const startupModels = (cached?.models ?? [])
+		.filter((m) => !isModelSuppressed({ id: m.id, name: m.name }, suppressPatterns))
+		.map(descriptorToOhMyPiModel);
 
 	log("startup", {
 		cachedModelCount: startupModels.length,
@@ -239,7 +243,8 @@ async function doRefresh(
 
 	try {
 		const { models: apiModels, raw } = await fetchPlexusModels(apiKey, modelsUrl);
-		const descriptors = convertDescriptors(apiModels, baseUrl);
+		const suppressPatterns = getSuppressedModels();
+		const descriptors = convertDescriptors(apiModels, baseUrl, suppressPatterns);
 		const ohMyPiModels = descriptors.map(descriptorToOhMyPiModel);
 
 		await Promise.all([writeCachedModels(descriptors), writeRawResponse(raw)]);

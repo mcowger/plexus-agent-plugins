@@ -244,6 +244,47 @@ Both adapters also accept pi-style environment interpolation in configured strin
 
 ---
 
+## Model suppression
+
+All plugin packages support suppressing models by name or pattern so undesired models do not appear in model selectors or cache restored lists.
+
+### Pattern matching syntax
+
+- **Exact match** (case-insensitive): Matches model `id`, `name`, or short ID (suffix after `/` or `:`). Example: `"gpt-4o"`, `"Claude 3.5 Sonnet"`.
+- **Glob wildcards**: Supports `*` (0+ characters) and `?` (1 character). Example: `"gpt-3.5*"`, `"*deprecated*"`, `"anthropic/*"`.
+- **Regex patterns**: Prefix with `regex:`. Example: `"regex:^gpt-[34]"`.
+
+### Configuration methods
+
+- **Environment variables**:
+  ```sh
+  export PLEXUS_SUPPRESS_MODELS="gpt-3.5*, *deprecated*, whisper"
+  ```
+  `PLEXUS_EXCLUDE_MODELS` is also accepted. Values can be comma-, semicolon-, or newline-separated.
+
+- **pi / Oh My Pi config**: Add `suppressModels` (or `suppress`) to `config.json`:
+  ```json
+  {
+    "baseUrl": "https://plexus.example.com",
+    "suppressModels": ["gpt-3.5*", "*deprecated*"]
+  }
+  ```
+
+- **OpenCode config**: Add `suppressModels` (or `suppress`) under `provider.plexus.options` in `opencode.json`:
+  ```json
+  {
+    "provider": {
+      "plexus": {
+        "options": {
+          "suppressModels": ["gpt-3.5*", "claude-2*"]
+        }
+      }
+    }
+  }
+  ```
+
+---
+
 ## Package layout
 
 ```
@@ -252,6 +293,7 @@ packages/
     src/
       types.ts          # wire types (PlexusApiModel, PlexusModelDescriptor, etc.)
       convert.ts        # model fetching, conversion, compat detection
+      suppress.ts       # model pattern suppression / exclusion matching
       index.ts          # barrel export
   plexus-pi/            # pi host adapter
     src/

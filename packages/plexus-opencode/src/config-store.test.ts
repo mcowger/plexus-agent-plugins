@@ -1,8 +1,16 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { PLEXUS_BASE_URL_OPTION } from "./constants.ts"
-import { AUTH_METADATA_BASE_URL, resolveConfig, resolveConfigTemplate } from "./config-store.ts"
+import { AUTH_METADATA_BASE_URL, getSuppressedModels, resolveConfig, resolveConfigTemplate } from "./config-store.ts"
 
 const ORIGINAL_ENV = { ...process.env }
+
+beforeEach(() => {
+  delete process.env["PLEXUS_API_KEY"]
+  delete process.env["PLEXUS_API_URL"]
+  delete process.env["PLEXUS_BASE_URL"]
+  delete process.env["PLEXUS_SUPPRESS_MODELS"]
+  delete process.env["PLEXUS_EXCLUDE_MODELS"]
+})
 
 afterEach(() => {
   process.env = { ...ORIGINAL_ENV }
@@ -53,5 +61,16 @@ describe("OpenCode config resolution", () => {
         { [AUTH_METADATA_BASE_URL]: "https://metadata.example.com/v1" },
       ),
     ).toMatchObject({ baseURL: "https://metadata.example.com" })
+  })
+
+  test("resolves suppressed models from provider options and env vars", () => {
+    process.env["PLEXUS_SUPPRESS_MODELS"] = "gpt-3.5*"
+    expect(
+      getSuppressedModels({
+        options: {
+          suppressModels: ["claude-2*", "whisper"],
+        },
+      } as never),
+    ).toEqual(["gpt-3.5*", "claude-2*", "whisper"])
   })
 })

@@ -28,4 +28,28 @@ describe("OpenCode model cache", () => {
 
     expect(Object.keys(models)).toEqual(["chat"])
   })
+
+  test("removes suppressed model entries from cache", () => {
+    const models = filterCachedModels(
+      {
+        "gpt-4o": cachedModel("gpt-4o"),
+        "gpt-3.5-turbo": cachedModel("gpt-3.5-turbo"),
+      },
+      "gpt-3.5*",
+    )
+
+    expect(Object.keys(models)).toEqual(["gpt-4o"])
+  })
+
+  test("filters suppressed models from cache", () => {
+    const models = filterCachedModels(
+      {
+        gpt4: cachedModel("gpt-4o"),
+        gpt35: cachedModel("gpt-3.5-turbo"),
+      },
+      ["gpt-3.5*"],
+    )
+
+    expect(Object.keys(models)).toEqual(["gpt4"])
+  })
 })

@@ -3,6 +3,11 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
+import {
+	getEnvSuppressedModels,
+	parseSuppressionPatterns,
+} from "../../plexus-models/src/index.ts";
+
 const getConfigDir = (): string => join(getAgentDir(), "extensions", "plexus");
 const getConfigPath = (): string => join(getConfigDir(), "config.json");
 
@@ -16,6 +21,8 @@ const ENV_VAR_NAME_PREFIX_RE = /^[A-Za-z_][A-Za-z0-9_]*/;
 interface PlexusConfig {
 	baseUrl?: string;
 	defaultModel?: string;
+	suppressModels?: string | string[];
+	suppress?: string | string[];
 }
 
 const normalizeRoot = (raw: string): string => raw.trim().replace(/\/+$/, "");
@@ -158,4 +165,11 @@ export function getBaseUrl(): string | null {
 
 export function getDefaultModel(): string | null {
 	return getConfigSync().defaultModel ?? null;
+}
+
+export function getSuppressedModels(): string[] {
+	const config = getConfigSync();
+	const envSuppressed = getEnvSuppressedModels();
+	const configSuppressed = parseSuppressionPatterns(config.suppressModels ?? config.suppress);
+	return [...envSuppressed, ...configSuppressed];
 }

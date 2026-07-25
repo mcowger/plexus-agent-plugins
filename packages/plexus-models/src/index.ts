@@ -12,7 +12,12 @@ export type {
 
 export type { OpenAICompletionsThinkingFormat } from "./convert.ts";
 
-// Model fetching and conversion
+// Model suppression
+export {
+	getEnvSuppressedModels,
+	isModelSuppressed,
+	parseSuppressionPatterns,
+} from "./suppress.ts";
 export {
 	adjustBaseUrl,
 	convertDescriptors,

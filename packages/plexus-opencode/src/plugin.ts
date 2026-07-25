@@ -1,8 +1,8 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import type { Auth, Model as OpenCodeModel, Provider as OpenCodeProvider } from "@opencode-ai/sdk/v2"
 import { fetchPlexusModels } from "../../plexus-models/src/index.ts"
-import { readCachedModels, writeCache } from "./cache.ts"
-import { AUTH_METADATA_BASE_URL, readStoredAuth, resolveConfig } from "./config-store.ts"
+import { filterCachedModels, readCachedModels, writeCache } from "./cache.ts"
+import { AUTH_METADATA_BASE_URL, getSuppressedModels, readStoredAuth, resolveConfig } from "./config-store.ts"
 import { createLogger } from "./log.ts"
 import { buildModels, type ConfigModel } from "./mapper.ts"
 import {
@@ -201,6 +201,7 @@ function refreshModels(
   log: ReturnType<typeof createLogger>,
   apiKey?: string,
   force = false,
+  suppress?: string | string[] | null,
 ): Promise<Record<string, ConfigModel>> {
   if (!force && lastRefresh && Date.now() - lastRefresh.at < REFRESH_TTL_MS) {
     log.info(`Using in-memory plexus model cache (${Object.keys(lastRefresh.models).length} models)`)
@@ -218,7 +219,7 @@ function refreshModels(
     // an AbortController timeout, so this can't hang indefinitely.
     const url = modelsUrl(baseURL)
     const { models: apiModels, raw } = await fetchPlexusModels(apiKey ?? "", url)
-    const built = buildModels(apiModels, apiBase(baseURL))
+    const built = buildModels(apiModels, apiBase(baseURL), suppress)
     for (const [id, model] of Object.entries(built)) {
       const providerNpm = model.provider?.npm ?? OPENAI_COMPATIBLE_NPM
       const providerApi = model.provider?.api ?? "(missing)"
@@ -261,6 +262,7 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
           : null
       )
 
+      const suppress = getSuppressedModels(existing as never)
       const { baseURL, apiKey } = resolveConfig(existing as never)
       log.info(
         `Resolved plexus config: baseURL=${baseURL ?? "(missing)"} apiKey=${apiKey ? "present" : "missing"}`,
@@ -271,10 +273,12 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
 
       // Async cache read — config() is already async, so there's no reason
       // to pay for a blocking sync file read here.
-      const cachedAsync = await readCachedModels(client)
+      const cachedAsync = await readCachedModels(client, suppress)
       if (cachedAsync) {
         log.info(`Loaded plexus cache with ${Object.keys(cachedAsync).length} models`)
       }
+
+      const effectiveExistingModels = existingModels ? filterCachedModels(existingModels, suppress) : null
 
       const merged: Record<string, unknown> = {
         ...existing,
@@ -288,7 +292,7 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
         // Always seed at least one model so OpenCode doesn't prune the provider
         // before /connect runs. The placeholder is replaced once a live fetch
         // succeeds or a real cache exists.
-        models: existingModels ?? (cachedAsync ? toConfigModels(cachedAsync) : null) ?? {
+        models: (effectiveExistingModels && Object.keys(effectiveExistingModels).length > 0 ? effectiveExistingModels : null) ?? (cachedAsync ? toConfigModels(cachedAsync) : null) ?? {
           [PLACEHOLDER_MODEL_ID]: {
             id: PLACEHOLDER_MODEL_ID,
             name: "Plexus (run /connect to configure)",
@@ -336,17 +340,18 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
     provider: {
       id: PLEXUS_PROVIDER_ID,
       models: async (provider, hookCtx) => {
+        const suppress = getSuppressedModels(provider as never)
         const authKey = hookCtx.auth?.type === "api" ? hookCtx.auth.key : undefined
         const { baseURL, apiKey } = resolveConfig(provider as never, authMetadata(hookCtx.auth))
         const key = authKey ?? apiKey
 
         if (!baseURL) {
           log.info("Provider hook skipped live refresh; baseURL missing")
-          const cached = await readCachedModels(client)
+          const cached = await readCachedModels(client, suppress)
           return cached ? toRuntimeModels(cached, provider) : {}
         }
 
-        const refreshPromise = refreshModels(client, baseURL, log, key)
+        const refreshPromise = refreshModels(client, baseURL, log, key, false, suppress)
         const race = await raceWithTimeout(refreshPromise, CONFIG_HOOK_REFRESH_BUDGET_MS)
 
         if (race.status === "resolved") {
@@ -354,7 +359,7 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
           return toRuntimeModels(race.value, provider)
         }
 
-        const cached = await readCachedModels(client)
+        const cached = await readCachedModels(client, suppress)
         if (race.status === "rejected") {
           log.warn(`Provider hook live refresh failed, using cache: ${String(race.error)}`)
         } else {
@@ -375,6 +380,7 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
 
       const configResponse = await client.config.get()
       const provider = configResponse.data?.provider?.[PLEXUS_PROVIDER_ID]
+      const suppress = getSuppressedModels(provider as never)
 
       // command.execute.before has no auth/getAuth accessor (unlike
       // provider.auth.loader), so credentials stored via /connect are read
@@ -389,7 +395,7 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
 
       let models: Record<string, ConfigModel>
       try {
-        models = await refreshModels(client, baseURL, log, key, true)
+        models = await refreshModels(client, baseURL, log, key, true, suppress)
       } catch (e) {
         throw new Error(`Plexus refresh failed: ${String(e)}. Existing cache left untouched.`)
       }

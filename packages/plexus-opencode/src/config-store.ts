@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import type { ProviderConfig } from "@opencode-ai/sdk/v2"
+import { getEnvSuppressedModels, parseSuppressionPatterns } from "../../plexus-models/src/index.ts"
 import { ENV_API_KEY, ENV_API_URL, ENV_BASE_URL, PLEXUS_BASE_URL_OPTION, PLEXUS_PROVIDER_ID } from "./constants.ts"
 import { rootURL } from "./url.ts"
 
@@ -117,16 +118,16 @@ function resolveStringOption(value: unknown): string | undefined {
 }
 
 /**
- * Resolve { baseURL, apiKey } with priority:
+ * Resolve { baseURL, apiKey, suppressModels } with priority:
  *   1. Environment variables
  *   2. OpenCode auth metadata from /connect
- *   3. cfg.provider.plexus.options.{plexusBaseURL,apiKey}
+ *   3. cfg.provider.plexus.options.{plexusBaseURL,apiKey,suppressModels}
  *   4. legacy cfg.provider.plexus.options.baseURL
  */
 export function resolveConfig(
   provider?: ProviderConfig,
   authMetadata?: AuthMetadata,
-): { baseURL?: string; apiKey?: string } {
+): { baseURL?: string; apiKey?: string; suppressModels?: string[] } {
   const envBaseURL = process.env[ENV_API_URL] ?? process.env[ENV_BASE_URL]
   const envApiKey = process.env[ENV_API_KEY]
 
@@ -134,6 +135,11 @@ export function resolveConfig(
   const optBaseURL = resolveStringOption(provider?.options?.[PLEXUS_BASE_URL_OPTION])
   const legacyBaseURL = resolveStringOption(provider?.options?.baseURL)
   const optApiKey = resolveStringOption(provider?.options?.apiKey)
+
+  const optSuppress = provider?.options?.["suppressModels"] ?? provider?.options?.["suppress"] ?? provider?.options?.["suppress_models"]
+  const envSuppress = getEnvSuppressedModels()
+  const configSuppress = parseSuppressionPatterns(optSuppress as string | string[] | undefined)
+  const suppressModels = [...envSuppress, ...configSuppress]
 
   const baseURL =
     (envBaseURL ? rootURL(envBaseURL) : undefined) ||
@@ -143,5 +149,29 @@ export function resolveConfig(
     undefined
   const apiKey = (envApiKey ? envApiKey.trim() : undefined) || optApiKey || undefined
 
-  return { baseURL: baseURL || undefined, apiKey: apiKey || undefined }
+  return {
+    baseURL: baseURL || undefined,
+    apiKey: apiKey || undefined,
+    ...(suppressModels.length > 0 ? { suppressModels } : {}),
+  }
+}
+
+export function getSuppressedModels(provider?: ProviderConfig): string[] {
+  const envSuppressed = getEnvSuppressedModels()
+
+  const providerObj = (provider ?? {}) as Record<string, unknown>
+  const providerOptions = (
+    typeof providerObj["options"] === "object" && providerObj["options"] !== null
+      ? providerObj["options"]
+      : {}
+  ) as Record<string, unknown>
+
+  const optSuppressed = parseSuppressionPatterns(
+    (providerOptions["suppressModels"] ??
+      providerOptions["suppress"] ??
+      providerObj["suppressModels"] ??
+      providerObj["suppress"]) as string | string[] | undefined,
+  )
+
+  return [...envSuppressed, ...optSuppressed]
 }

@@ -1,6 +1,7 @@
 import {
   adjustBaseUrl,
   isChatModel,
+  isModelSuppressed,
   mapPreferredApi,
   type PlexusApiModel,
 } from "../../plexus-models/src/index.ts"
@@ -158,11 +159,16 @@ function buildOutputModalities(model: PlexusApiModel): Modality[] | null {
  * Image-output and embedding models are filtered out — OpenCode does not
  * support non-chat models as chat providers.
  */
-export function buildModels(models: PlexusApiModel[], baseURL: string): Record<string, ConfigModel> {
+export function buildModels(
+  models: PlexusApiModel[],
+  baseURL: string,
+  suppress?: string | string[] | null,
+): Record<string, ConfigModel> {
   const result: Record<string, ConfigModel> = {}
 
   for (const m of models) {
     if (!isChatModel(m)) continue
+    if (isModelSuppressed(m, suppress)) continue
 
     const outputModalities = buildOutputModalities(m)
     if (outputModalities === null) continue

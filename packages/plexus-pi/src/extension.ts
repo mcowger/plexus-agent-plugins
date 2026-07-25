@@ -29,11 +29,12 @@ import type {
 	OAuthLoginCallbacks,
 	RefreshModelsContext,
 } from "@earendil-works/pi-ai";
-import { adjustBaseUrl, convertDescriptors, fetchPlexusModels } from "../../plexus-models/src/index.ts";
+import { adjustBaseUrl, convertDescriptors, fetchPlexusModels, isModelSuppressed } from "../../plexus-models/src/index.ts";
 import {
 	getBaseUrl,
 	getEnvApiKey,
 	getModelsUrl,
+	getSuppressedModels,
 	saveBaseUrl,
 	saveDefaultModel,
 } from "./config.ts";
@@ -144,11 +145,16 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 	const baseUrl = getBaseUrl();
 	const modelsUrl = getModelsUrl();
 	const apiKey = credentialApiKey(context.credential) ?? getEnvApiKey() ?? undefined;
+	const suppress = getSuppressedModels();
 
 	if (!context.allowNetwork || !apiKey || !modelsUrl || !baseUrl) {
 		// Prefer models fetched earlier this session; they are always at least
 		// as fresh as the store. Persist them for future offline sessions.
 		if (currentModels.length > 0) {
+			const filteredCurrent = currentModels.filter(
+				(m) => !isModelSuppressed({ id: m.id, name: m.name }, suppress),
+			);
+			currentModels = filteredCurrent;
 			await context.store.write({ models: currentModels as unknown as Model<Api>[], checkedAt: Date.now() });
 			return currentModels;
 		}
@@ -163,7 +169,7 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 
 	try {
 		const { models: apiModels, raw } = await fetchPlexusModels(apiKey, modelsUrl);
-		const piModels = convertDescriptors(apiModels, baseUrl).map(descriptorToPiModel);
+		const piModels = convertDescriptors(apiModels, baseUrl, suppress).map(descriptorToPiModel);
 
 		await Promise.all([
 			context.store.write({ models: piModels, checkedAt: Date.now() }),
@@ -184,7 +190,10 @@ async function restoreStoredModels(
 ): Promise<ProviderModelConfig[] | undefined> {
 	const stored = await context.store.read();
 	if (!stored || stored.models.length === 0) return undefined;
-	const models = stored.models as unknown as ProviderModelConfig[];
+	const suppress = getSuppressedModels();
+	const models = (stored.models as unknown as ProviderModelConfig[]).filter(
+		(m) => !isModelSuppressed({ id: m.id, name: m.name }, suppress),
+	);
 	currentModels = models;
 	log("refreshModels: restored from store", { count: models.length });
 	return models;

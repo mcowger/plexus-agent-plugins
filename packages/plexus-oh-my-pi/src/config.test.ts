@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { resolveConfigTemplate } from "./config.ts";
+import { getSuppressedModels, resolveConfigTemplate } from "./config.ts";
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -21,5 +21,10 @@ describe("oh-my-pi config template resolution", () => {
 		delete process.env["PLEXUS_MISSING_VAR"];
 
 		expect(resolveConfigTemplate("${PLEXUS_MISSING_VAR}")).toBeUndefined();
+	});
+
+	test("resolves suppressed models from environment variable", () => {
+		process.env["PLEXUS_SUPPRESS_MODELS"] = "claude-2*, gpt-3.5*";
+		expect(getSuppressedModels()).toEqual(["claude-2*", "gpt-3.5*"]);
 	});
 });

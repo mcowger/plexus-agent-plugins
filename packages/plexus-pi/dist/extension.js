@@ -1,4 +1,53 @@
 // @bun
+// ../plexus-models/src/suppress.ts
+function parseSuppressionPatterns(raw) {
+  if (!raw)
+    return [];
+  const items = Array.isArray(raw) ? raw : raw.split(/[\n,;]+/);
+  return items.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+function getEnvSuppressedModels() {
+  const env = typeof process !== "undefined" && process?.env ? process.env : {};
+  const raw = env.PLEXUS_SUPPRESS_MODELS ?? env.PLEXUS_EXCLUDE_MODELS;
+  return parseSuppressionPatterns(raw);
+}
+function isModelSuppressed(model, patterns) {
+  const envPatterns = getEnvSuppressedModels();
+  const explicitPatterns = parseSuppressionPatterns(patterns);
+  const allPatterns = [...envPatterns, ...explicitPatterns];
+  if (allPatterns.length === 0)
+    return false;
+  const id = model.id.toLowerCase();
+  const name = (model.name ?? "").toLowerCase();
+  const shortId = id.includes("/") ? id.split("/").pop() : id.includes(":") ? id.split(":").pop() : id;
+  for (const pattern of allPatterns) {
+    if (matchesPattern(id, name, shortId, pattern)) {
+      return true;
+    }
+  }
+  return false;
+}
+function matchesPattern(id, name, shortId, pattern) {
+  const p = pattern.toLowerCase();
+  if (p.startsWith("regex:")) {
+    try {
+      const re = new RegExp(pattern.slice(6), "i");
+      return re.test(id) || re.test(name) || re.test(shortId);
+    } catch {
+      return false;
+    }
+  }
+  if (p.includes("*") || p.includes("?")) {
+    const regexStr = "^" + p.replace(/([.+^${}()|[\]\\])/g, "\\$1").replace(/\*/g, ".*").replace(/\?/g, ".") + "$";
+    try {
+      const re = new RegExp(regexStr, "i");
+      return re.test(id) || re.test(name) || re.test(shortId);
+    } catch {
+      return false;
+    }
+  }
+  return id === p || name === p || shortId === p;
+}
 // ../plexus-models/src/convert.ts
 var REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
 var NON_CHAT_PATTERN = /(?:^|[\W_])(?:embed(?:ding|dings)?|transcri(?:be[ds]?|ptions?)|whisper|speech[\W_]*to[\W_]*text|stt|text[\W_]*to[\W_]*speech|tts|image[\W_]*(?:gen(?:eration)?|\d+)|diffusion|dall[\W_]*e|stable[\W_]*diffusion|sdxl|dream)(?:$|[\W_])/i;
@@ -132,10 +181,67 @@ function isChatModel(model) {
   const apiHints = Array.isArray(model.preferred_api) ? model.preferred_api.join(" ") : model.preferred_api ?? "";
   return !NON_CHAT_PATTERN.test(`${model.id} ${model.name ?? ""} ${apiHints}`);
 }
-function convertDescriptors(models, baseUrl) {
+function parseSuppressionPatterns2(input) {
+  if (!input)
+    return [];
+  const rawItems = Array.isArray(input) ? input : [input];
+  const patterns = [];
+  for (const item of rawItems) {
+    if (!item || typeof item !== "string")
+      continue;
+    const parts = item.split(/[\n,]/);
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (trimmed.length > 0) {
+        patterns.push(trimmed);
+      }
+    }
+  }
+  return patterns;
+}
+function isSuppressedModel(model, suppress) {
+  if (!model || !model.id)
+    return false;
+  const patterns = parseSuppressionPatterns2(suppress);
+  if (patterns.length === 0)
+    return false;
+  const idLower = model.id.toLowerCase();
+  const nameLower = (model.name ?? "").toLowerCase();
+  for (const pattern of patterns) {
+    const patternLower = pattern.toLowerCase();
+    if (idLower === patternLower || nameLower && nameLower === patternLower) {
+      return true;
+    }
+    if (pattern.startsWith("/") && pattern.lastIndexOf("/") > 0) {
+      const lastSlash = pattern.lastIndexOf("/");
+      const regexBody = pattern.slice(1, lastSlash);
+      const regexFlags = pattern.slice(lastSlash + 1) || "i";
+      try {
+        const re = new RegExp(regexBody, regexFlags);
+        if (re.test(model.id) || model.name && re.test(model.name)) {
+          return true;
+        }
+      } catch {}
+    }
+    if (pattern.includes("*") || pattern.includes("?")) {
+      try {
+        const escaped = patternLower.replace(/[.+^$()|[{}]\\]/g, "\\$&");
+        const regexStr = "^" + escaped.replace(/\*/g, ".*").replace(/\?/g, ".") + "$";
+        const globRe = new RegExp(regexStr, "i");
+        if (globRe.test(model.id) || model.name && globRe.test(model.name)) {
+          return true;
+        }
+      } catch {}
+    }
+  }
+  return false;
+}
+function convertDescriptors(models, baseUrl, suppress) {
   const result = [];
   for (const m of models) {
     if (!isChatModel(m))
+      continue;
+    if (isSuppressedModel(m, suppress))
       continue;
     result.push(convertToDescriptor(m, baseUrl));
   }
@@ -349,6 +455,12 @@ function getModelsUrl() {
 function getBaseUrl() {
   const raw = getRawBaseUrl();
   return raw ? normalizeApiBase(raw) : null;
+}
+function getSuppressedModels() {
+  const config = getConfigSync();
+  const envSuppressed = getEnvSuppressedModels();
+  const configSuppressed = parseSuppressionPatterns(config.suppressModels ?? config.suppress);
+  return [...envSuppressed, ...configSuppressed];
 }
 
 // src/cache.ts
@@ -619,8 +731,11 @@ async function refreshPlexusModels(context) {
   const baseUrl = getBaseUrl();
   const modelsUrl = getModelsUrl();
   const apiKey = credentialApiKey(context.credential) ?? getEnvApiKey() ?? undefined;
+  const suppress = getSuppressedModels();
   if (!context.allowNetwork || !apiKey || !modelsUrl || !baseUrl) {
     if (currentModels.length > 0) {
+      const filteredCurrent = currentModels.filter((m) => !isModelSuppressed({ id: m.id, name: m.name }, suppress));
+      currentModels = filteredCurrent;
       await context.store.write({ models: currentModels, checkedAt: Date.now() });
       return currentModels;
     }
@@ -631,7 +746,7 @@ async function refreshPlexusModels(context) {
   }
   try {
     const { models: apiModels, raw } = await fetchPlexusModels(apiKey, modelsUrl);
-    const piModels = convertDescriptors(apiModels, baseUrl).map(descriptorToPiModel);
+    const piModels = convertDescriptors(apiModels, baseUrl, suppress).map(descriptorToPiModel);
     await Promise.all([
       context.store.write({ models: piModels, checkedAt: Date.now() }),
       writeRawResponse(raw)
@@ -648,7 +763,8 @@ async function restoreStoredModels(context) {
   const stored = await context.store.read();
   if (!stored || stored.models.length === 0)
     return;
-  const models = stored.models;
+  const suppress = getSuppressedModels();
+  const models = stored.models.filter((m) => !isModelSuppressed({ id: m.id, name: m.name }, suppress));
   currentModels = models;
   log("refreshModels: restored from store", { count: models.length });
   return models;

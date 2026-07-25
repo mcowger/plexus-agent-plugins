@@ -8,6 +8,7 @@ packages/
     src/
       types.ts          # wire types (PlexusApiModel, PlexusModelDescriptor, etc.)
       convert.ts        # model fetching, conversion, compat detection
+      suppress.ts       # model pattern suppression / exclusion matching
       index.ts          # barrel export
   plexus-{host}/        # one package per supported agent host
     src/

@@ -1,4 +1,5 @@
 import type { PlexusApiModel, PlexusModelDescriptor } from "./types.ts";
+import { isModelSuppressed } from "./suppress.ts";
 
 const REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
 
@@ -190,14 +191,113 @@ export function isChatModel(model: PlexusApiModel): boolean {
 }
 
 /**
+ * Normalizes suppression criteria into an array of trimmed, non-empty pattern strings.
+ * Supports comma-separated strings, newline-separated strings, or arrays of strings.
+ */
+export function parseSuppressionPatterns(
+	input?: string | (string | undefined | null)[] | null,
+): string[] {
+	if (!input) return [];
+	const rawItems = Array.isArray(input) ? input : [input];
+	const patterns: string[] = [];
+
+	for (const item of rawItems) {
+		if (!item || typeof item !== "string") continue;
+		const parts = item.split(/[\n,]/);
+		for (const part of parts) {
+			const trimmed = part.trim();
+			if (trimmed.length > 0) {
+				patterns.push(trimmed);
+			}
+		}
+	}
+
+	return patterns;
+}
+
+/**
+ * Returns whether a model matches any suppression pattern by its ID or display name.
+ * Supports exact case-insensitive matches, wildcard patterns (* and ?), and regexes (/pattern/i).
+ */
+export function isSuppressedModel(
+	model: { id: string; name?: string },
+	suppress?: string | (string | undefined | null)[] | null,
+): boolean {
+	if (!model || !model.id) return false;
+	const patterns = parseSuppressionPatterns(suppress);
+	if (patterns.length === 0) return false;
+
+	const idLower = model.id.toLowerCase();
+	const nameLower = (model.name ?? "").toLowerCase();
+
+	for (const pattern of patterns) {
+		const patternLower = pattern.toLowerCase();
+
+		// Exact match (case-insensitive) against id or display name
+		if (idLower === patternLower || (nameLower && nameLower === patternLower)) {
+			return true;
+		}
+
+		// Regex pattern: /regex/flags
+		if (pattern.startsWith("/") && pattern.lastIndexOf("/") > 0) {
+			const lastSlash = pattern.lastIndexOf("/");
+			const regexBody = pattern.slice(1, lastSlash);
+			const regexFlags = pattern.slice(lastSlash + 1) || "i";
+			try {
+				const re = new RegExp(regexBody, regexFlags);
+				if (re.test(model.id) || (model.name && re.test(model.name))) {
+					return true;
+				}
+			} catch {
+				// Ignore invalid regex
+			}
+		}
+
+		// Wildcard glob pattern (* and ?)
+		if (pattern.includes("*") || pattern.includes("?")) {
+			try {
+				const escaped = patternLower.replace(/[.+^$()|[{}]\\]/g, "\\$&");
+				const regexStr = "^" + escaped.replace(/\*/g, ".*").replace(/\?/g, ".") + "$";
+				const globRe = new RegExp(regexStr, "i");
+				if (globRe.test(model.id) || (model.name && globRe.test(model.name))) {
+					return true;
+				}
+			} catch {
+				// Fallback if regex generation fails
+			}
+		}
+	}
+
+	return false;
+}
+
+/**
+ * Filters out models matching any suppression pattern.
+ */
+export function filterSuppressedModels<T extends { id: string; name?: string }>(
+	models: T[],
+	suppress?: string | (string | undefined | null)[] | null,
+): T[] {
+	if (!suppress) return models;
+	const patterns = parseSuppressionPatterns(suppress);
+	if (patterns.length === 0) return models;
+	return models.filter((m) => !isSuppressedModel(m, patterns));
+}
+
+/**
  * Batch-converts chat-capable PlexusApiModel entries, silently skipping entries
- * with falsy ids and endpoint-specific non-chat models.
+ * with falsy ids, endpoint-specific non-chat models, or suppressed models.
  * Output order matches input order minus skipped entries.
  */
-export function convertDescriptors(models: PlexusApiModel[], baseUrl: string): PlexusModelDescriptor[] {
+export function convertDescriptors(
+	models: PlexusApiModel[],
+	baseUrl: string,
+	suppress?: string | (string | undefined | null)[] | null,
+): PlexusModelDescriptor[] {
 	const result: PlexusModelDescriptor[] = [];
 	for (const m of models) {
 		if (!isChatModel(m)) continue;
+		if (isSuppressedModel(m, suppress)) continue;
 		result.push(convertToDescriptor(m, baseUrl));
 	}
 	return result;

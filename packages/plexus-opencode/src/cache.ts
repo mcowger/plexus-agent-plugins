@@ -3,7 +3,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import type { PluginInput } from "@opencode-ai/plugin"
 import type { ConfigModel } from "./mapper.ts"
-import { isChatModel, type PlexusApiResponse } from "../../plexus-models/src/index.ts"
+import { isChatModel, isModelSuppressed, type PlexusApiResponse } from "../../plexus-models/src/index.ts"
 
 const PLUGIN_SUBDIR = join("plugins", "plexus")
 const CACHE_FILE = "models-cache.json"
@@ -40,16 +40,20 @@ interface ModelCache {
  */
 export function filterCachedModels(
   models: Record<string, ConfigModel>,
+  suppress?: string | string[] | null,
 ): Record<string, ConfigModel> {
   return Object.fromEntries(
-    Object.entries(models).filter(([, model]) => isChatModel({
-      id: model.id,
-      name: model.name,
-      architecture: {
-        input_modalities: model.modalities.input,
-        output_modalities: model.modalities.output,
-      },
-    })),
+    Object.entries(models).filter(([, model]) => {
+      if (isModelSuppressed({ id: model.id, name: model.name }, suppress)) return false
+      return isChatModel({
+        id: model.id,
+        name: model.name,
+        architecture: {
+          input_modalities: model.modalities.input,
+          output_modalities: model.modalities.output,
+        },
+      })
+    }),
   )
 }
 
@@ -66,13 +70,14 @@ export function filterCachedModels(
  */
 export async function readCachedModels(
   _client: PluginInput["client"],
+  suppress?: string | string[] | null,
 ): Promise<Record<string, ConfigModel> | null> {
   try {
     const dir = getDir()
     const content = await readFile(join(dir, CACHE_FILE), "utf8")
     const parsed = JSON.parse(content) as ModelCache
     if (parsed && typeof parsed.models === "object" && !Array.isArray(parsed.models)) {
-      return filterCachedModels(parsed.models)
+      return filterCachedModels(parsed.models, suppress)
     }
     return null
   } catch {
