@@ -120,9 +120,10 @@ function isChatModel(model) {
   return !NON_CHAT_PATTERN.test(`${model.id} ${model.name ?? ""} ${apiHints}`);
 }
 var DEFAULT_MODELS_FETCH_TIMEOUT_MS = 1e4;
-async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_FETCH_TIMEOUT_MS, etag) {
+async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_FETCH_TIMEOUT_MS, etag, signal) {
   const controller = new AbortController;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   try {
     const headers = { Accept: "application/json" };
     if (apiKey)
@@ -131,7 +132,7 @@ async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_F
       headers["If-None-Match"] = etag;
     const res = await fetch(modelsUrl, {
       headers,
-      signal: controller.signal
+      signal: requestSignal
     });
     if (res.status === 304) {
       return { models: [], notModified: true };
@@ -143,6 +144,8 @@ async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_F
     const responseEtag = res.headers.get("etag") ?? undefined;
     return { models: raw.data ?? [], raw, etag: responseEtag };
   } catch (err) {
+    if (signal?.aborted)
+      throw err;
     if (err instanceof Error && err.name === "AbortError") {
       throw new Error(`Plexus models fetch timed out after ${timeoutMs}ms`);
     }

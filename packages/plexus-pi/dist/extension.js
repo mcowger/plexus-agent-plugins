@@ -307,9 +307,10 @@ function detectOpenAICompletionsCompat(providerName, baseUrl) {
   return compat;
 }
 var DEFAULT_MODELS_FETCH_TIMEOUT_MS = 1e4;
-async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_FETCH_TIMEOUT_MS, etag) {
+async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_FETCH_TIMEOUT_MS, etag, signal) {
   const controller = new AbortController;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
   try {
     const headers = { Accept: "application/json" };
     if (apiKey)
@@ -318,7 +319,7 @@ async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_F
       headers["If-None-Match"] = etag;
     const res = await fetch(modelsUrl, {
       headers,
-      signal: controller.signal
+      signal: requestSignal
     });
     if (res.status === 304) {
       return { models: [], notModified: true };
@@ -330,6 +331,8 @@ async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_F
     const responseEtag = res.headers.get("etag") ?? undefined;
     return { models: raw.data ?? [], raw, etag: responseEtag };
   } catch (err) {
+    if (signal?.aborted)
+      throw err;
     if (err instanceof Error && err.name === "AbortError") {
       throw new Error(`Plexus models fetch timed out after ${timeoutMs}ms`);
     }
@@ -579,80 +582,6 @@ function descriptorToPiModel(descriptor) {
   };
 }
 
-// src/gemini-toolcall-id.ts
-var GEMINI_3_PATTERN = /gemini-(?:live-)?3(?:\.\d+)?[-.]/i;
-var GEMINI_3_ALIASES = new Set(["gemini-flash-latest", "gemini-flash-lite-latest"]);
-function isGemini3Model(modelId) {
-  return GEMINI_3_ALIASES.has(modelId) || GEMINI_3_PATTERN.test(modelId);
-}
-function createGeminiToolCallIdFixer() {
-  let functionCallIds = [];
-  let functionResponseIds = [];
-  function onContext(messages) {
-    const calls = [];
-    const responses = [];
-    for (const msg of messages) {
-      if (msg.role === "assistant" && Array.isArray(msg.content)) {
-        for (const block of msg.content) {
-          if (block?.type === "toolCall" && typeof block.id === "string") {
-            calls.push(block.id);
-          }
-        }
-      } else if (msg.role === "toolResult" && typeof msg.toolCallId === "string") {
-        responses.push({ id: msg.toolCallId, name: msg.toolName ?? "" });
-      }
-    }
-    functionCallIds = calls;
-    functionResponseIds = responses;
-  }
-  function onBeforeProviderRequest(payload) {
-    const google = payload;
-    if (!google || typeof google !== "object" || !Array.isArray(google.contents)) {
-      return payload;
-    }
-    if (typeof google.model !== "string" || !isGemini3Model(google.model)) {
-      return payload;
-    }
-    let callCursor = 0;
-    let responseCursor = 0;
-    let missing = 0;
-    for (const content of google.contents) {
-      if (!Array.isArray(content?.parts))
-        continue;
-      for (const part of content.parts) {
-        if (part.functionCall && part.functionCall.id === undefined) {
-          const id = functionCallIds[callCursor++];
-          if (id !== undefined) {
-            part.functionCall.id = id;
-          } else {
-            missing++;
-          }
-        } else if (part.functionResponse && part.functionResponse.id === undefined) {
-          const entry = functionResponseIds[responseCursor++];
-          if (entry !== undefined) {
-            part.functionResponse.id = entry.id;
-            if (part.functionResponse.name === undefined && entry.name) {
-              part.functionResponse.name = entry.name;
-            }
-          } else {
-            missing++;
-          }
-        }
-      }
-    }
-    if (missing > 0) {
-      log("gemini-toolcall-id: fewer captured ids than parts", {
-        model: google.model,
-        missing,
-        capturedCalls: functionCallIds.length,
-        capturedResponses: functionResponseIds.length
-      });
-    }
-    return payload;
-  }
-  return { onContext, onBeforeProviderRequest };
-}
-
 // src/gemini-malformed-retry.ts
 var MALFORMED_LEAK_PATTERN = /(?:print\()?call:\s*default_api[.:]|default_api\.\w+\s*\(/;
 var MALFORMED_DIAGNOSTIC_PATTERN = /\bmalformed[\s_-]?function[\s_-]?call\b/i;
@@ -700,13 +629,6 @@ function plexusExtension(pi) {
   const envApiKey = getEnvApiKey();
   const startupBaseUrl = getBaseUrl();
   log("startup", { baseUrl: startupBaseUrl, hasEnvApiKey: !!envApiKey });
-  const geminiToolCallIdFixer = createGeminiToolCallIdFixer();
-  pi.on("context", (event) => {
-    geminiToolCallIdFixer.onContext(event.messages);
-  });
-  pi.on("before_provider_request", (event) => {
-    return geminiToolCallIdFixer.onBeforeProviderRequest(event.payload);
-  });
   pi.on("message_end", (event) => normalizeMalformedFunctionCall(event.message, PROVIDER_NAME));
   pi.registerProvider(PROVIDER_NAME, {
     api: "openai-completions",
@@ -758,21 +680,25 @@ async function refreshPlexusModels(context) {
   const modelsUrl = getModelsUrl();
   const apiKey = credentialApiKey(context.credential) ?? getEnvApiKey() ?? undefined;
   const suppress = getSuppressedModels();
-  const storedEtag = await readCachedEtag();
   if (!context.allowNetwork || !apiKey || !modelsUrl || !baseUrl) {
     if (currentModels.length > 0) {
       const filteredCurrent = currentModels.filter((m) => !isModelSuppressed({ id: m.id, name: m.name }, suppress));
-      currentModels = filteredCurrent;
-      await context.store.write({ models: currentModels, checkedAt: Date.now() });
-      return currentModels;
+      await context.publish({
+        persist: { models: filteredCurrent, checkedAt: Date.now() },
+        update: () => {
+          currentModels = filteredCurrent;
+        }
+      });
+      return filteredCurrent;
     }
     const restored = await restoreStoredModels(context);
     if (restored)
       return restored;
     throw new Error(!modelsUrl || !baseUrl ? "Plexus base URL not configured. Run /login plexus first." : "No Plexus API key configured. Run /login plexus first.");
   }
+  const storedEtag = await readCachedEtag();
   try {
-    const { models: apiModels, raw, etag, notModified } = await fetchPlexusModels(apiKey, modelsUrl, undefined, storedEtag);
+    const { models: apiModels, raw, etag, notModified } = await fetchPlexusModels(apiKey, modelsUrl, undefined, storedEtag, context.signal);
     if (notModified) {
       log("refreshModels: not modified", { etag: storedEtag });
       const restored = await restoreStoredModels(context);
@@ -780,12 +706,19 @@ async function refreshPlexusModels(context) {
         return restored;
     }
     const piModels = convertDescriptors(apiModels, baseUrl, suppress).map(descriptorToPiModel);
+    const published = await context.publish({
+      persist: { models: piModels, checkedAt: Date.now() },
+      update: () => {
+        currentModels = piModels;
+      }
+    });
+    if (!published) {
+      log("refreshModels: publication superseded by a newer refresh", {});
+    }
     await Promise.all([
-      context.store.write({ models: piModels, checkedAt: Date.now() }),
       writeCachedEtag(etag),
       raw ? writeRawResponse(raw) : Promise.resolve()
     ]);
-    currentModels = piModels;
     log("refreshModels: fetched", { count: piModels.length });
     return piModels;
   } catch (error) {
@@ -794,12 +727,16 @@ async function refreshPlexusModels(context) {
   }
 }
 async function restoreStoredModels(context) {
-  const stored = await context.store.read();
+  const stored = context.stored;
   if (!stored || stored.models.length === 0)
     return;
   const suppress = getSuppressedModels();
   const models = stored.models.filter((m) => !isModelSuppressed({ id: m.id, name: m.name }, suppress));
-  currentModels = models;
+  await context.publish({
+    update: () => {
+      currentModels = models;
+    }
+  });
   log("refreshModels: restored from store", { count: models.length });
   return models;
 }
@@ -831,7 +768,8 @@ function createPlexusLoginProvider() {
         plexusBaseUrl: baseUrl
       };
     },
-    async refreshToken(credentials) {
+    async refreshToken(credentials, signal) {
+      signal.throwIfAborted();
       return { ...credentials, expires: PLEXUS_CREDENTIAL_EXPIRES_AT };
     },
     getApiKey(credentials) {
@@ -853,7 +791,16 @@ async function handleRefresh(ctx) {
     return;
   }
   ctx.ui.notify("Refreshing Plexus models\u2026", "info");
-  await ctx.modelRegistry.refresh();
+  const result = await ctx.modelRegistry.refresh({ providers: [PROVIDER_NAME], force: true });
+  if (result.aborted) {
+    ctx.ui.notify("Plexus model refresh was cancelled.", "warning");
+    return;
+  }
+  const refreshError = result.errors.get(PROVIDER_NAME);
+  if (refreshError) {
+    ctx.ui.notify(`Plexus model refresh failed: ${refreshError.message}`, "error");
+    return;
+  }
   ctx.ui.notify(currentModels.length > 0 ? `Refreshed ${currentModels.length} Plexus models` : "Refresh finished but no Plexus models are available. Check the Plexus server and /login plexus.", currentModels.length > 0 ? "info" : "warning");
 }
 async function handleSetDefaultModel(pi, ctx, requestedModelId) {

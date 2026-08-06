@@ -4,10 +4,12 @@
  * Auth: API key is stored by pi's credential store (persisted in auth.json).
  *       It may also be pre-seeded via the PLEXUS_API_KEY env var.
  *
- * Model discovery: Pi 0.81+ registers extension providers before its deferred
- *       startup network refresh. Discovery therefore goes through
- *       refreshModels for startup, /login, /model, and /plexus refresh, and is
- *       persisted in pi's models-store.json.
+ * Model discovery: Pi 0.84+ runs the provider's refreshModels hook in two
+ *       phases — a cache-restore phase (allowNetwork: false, read-only
+ *       context.stored snapshot) followed by a network phase with the resolved
+ *       credential — at startup, after /login, when /model opens, and from
+ *       /plexus refresh. Catalog persistence goes through the generation-checked
+ *       context.publish() transaction into pi's models-store.json.
  *
  * Commands:
  *   /login plexus   — set base URL and API key using pi's native login UI
@@ -41,7 +43,6 @@ import {
 import { readCachedEtag, writeCachedEtag, writeRawResponse } from "./cache.ts";
 import { log } from "./log.ts";
 import { descriptorToPiModel } from "./mapper.ts";
-import { createGeminiToolCallIdFixer } from "./gemini-toolcall-id.ts";
 import { normalizeMalformedFunctionCall } from "./gemini-malformed-retry.ts";
 
 const PROVIDER_NAME = "plexus";
@@ -59,15 +60,6 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	const startupBaseUrl = getBaseUrl();
 
 	log("startup", { baseUrl: startupBaseUrl, hasEnvApiKey: !!envApiKey });
-
-	// Restore Gemini 3.x tool-call correlation IDs that pi's serializer drops.
-	const geminiToolCallIdFixer = createGeminiToolCallIdFixer();
-	pi.on("context", (event) => {
-		geminiToolCallIdFixer.onContext(event.messages);
-	});
-	pi.on("before_provider_request", (event) => {
-		return geminiToolCallIdFixer.onBeforeProviderRequest(event.payload);
-	});
 
 	// Retag Gemini MALFORMED_FUNCTION_CALL failures (which pi flattens to a generic
 	// non-retryable "An unknown error occurred") so pi's native agent-turn retry
@@ -147,8 +139,6 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 	const apiKey = credentialApiKey(context.credential) ?? getEnvApiKey() ?? undefined;
 	const suppress = getSuppressedModels();
 
-	const storedEtag = await readCachedEtag();
-
 	if (!context.allowNetwork || !apiKey || !modelsUrl || !baseUrl) {
 		// Prefer models fetched earlier this session; they are always at least
 		// as fresh as the store. Persist them for future offline sessions.
@@ -156,9 +146,13 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 			const filteredCurrent = currentModels.filter(
 				(m) => !isModelSuppressed({ id: m.id, name: m.name }, suppress),
 			);
-			currentModels = filteredCurrent;
-			await context.store.write({ models: currentModels as unknown as Model<Api>[], checkedAt: Date.now() });
-			return currentModels;
+			await context.publish({
+				persist: { models: filteredCurrent as unknown as Model<Api>[], checkedAt: Date.now() },
+				update: () => {
+					currentModels = filteredCurrent;
+				},
+			});
+			return filteredCurrent;
 		}
 		const restored = await restoreStoredModels(context);
 		if (restored) return restored;
@@ -169,8 +163,16 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 		);
 	}
 
+	const storedEtag = await readCachedEtag();
+
 	try {
-		const { models: apiModels, raw, etag, notModified } = await fetchPlexusModels(apiKey, modelsUrl, undefined, storedEtag);
+		const { models: apiModels, raw, etag, notModified } = await fetchPlexusModels(
+			apiKey,
+			modelsUrl,
+			undefined,
+			storedEtag,
+			context.signal,
+		);
 
 		if (notModified) {
 			log("refreshModels: not modified", { etag: storedEtag });
@@ -180,13 +182,23 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 
 		const piModels = convertDescriptors(apiModels, baseUrl, suppress).map(descriptorToPiModel);
 
+		// pi publishes the returned list in memory but does not persist it —
+		// persistence is provider-owned via generation-checked publish().
+		const published = await context.publish({
+			persist: { models: piModels as unknown as Model<Api>[], checkedAt: Date.now() },
+			update: () => {
+				currentModels = piModels;
+			},
+		});
+		if (!published) {
+			log("refreshModels: publication superseded by a newer refresh", {});
+		}
+
 		await Promise.all([
-			context.store.write({ models: piModels, checkedAt: Date.now() }),
 			writeCachedEtag(etag),
 			raw ? writeRawResponse(raw) : Promise.resolve(),
 		]);
 
-		currentModels = piModels;
 		log("refreshModels: fetched", { count: piModels.length });
 		return piModels;
 	} catch (error) {
@@ -198,13 +210,19 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 async function restoreStoredModels(
 	context: RefreshModelsContext,
 ): Promise<ProviderModelConfig[] | undefined> {
-	const stored = await context.store.read();
+	const stored = context.stored;
 	if (!stored || stored.models.length === 0) return undefined;
 	const suppress = getSuppressedModels();
 	const models = (stored.models as unknown as ProviderModelConfig[]).filter(
 		(m) => !isModelSuppressed({ id: m.id, name: m.name }, suppress),
 	);
-	currentModels = models;
+	// Nothing new to persist (the snapshot came from the store); only adopt it
+	// as our in-memory list, generation-checked so a newer refresh wins.
+	await context.publish({
+		update: () => {
+			currentModels = models;
+		},
+	});
 	log("refreshModels: restored from store", { count: models.length });
 	return models;
 }
@@ -239,7 +257,8 @@ function createPlexusLoginProvider(): NonNullable<ProviderConfig["oauth"]> {
 				plexusBaseUrl: baseUrl,
 			} satisfies PlexusCredentials;
 		},
-		async refreshToken(credentials: OAuthCredentials): Promise<OAuthCredentials> {
+		async refreshToken(credentials: OAuthCredentials, signal: AbortSignal): Promise<OAuthCredentials> {
+			signal.throwIfAborted();
 			return { ...credentials, expires: PLEXUS_CREDENTIAL_EXPIRES_AT };
 		},
 		getApiKey(credentials: OAuthCredentials): string {
@@ -270,9 +289,18 @@ async function handleRefresh(ctx: ExtensionCommandContext): Promise<void> {
 		return;
 	}
 	ctx.ui.notify("Refreshing Plexus models…", "info");
-	// ModelRegistry.refresh() reloads models.json and re-runs every provider's
-	// refreshModels hook, including ours.
-	await ctx.modelRegistry.refresh();
+	// Scope the refresh to Plexus and bypass pi's freshness checks; the result
+	// surfaces per-provider errors and cancellation that a bare refresh() drops.
+	const result = await ctx.modelRegistry.refresh({ providers: [PROVIDER_NAME], force: true });
+	if (result.aborted) {
+		ctx.ui.notify("Plexus model refresh was cancelled.", "warning");
+		return;
+	}
+	const refreshError = result.errors.get(PROVIDER_NAME);
+	if (refreshError) {
+		ctx.ui.notify(`Plexus model refresh failed: ${refreshError.message}`, "error");
+		return;
+	}
 	ctx.ui.notify(
 		currentModels.length > 0
 			? `Refreshed ${currentModels.length} Plexus models`

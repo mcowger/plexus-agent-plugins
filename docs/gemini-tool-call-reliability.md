@@ -9,8 +9,9 @@ what we implemented. Written so we don't re-derive this from scratch.
 >   problems. One is not caused by the other (verified: malformed calls still
 >   occur with IDs correctly present).
 > - **Oh My Pi (`@oh-my-pi/*`) already handles both natively** — no plugin code.
-> - **pi (`@earendil-works/*`, 0.81.x) needs both worked around in the plugin**,
->   because its fork lacks the fixes OMP's fork has.
+> - **pi ≥ v0.84.0 handles IDs natively**; the plugin workaround for Problem A was
+>   removed. Only `MALFORMED_FUNCTION_CALL` (Problem B) still needs the plugin
+>   normalization on pi.
 
 ---
 
@@ -50,7 +51,7 @@ Gemini 3.x requires that the `id` returned on each `functionCall` be echoed back
 on the matching `functionResponse`. When it isn't, the model degrades over a long
 tool history and eventually emits a malformed textual pseudo-call.
 
-### Root cause (pi fork only)
+### Root cause (pi fork only, pre-v0.84.0)
 `@earendil-works/pi-ai` `providers/google-shared.ts`:
 ```ts
 export function requiresToolCallId(modelId: string): boolean {
@@ -60,14 +61,18 @@ export function requiresToolCallId(modelId: string): boolean {
 `id` is only serialized onto `functionCall`/`functionResponse` when this returns
 true — so **Gemini 3.x loses the id on every replay**.
 
-### Fix (pi plugin) — `packages/plexus-pi/src/gemini-toolcall-id.ts`
-Re-inject IDs at the serialization boundary using two extension hooks that fire
-sequentially in the same single-threaded stream call:
-- `context` — capture ordered `functionCallIds` / `functionResponseIds` from the
-  internal messages (which still carry intact IDs).
-- `before_provider_request` — the serialized Google payload has the IDs stripped;
-  walk `contents[].parts[]` and re-inject IDs by order (independent queues for
-  calls vs responses preserve identity under parallel tool calls).
+### Fix (pi plugin) — RETIRED in pi v0.84.0
+**pi v0.84.0 adopted the suggested upstream fix below** (`requiresToolCallId`
+now returns true when `getGeminiMajorVersion(modelId) >= 3`, emitting `id` on
+both `functionCall` and `functionResponse`), so `gemini-toolcall-id.ts` and its
+tests were removed. Details kept for history:
+
+Re-injected IDs at the serialization boundary using two extension hooks that
+fired sequentially in the same single-threaded stream call:
+- `context` — captured ordered `functionCallIds` / `functionResponseIds` from the
+  internal messages (which still carried intact IDs).
+- `before_provider_request` — walked the serialized Google payload and re-injected
+  IDs by order.
 
 Gated to Gemini 3.x (`/gemini-(?:live-)?3(?:\.\d+)?[-.]/i` + aliases
 `gemini-flash-latest` / `gemini-flash-lite-latest`). Idempotent (skips parts that
@@ -88,9 +93,10 @@ model exposed under an alias *without* `gemini-3` in its id (e.g.
 `gemini-flash-latest`) would not get IDs. Only relevant if the Plexus catalog
 exposes such aliases; not currently worked around.
 
-### Suggested upstream fix (pi)
-Extend `requiresToolCallId` to also return true when
-`getGeminiMajorVersion(modelId) >= 3` (that helper already exists in the file).
+### Upstream fix (shipped in pi v0.84.0)
+`requiresToolCallId` now also returns true when `getGeminiMajorVersion(modelId)
+>= 3` (`packages/ai/src/api/google-shared.ts`), and the serializer emits `id`
+on both `functionCall` and `functionResponse` for those models.
 
 ---
 
@@ -262,9 +268,8 @@ phrasings including malformed. `retry.maxRetries` default **10**.
 | File | Purpose |
 |---|---|
 | `packages/plexus-models/src/convert.ts` | shared model conversion; sets per-model `api` from `preferred_api` |
-| `packages/plexus-pi/src/gemini-toolcall-id.ts` (+`.test.ts`) | pi: re-inject Gemini 3.x function-call IDs (Problem A) |
 | `packages/plexus-pi/src/gemini-malformed-retry.ts` (+`.test.ts`) | pi: normalize `MALFORMED_FUNCTION_CALL` so native retry fires (Problem B) |
-| `packages/plexus-pi/src/extension.ts` | registers `context`, `before_provider_request`, `message_end` hooks |
+| `packages/plexus-pi/src/extension.ts` | registers the `message_end` hook |
 | `packages/plexus-oh-my-pi/*` | no tool-call-reliability code — OMP fork handles both natively |
 
 ---
@@ -274,7 +279,8 @@ phrasings including malformed. `retry.maxRetries` default **10**.
 - **OMP, both problems → do nothing.** The fork already fixed them upstream
   (`supportsFunctionPartId` for IDs; `Flag.MalformedFunctionCall` + default-10
   retry for malformed). Redundant code would risk interfering.
-- **pi, IDs → re-inject.** Host `requiresToolCallId` omits Gemini 3.
+- **pi, IDs → fixed upstream in v0.84.0; plugin workaround removed.** pi
+  `requiresToolCallId` now covers Gemini ≥ 3.
 - **pi, malformed → normalize + native retry, NOT a `streamSimple` wrapper.**
   Native retry exists in 0.81.1 and is safer (drops the failed message); the
   visible-content-before-error property makes a wrapper retry unsafe anyway.
@@ -285,10 +291,11 @@ phrasings including malformed. `retry.maxRetries` default **10**.
 
 ## 7. Maintenance / re-verify on host upgrades
 
-Both pi workarounds probe host internals; re-check these when bumping the host:
-- **pi IDs:** whether `requiresToolCallId` (or its replacement) now covers Gemini
-  3 — if so, our re-injection becomes a harmless idempotent no-op and can be
-  retired.
+The pi malformed-call workaround probes host internals; re-check these when
+bumping the host:
+- **pi IDs:** retired in v0.84.0 — upstream `requiresToolCallId` covers Gemini ≥ 3
+  (`google-shared.ts`), so no re-injection is needed. Verify only that the
+  per-model `id` values pi requires from Gemini are echoed by the Plexus proxy.
 - **pi malformed:**
   - `message_end` still returns a same-role `{ message }` replacement applied
     before the retry gate (`emitMessageEnd` → `_replaceMessageInPlace`).

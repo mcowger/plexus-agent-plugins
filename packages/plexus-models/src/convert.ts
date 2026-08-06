@@ -412,16 +412,20 @@ export const DEFAULT_MODELS_FETCH_TIMEOUT_MS = 10_000;
  *
  * Bounded by an AbortController-based timeout (default 10s) so a slow or
  * unreachable server cannot hang the caller indefinitely — plugin startup
- * paths depend on this call resolving (or rejecting) promptly.
+ * paths depend on this call resolving (or rejecting) promptly. An optional
+ * caller `signal` is honored alongside the timeout; caller cancellation
+ * propagates the raw AbortError rather than the timeout error.
  */
 export async function fetchPlexusModels(
 	apiKey: string,
 	modelsUrl: string,
 	timeoutMs: number = DEFAULT_MODELS_FETCH_TIMEOUT_MS,
 	etag?: string,
+	signal?: AbortSignal,
 ): Promise<{ models: PlexusApiModel[]; raw?: import("./types.ts").PlexusApiResponse; etag?: string; notModified?: boolean }> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
+	const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
 	try {
 		const headers: Record<string, string> = { Accept: "application/json" };
 		if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
@@ -429,7 +433,7 @@ export async function fetchPlexusModels(
 
 		const res = await fetch(modelsUrl, {
 			headers,
-			signal: controller.signal,
+			signal: requestSignal,
 		});
 		
 		if (res.status === 304) {
@@ -443,6 +447,8 @@ export async function fetchPlexusModels(
 		const responseEtag = res.headers.get("etag") ?? undefined;
 		return { models: raw.data ?? [], raw, etag: responseEtag };
 	} catch (err) {
+		// Caller cancellation propagates unchanged so hosts can detect their own abort.
+		if (signal?.aborted) throw err;
 		if (err instanceof Error && err.name === "AbortError") {
 			throw new Error(`Plexus models fetch timed out after ${timeoutMs}ms`);
 		}
