@@ -40,7 +40,13 @@ import {
 	saveBaseUrl,
 	saveDefaultModel,
 } from "./config.ts";
-import { readCachedEtag, writeCachedEtag, writeRawResponse } from "./cache.ts";
+import {
+	readCachedEtag,
+	readCachedModelsSync,
+	writeCachedEtag,
+	writeCachedModels,
+	writeRawResponse,
+} from "./cache.ts";
 import { log } from "./log.ts";
 import { descriptorToPiModel } from "./mapper.ts";
 import { normalizeMalformedFunctionCall } from "./gemini-malformed-retry.ts";
@@ -58,8 +64,29 @@ let currentModels: ProviderModelConfig[] = [];
 export default function plexusExtension(pi: ExtensionAPI): void {
 	const envApiKey = getEnvApiKey();
 	const startupBaseUrl = getBaseUrl();
+	const suppressPatterns = getSuppressedModels();
 
-	log("startup", { baseUrl: startupBaseUrl, hasEnvApiKey: !!envApiKey });
+	const cached = readCachedModelsSync();
+	let startupModels: ProviderModelConfig[] = [];
+	if (cached?.models && cached.models.length > 0) {
+		startupModels = convertDescriptors(
+			cached.models,
+			startupBaseUrl ?? PLACEHOLDER_BASE_URL,
+			suppressPatterns,
+		).map(descriptorToPiModel);
+	} else if (cached?.piModels && cached.piModels.length > 0) {
+		startupModels = cached.piModels.filter(
+			(m) => !isModelSuppressed({ id: m.id, name: m.name }, suppressPatterns),
+		);
+	}
+
+	currentModels = startupModels;
+
+	log("startup", {
+		baseUrl: startupBaseUrl,
+		hasEnvApiKey: !!envApiKey,
+		cachedModelCount: startupModels.length,
+	});
 
 	// Retag Gemini MALFORMED_FUNCTION_CALL failures (which pi flattens to a generic
 	// non-retryable "An unknown error occurred") so pi's native agent-turn retry
@@ -75,7 +102,7 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 		...(envApiKey ? { apiKey: PROVIDER_API_KEY_TEMPLATE } : {}),
 		authHeader: true,
 		baseUrl: startupBaseUrl ?? PLACEHOLDER_BASE_URL,
-		models: [],
+		models: startupModels,
 		refreshModels: refreshPlexusModels,
 		oauth: createPlexusLoginProvider(),
 	});
@@ -180,7 +207,8 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 			if (restored) return restored;
 		}
 
-		const piModels = convertDescriptors(apiModels, baseUrl, suppress).map(descriptorToPiModel);
+		const descriptors = convertDescriptors(apiModels, baseUrl, suppress);
+		const piModels = descriptors.map(descriptorToPiModel);
 
 		// pi publishes the returned list in memory but does not persist it —
 		// persistence is provider-owned via generation-checked publish().
@@ -195,6 +223,7 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 		}
 
 		await Promise.all([
+			writeCachedModels(descriptors, etag),
 			writeCachedEtag(etag),
 			raw ? writeRawResponse(raw) : Promise.resolve(),
 		]);

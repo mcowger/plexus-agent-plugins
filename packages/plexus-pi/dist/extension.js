@@ -474,12 +474,88 @@ function getSuppressedModels() {
 
 // src/cache.ts
 import { mkdir as mkdir2, writeFile as writeFile2, readFile } from "fs/promises";
-import { existsSync as existsSync2 } from "fs";
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
 import { join as join2 } from "path";
 import { getAgentDir as getAgentDir2 } from "@earendil-works/pi-coding-agent";
 var getCacheDir = () => join2(getAgentDir2(), "extensions", "plexus");
+var getModelsCachePath = () => join2(getCacheDir(), "plexus-models-cache.json");
 var getRawResponsePath = () => join2(getCacheDir(), "plexus-models-response.json");
 var getEtagPath = () => join2(getCacheDir(), "plexus-models-etag.txt");
+var getModelsStorePath = () => join2(getAgentDir2(), "models-store.json");
+function parseCacheData(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return null;
+    const obj = parsed;
+    if (!Array.isArray(obj["models"]))
+      return null;
+    return {
+      models: obj["models"],
+      timestamp: typeof obj["timestamp"] === "number" ? obj["timestamp"] : 0,
+      etag: typeof obj["etag"] === "string" ? obj["etag"] : undefined
+    };
+  } catch {
+    return null;
+  }
+}
+function parseModelsStoreData(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return null;
+    const obj = parsed;
+    const plexusObj = obj["plexus"];
+    if (!plexusObj)
+      return null;
+    let modelsList = null;
+    let checkedAt = 0;
+    if (Array.isArray(plexusObj)) {
+      modelsList = plexusObj;
+    } else if (typeof plexusObj === "object" && plexusObj !== null) {
+      const pObj = plexusObj;
+      if (Array.isArray(pObj["models"])) {
+        modelsList = pObj["models"];
+      }
+      if (typeof pObj["checkedAt"] === "number") {
+        checkedAt = pObj["checkedAt"];
+      }
+    }
+    if (!modelsList)
+      return null;
+    return {
+      piModels: modelsList,
+      timestamp: checkedAt
+    };
+  } catch {
+    return null;
+  }
+}
+function readCachedModelsSync() {
+  try {
+    const cachePath = getModelsCachePath();
+    if (existsSync2(cachePath)) {
+      const cache = parseCacheData(readFileSync2(cachePath, "utf8"));
+      if (cache)
+        return cache;
+    }
+    const storePath = getModelsStorePath();
+    if (existsSync2(storePath)) {
+      const storeCache = parseModelsStoreData(readFileSync2(storePath, "utf8"));
+      if (storeCache)
+        return storeCache;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+async function writeCachedModels(models, etag) {
+  await mkdir2(getCacheDir(), { recursive: true });
+  const payload = { models, timestamp: Date.now(), etag };
+  await writeFile2(getModelsCachePath(), `${JSON.stringify(payload, null, 2)}
+`, "utf8");
+}
 async function writeRawResponse(data) {
   await mkdir2(getCacheDir(), { recursive: true });
   await writeFile2(getRawResponsePath(), `${JSON.stringify(data, null, 2)}
@@ -487,6 +563,9 @@ async function writeRawResponse(data) {
 }
 async function readCachedEtag() {
   try {
+    const cache = readCachedModelsSync();
+    if (cache?.etag)
+      return cache.etag;
     const p = getEtagPath();
     if (!existsSync2(p))
       return;
@@ -628,14 +707,27 @@ var currentModels = [];
 function plexusExtension(pi) {
   const envApiKey = getEnvApiKey();
   const startupBaseUrl = getBaseUrl();
-  log("startup", { baseUrl: startupBaseUrl, hasEnvApiKey: !!envApiKey });
+  const suppressPatterns = getSuppressedModels();
+  const cached = readCachedModelsSync();
+  let startupModels = [];
+  if (cached?.models && cached.models.length > 0) {
+    startupModels = convertDescriptors(cached.models, startupBaseUrl ?? PLACEHOLDER_BASE_URL, suppressPatterns).map(descriptorToPiModel);
+  } else if (cached?.piModels && cached.piModels.length > 0) {
+    startupModels = cached.piModels.filter((m) => !isModelSuppressed({ id: m.id, name: m.name }, suppressPatterns));
+  }
+  currentModels = startupModels;
+  log("startup", {
+    baseUrl: startupBaseUrl,
+    hasEnvApiKey: !!envApiKey,
+    cachedModelCount: startupModels.length
+  });
   pi.on("message_end", (event) => normalizeMalformedFunctionCall(event.message, PROVIDER_NAME));
   pi.registerProvider(PROVIDER_NAME, {
     api: "openai-completions",
     ...envApiKey ? { apiKey: PROVIDER_API_KEY_TEMPLATE } : {},
     authHeader: true,
     baseUrl: startupBaseUrl ?? PLACEHOLDER_BASE_URL,
-    models: [],
+    models: startupModels,
     refreshModels: refreshPlexusModels,
     oauth: createPlexusLoginProvider()
   });
@@ -705,7 +797,8 @@ async function refreshPlexusModels(context) {
       if (restored)
         return restored;
     }
-    const piModels = convertDescriptors(apiModels, baseUrl, suppress).map(descriptorToPiModel);
+    const descriptors = convertDescriptors(apiModels, baseUrl, suppress);
+    const piModels = descriptors.map(descriptorToPiModel);
     const published = await context.publish({
       persist: { models: piModels, checkedAt: Date.now() },
       update: () => {
@@ -716,6 +809,7 @@ async function refreshPlexusModels(context) {
       log("refreshModels: publication superseded by a newer refresh", {});
     }
     await Promise.all([
+      writeCachedModels(descriptors, etag),
       writeCachedEtag(etag),
       raw ? writeRawResponse(raw) : Promise.resolve()
     ]);
