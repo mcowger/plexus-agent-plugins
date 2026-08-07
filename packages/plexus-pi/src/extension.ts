@@ -31,7 +31,13 @@ import type {
 	OAuthLoginCallbacks,
 	RefreshModelsContext,
 } from "@earendil-works/pi-ai";
-import { adjustBaseUrl, convertDescriptors, fetchPlexusModels, isModelSuppressed } from "../../plexus-models/src/index.ts";
+import {
+	adjustBaseUrl,
+	convertDescriptors,
+	fetchPlexusModels,
+	isModelSuppressed,
+	type PlexusModelDescriptor,
+} from "../../plexus-models/src/index.ts";
 import {
 	getBaseUrl,
 	getEnvApiKey,
@@ -48,7 +54,7 @@ import {
 	writeRawResponse,
 } from "./cache.ts";
 import { log } from "./log.ts";
-import { descriptorToPiModel } from "./mapper.ts";
+import { descriptorToPiModel, MINIMUM_OUTPUT_TOKENS } from "./mapper.ts";
 import { normalizeMalformedFunctionCall } from "./gemini-malformed-retry.ts";
 
 const PROVIDER_NAME = "plexus";
@@ -61,6 +67,43 @@ type PlexusCredentials = OAuthCredentials & { plexusBaseUrl?: string };
 // Keep the current model list in module scope so setDefaultModel can reference it.
 let currentModels: ProviderModelConfig[] = [];
 
+export function cachedDescriptorsToPiModels(
+	descriptors: PlexusModelDescriptor[],
+	suppressPatterns?: string[],
+): ProviderModelConfig[] {
+	return descriptors
+		.filter((descriptor) => !isModelSuppressed({ id: descriptor.id, name: descriptor.name }, suppressPatterns))
+		.map(descriptorToPiModel);
+}
+
+export function enforceMinimumOutputTokens(payload: unknown): unknown {
+	if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+
+	const next = { ...(payload as Record<string, unknown>) };
+	let changed = false;
+	for (const field of ["max_completion_tokens", "max_tokens", "max_output_tokens"] as const) {
+		const value = next[field];
+		if (typeof value === "number" && Number.isFinite(value) && value < MINIMUM_OUTPUT_TOKENS) {
+			next[field] = MINIMUM_OUTPUT_TOKENS;
+			changed = true;
+		}
+	}
+
+	const generationConfig = next["generationConfig"];
+	if (generationConfig && typeof generationConfig === "object" && !Array.isArray(generationConfig)) {
+		const maxOutputTokens = (generationConfig as Record<string, unknown>)["maxOutputTokens"];
+		if (typeof maxOutputTokens === "number" && Number.isFinite(maxOutputTokens) && maxOutputTokens < MINIMUM_OUTPUT_TOKENS) {
+			next["generationConfig"] = {
+				...(generationConfig as Record<string, unknown>),
+				maxOutputTokens: MINIMUM_OUTPUT_TOKENS,
+			};
+			changed = true;
+		}
+	}
+
+	return changed ? next : payload;
+}
+
 export default function plexusExtension(pi: ExtensionAPI): void {
 	const envApiKey = getEnvApiKey();
 	const startupBaseUrl = getBaseUrl();
@@ -69,11 +112,7 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	const cached = readCachedModelsSync();
 	let startupModels: ProviderModelConfig[] = [];
 	if (cached?.models && cached.models.length > 0) {
-		startupModels = convertDescriptors(
-			cached.models,
-			startupBaseUrl ?? PLACEHOLDER_BASE_URL,
-			suppressPatterns,
-		).map(descriptorToPiModel);
+		startupModels = cachedDescriptorsToPiModels(cached.models, suppressPatterns);
 	} else if (cached?.piModels && cached.piModels.length > 0) {
 		startupModels = cached.piModels.filter(
 			(m) => !isModelSuppressed({ id: m.id, name: m.name }, suppressPatterns),
@@ -81,6 +120,10 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	}
 
 	currentModels = startupModels;
+
+	pi.on("before_provider_request", (event, ctx) => (
+		ctx.model?.provider === PROVIDER_NAME ? enforceMinimumOutputTokens(event.payload) : undefined
+	));
 
 	log("startup", {
 		baseUrl: startupBaseUrl,

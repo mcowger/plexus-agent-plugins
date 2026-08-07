@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { convertToPiModels, descriptorToPiModel } from "./mapper.ts";
+import { convertToPiModels, descriptorToPiModel, MINIMUM_OUTPUT_TOKENS } from "./mapper.ts";
 
 describe("descriptorToPiModel", () => {
 	test("retains provider so Pi can select Plexus defaults", () => {
@@ -22,6 +22,23 @@ describe("descriptorToPiModel", () => {
 		});
 
 		expect(model.provider).toBe("plexus");
+	});
+
+	test("enforces the minimum output token limit", () => {
+		const model = descriptorToPiModel({
+			id: "low-output-model",
+			name: "Low Output Model",
+			preferredApi: "openai-completions",
+			provider: "plexus",
+			baseUrl: "https://plexus.example.com/v1",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1_000_000,
+			maxTokens: 1,
+		});
+
+		expect(model.maxTokens).toBe(MINIMUM_OUTPUT_TOKENS);
 	});
 
 	test("maps each API dialect to the base expected by pi", () => {

@@ -10,6 +10,8 @@ import {
 	type PlexusModelDescriptor,
 } from "../../plexus-models/src/index.ts";
 
+export const MINIMUM_OUTPUT_TOKENS = 8_192;
+
 /**
  * Maps a PlexusModelDescriptor to a pi ProviderModelConfig entry suitable for
  * use in pi.registerProvider({ models: [...] }).
@@ -80,7 +82,7 @@ export function descriptorToPiModel(descriptor: PlexusModelDescriptor) {
 		input: descriptor.input,
 		cost,
 		contextWindow: descriptor.contextWindow,
-		maxTokens: descriptor.maxTokens,
+		maxTokens: Math.max(descriptor.maxTokens, MINIMUM_OUTPUT_TOKENS),
 		...(builtinModel?.thinkingLevelMap !== undefined
 			? { thinkingLevelMap: builtinModel.thinkingLevelMap }
 			: {}),

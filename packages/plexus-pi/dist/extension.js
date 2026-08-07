@@ -609,6 +609,7 @@ async function writeLogLine(message, data) {
 
 // src/mapper.ts
 import { getModel } from "@earendil-works/pi-ai/compat";
+var MINIMUM_OUTPUT_TOKENS = 8192;
 function descriptorToPiModel(descriptor) {
   let builtinModel;
   if (descriptor.piProvider && descriptor.piModel) {
@@ -654,7 +655,7 @@ function descriptorToPiModel(descriptor) {
     input: descriptor.input,
     cost,
     contextWindow: descriptor.contextWindow,
-    maxTokens: descriptor.maxTokens,
+    maxTokens: Math.max(descriptor.maxTokens, MINIMUM_OUTPUT_TOKENS),
     ...builtinModel?.thinkingLevelMap !== undefined ? { thinkingLevelMap: builtinModel.thinkingLevelMap } : {},
     ...builtinModel?.headers !== undefined ? { headers: builtinModel.headers } : {},
     ...compat !== undefined ? { compat } : {}
@@ -704,6 +705,34 @@ var PROVIDER_API_KEY_TEMPLATE = "${PLEXUS_API_KEY}";
 var PLEXUS_CREDENTIAL_EXPIRES_AT = 253402300799000;
 var PLACEHOLDER_BASE_URL = "http://localhost/v1";
 var currentModels = [];
+function cachedDescriptorsToPiModels(descriptors, suppressPatterns) {
+  return descriptors.filter((descriptor) => !isModelSuppressed({ id: descriptor.id, name: descriptor.name }, suppressPatterns)).map(descriptorToPiModel);
+}
+function enforceMinimumOutputTokens(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload))
+    return payload;
+  const next = { ...payload };
+  let changed = false;
+  for (const field of ["max_completion_tokens", "max_tokens", "max_output_tokens"]) {
+    const value = next[field];
+    if (typeof value === "number" && Number.isFinite(value) && value < MINIMUM_OUTPUT_TOKENS) {
+      next[field] = MINIMUM_OUTPUT_TOKENS;
+      changed = true;
+    }
+  }
+  const generationConfig = next["generationConfig"];
+  if (generationConfig && typeof generationConfig === "object" && !Array.isArray(generationConfig)) {
+    const maxOutputTokens = generationConfig["maxOutputTokens"];
+    if (typeof maxOutputTokens === "number" && Number.isFinite(maxOutputTokens) && maxOutputTokens < MINIMUM_OUTPUT_TOKENS) {
+      next["generationConfig"] = {
+        ...generationConfig,
+        maxOutputTokens: MINIMUM_OUTPUT_TOKENS
+      };
+      changed = true;
+    }
+  }
+  return changed ? next : payload;
+}
 function plexusExtension(pi) {
   const envApiKey = getEnvApiKey();
   const startupBaseUrl = getBaseUrl();
@@ -711,11 +740,12 @@ function plexusExtension(pi) {
   const cached = readCachedModelsSync();
   let startupModels = [];
   if (cached?.models && cached.models.length > 0) {
-    startupModels = convertDescriptors(cached.models, startupBaseUrl ?? PLACEHOLDER_BASE_URL, suppressPatterns).map(descriptorToPiModel);
+    startupModels = cachedDescriptorsToPiModels(cached.models, suppressPatterns);
   } else if (cached?.piModels && cached.piModels.length > 0) {
     startupModels = cached.piModels.filter((m) => !isModelSuppressed({ id: m.id, name: m.name }, suppressPatterns));
   }
   currentModels = startupModels;
+  pi.on("before_provider_request", (event, ctx) => ctx.model?.provider === PROVIDER_NAME ? enforceMinimumOutputTokens(event.payload) : undefined);
   log("startup", {
     baseUrl: startupBaseUrl,
     hasEnvApiKey: !!envApiKey,
@@ -922,5 +952,7 @@ async function handleSetDefaultModel(pi, ctx, requestedModelId) {
   ctx.ui.notify(active ? `Plexus model selected: ${model.id}.` : `Plexus model ${model.id} was saved but could not be selected in this session.`, active ? "info" : "warning");
 }
 export {
-  plexusExtension as default
+  enforceMinimumOutputTokens,
+  plexusExtension as default,
+  cachedDescriptorsToPiModels
 };
