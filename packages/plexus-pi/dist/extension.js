@@ -482,13 +482,20 @@ var getModelsCachePath = () => join2(getCacheDir(), "plexus-models-cache.json");
 var getRawResponsePath = () => join2(getCacheDir(), "plexus-models-response.json");
 var getEtagPath = () => join2(getCacheDir(), "plexus-models-etag.txt");
 var getModelsStorePath = () => join2(getAgentDir2(), "models-store.json");
+function isPlexusModelDescriptor(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return false;
+  const model = value;
+  const cost = model["cost"];
+  return typeof model["id"] === "string" && typeof model["name"] === "string" && typeof model["preferredApi"] === "string" && model["provider"] === "plexus" && typeof model["baseUrl"] === "string" && typeof model["reasoning"] === "boolean" && Array.isArray(model["input"]) && typeof model["contextWindow"] === "number" && typeof model["maxTokens"] === "number" && !!cost && typeof cost === "object" && !Array.isArray(cost) && typeof cost["input"] === "number" && typeof cost["output"] === "number" && typeof cost["cacheRead"] === "number" && typeof cost["cacheWrite"] === "number";
+}
 function parseCacheData(raw) {
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
       return null;
     const obj = parsed;
-    if (!Array.isArray(obj["models"]))
+    if (!Array.isArray(obj["models"]) || !obj["models"].every(isPlexusModelDescriptor))
       return null;
     return {
       models: obj["models"],

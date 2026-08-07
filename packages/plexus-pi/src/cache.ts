@@ -17,14 +17,38 @@ export interface ModelCache {
 	etag?: string;
 }
 
+function isPlexusModelDescriptor(value: unknown): value is PlexusModelDescriptor {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const model = value as Record<string, unknown>;
+	const cost = model["cost"];
+	return (
+		typeof model["id"] === "string" &&
+		typeof model["name"] === "string" &&
+		typeof model["preferredApi"] === "string" &&
+		model["provider"] === "plexus" &&
+		typeof model["baseUrl"] === "string" &&
+		typeof model["reasoning"] === "boolean" &&
+		Array.isArray(model["input"]) &&
+		typeof model["contextWindow"] === "number" &&
+		typeof model["maxTokens"] === "number" &&
+		!!cost &&
+		typeof cost === "object" &&
+		!Array.isArray(cost) &&
+		typeof (cost as Record<string, unknown>)["input"] === "number" &&
+		typeof (cost as Record<string, unknown>)["output"] === "number" &&
+		typeof (cost as Record<string, unknown>)["cacheRead"] === "number" &&
+		typeof (cost as Record<string, unknown>)["cacheWrite"] === "number"
+	);
+}
+
 function parseCacheData(raw: string): ModelCache | null {
 	try {
 		const parsed = JSON.parse(raw) as unknown;
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
 		const obj = parsed as Record<string, unknown>;
-		if (!Array.isArray(obj["models"])) return null;
+		if (!Array.isArray(obj["models"]) || !obj["models"].every(isPlexusModelDescriptor)) return null;
 		return {
-			models: obj["models"] as PlexusModelDescriptor[],
+			models: obj["models"],
 			timestamp: typeof obj["timestamp"] === "number" ? obj["timestamp"] : 0,
 			etag: typeof obj["etag"] === "string" ? obj["etag"] : undefined,
 		};

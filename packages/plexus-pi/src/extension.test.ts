@@ -24,6 +24,49 @@ describe("cachedDescriptorsToPiModels", () => {
 			maxTokens: 384_000,
 		});
 	});
+
+	test("preserves cached dialect and metadata without reparsing descriptors", () => {
+		const [responses, gemini] = cachedDescriptorsToPiModels([
+			{
+				id: "gpt-5.6-terra",
+				name: "GPT-5.6 Terra",
+				preferredApi: "openai-responses",
+				provider: "plexus",
+				baseUrl: "https://plexus.example.com/v1",
+				reasoning: true,
+				input: ["text", "image"],
+				cost: { input: 0.000002, output: 0.000012, cacheRead: 0.0000002, cacheWrite: 0.0000025 },
+				contextWindow: 1_050_000,
+				maxTokens: 128_000,
+			},
+			{
+				id: "gemini-3.6-flash",
+				name: "Gemini 3.6 Flash",
+				preferredApi: "google-generative-ai",
+				provider: "plexus",
+				baseUrl: "https://plexus.example.com/v1beta",
+				reasoning: true,
+				input: ["text", "image"],
+				cost: { input: 0.0000015, output: 0.0000075, cacheRead: 0.00000015, cacheWrite: 0 },
+				contextWindow: 1_048_576,
+				maxTokens: 65_536,
+			},
+		]);
+
+		expect(responses).toMatchObject({
+			api: "openai-responses",
+			contextWindow: 1_050_000,
+			maxTokens: 128_000,
+			input: ["text", "image"],
+			cost: { input: 2, output: 12, cacheRead: 0.19999999999999998, cacheWrite: 2.5 },
+		});
+		expect(gemini).toMatchObject({
+			api: "google-generative-ai",
+			baseUrl: "https://plexus.example.com/v1beta",
+			contextWindow: 1_048_576,
+			maxTokens: 65_536,
+		});
+	});
 });
 
 describe("enforceMinimumOutputTokens", () => {
