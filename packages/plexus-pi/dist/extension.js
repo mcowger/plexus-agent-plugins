@@ -959,7 +959,7 @@ async function handleSetDefaultModel(pi, ctx, requestedModelId) {
   ctx.ui.notify(active ? `Plexus model selected: ${model.id}.` : `Plexus model ${model.id} was saved but could not be selected in this session.`, active ? "info" : "warning");
 }
 export {
-  enforceMinimumOutputTokens,
+  cachedDescriptorsToPiModels,
   plexusExtension as default,
-  cachedDescriptorsToPiModels
+  enforceMinimumOutputTokens
 };

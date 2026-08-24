@@ -1,6 +1,6 @@
 {
 	"name": "@mcowger/oh-my-pi-plexus",
-	"version": "1.4.2",
+	"version": "1.4.3",
 	"description": "Plexus AI proxy plugin for the Oh My Pi coding agent",
 	"type": "module",
 	"files": [
@@ -26,15 +26,15 @@
 		"build": "bun run build.ts"
 	},
 	"peerDependencies": {
-		"@oh-my-pi/pi-ai": ">=17.1.0",
-		"@oh-my-pi/pi-coding-agent": ">=17.1.0",
-		"@oh-my-pi/pi-utils": ">=17.1.0"
+		"@oh-my-pi/pi-ai": ">=18.0.3",
+		"@oh-my-pi/pi-coding-agent": ">=18.0.3",
+		"@oh-my-pi/pi-utils": ">=18.0.3"
 	},
 	"devDependencies": {
-		"@oh-my-pi/pi-ai": "^17.1.0",
-		"@oh-my-pi/pi-catalog": "^17.1.0",
-		"@oh-my-pi/pi-coding-agent": "^17.1.0",
-		"@oh-my-pi/pi-utils": "^17.1.0",
+		"@oh-my-pi/pi-ai": "^18.0.3",
+		"@oh-my-pi/pi-catalog": "18.0.3",
+		"@oh-my-pi/pi-coding-agent": "^18.0.3",
+		"@oh-my-pi/pi-utils": "18.0.3",
 		"@types/bun": "latest"
 	},
 	"repository": {
