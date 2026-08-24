@@ -45,6 +45,10 @@ describe("OpenCode model mapping", () => {
         { id: "text-embedding-3-small" },
         { id: "whisper-large-v3" },
         { id: "opaque-transcriber", preferred_api: "audio_transcriptions" },
+        {
+          id: "gpt-4o-mini",
+          name: "GPT-4o mini Transcribe",
+        },
       ],
       "https://plexus.example.com/v1",
     )

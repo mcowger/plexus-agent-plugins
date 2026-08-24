@@ -148,6 +148,12 @@ describe("isChatModel", () => {
 			architecture: { output_modalities: ["image"] },
 		})).toBe(false);
 		expect(isChatModel({
+			id: "transcriber",
+			name: "GPT-4o mini Transcribe",
+			architecture: { input_modalities: ["audio"], output_modalities: ["text"] },
+		})).toBe(false);
+		expect(isChatModel({ id: "gpt-4o-mini", name: "GPT-4o mini Transcribe" })).toBe(false);
+		expect(isChatModel({
 			id: "multimodal-chat",
 			architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
 		})).toBe(true);

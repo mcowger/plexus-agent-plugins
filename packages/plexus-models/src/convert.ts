@@ -175,11 +175,19 @@ export function convertToDescriptor(raw: PlexusApiModel, baseUrl: string): Plexu
 export function isChatModel(model: PlexusApiModel): boolean {
 	if (!model.id) return false;
 
+	const inputModalities = model.architecture?.input_modalities;
+	if (inputModalities !== undefined && inputModalities.length > 0 && !inputModalities.includes("text")) {
+		return false;
+	}
+
 	const outputModalities = model.architecture?.output_modalities;
 	if (outputModalities !== undefined && !outputModalities.includes("text")) return false;
 
 	const modality = model.architecture?.modality;
 	if (modality?.includes("->")) {
+		const input = modality.split("->")[0] ?? "";
+		if (!input.toLowerCase().includes("text")) return false;
+
 		const output = modality.split("->").at(-1) ?? "";
 		if (!output.toLowerCase().includes("text")) return false;
 	}

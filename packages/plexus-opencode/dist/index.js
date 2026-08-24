@@ -107,11 +107,18 @@ function adjustBaseUrl(baseUrl, preferredApi, anthropicBaseStyle = "root") {
 function isChatModel(model) {
   if (!model.id)
     return false;
+  const inputModalities = model.architecture?.input_modalities;
+  if (inputModalities !== undefined && inputModalities.length > 0 && !inputModalities.includes("text")) {
+    return false;
+  }
   const outputModalities = model.architecture?.output_modalities;
   if (outputModalities !== undefined && !outputModalities.includes("text"))
     return false;
   const modality = model.architecture?.modality;
   if (modality?.includes("->")) {
+    const input = modality.split("->")[0] ?? "";
+    if (!input.toLowerCase().includes("text"))
+      return false;
     const output = modality.split("->").at(-1) ?? "";
     if (!output.toLowerCase().includes("text"))
       return false;
@@ -784,27 +791,27 @@ var plugin2 = {
 };
 var src_default = plugin2;
 export {
-  toRuntimeModels,
-  src_default as default,
-  buildModels,
-  REFRESH_TTL_MS,
-  PlexusProviderPlugin,
-  PLEXUS_SUPPRESS_MODELS_OPTION,
-  PLEXUS_REFRESH_COMMAND,
-  PLEXUS_PROVIDER_NAME,
-  PLEXUS_PROVIDER_ID,
-  PLEXUS_PLUGIN_ID,
-  PLEXUS_LOG_SERVICE,
-  PLEXUS_BASE_URL_OPTION,
-  PLACEHOLDER_MODEL_ID,
-  OPENAI_COMPATIBLE_NPM,
-  MODELS_FETCH_TIMEOUT_MS,
-  ENV_SUPPRESS_MODELS,
-  ENV_SUPPRESSED_MODELS,
-  ENV_IGNORE_MODELS,
-  ENV_EXCLUDE_MODELS,
-  ENV_BASE_URL,
-  ENV_API_URL,
+  CONFIG_HOOK_REFRESH_BUDGET_MS,
   ENV_API_KEY,
-  CONFIG_HOOK_REFRESH_BUDGET_MS
+  ENV_API_URL,
+  ENV_BASE_URL,
+  ENV_EXCLUDE_MODELS,
+  ENV_IGNORE_MODELS,
+  ENV_SUPPRESSED_MODELS,
+  ENV_SUPPRESS_MODELS,
+  MODELS_FETCH_TIMEOUT_MS,
+  OPENAI_COMPATIBLE_NPM,
+  PLACEHOLDER_MODEL_ID,
+  PLEXUS_BASE_URL_OPTION,
+  PLEXUS_LOG_SERVICE,
+  PLEXUS_PLUGIN_ID,
+  PLEXUS_PROVIDER_ID,
+  PLEXUS_PROVIDER_NAME,
+  PLEXUS_REFRESH_COMMAND,
+  PLEXUS_SUPPRESS_MODELS_OPTION,
+  PlexusProviderPlugin,
+  REFRESH_TTL_MS,
+  buildModels,
+  src_default as default,
+  toRuntimeModels
 };
