@@ -4,7 +4,7 @@
  * Auth: API key is stored by pi's credential store (persisted in auth.json).
  *       It may also be pre-seeded via the PLEXUS_API_KEY env var.
  *
- * Model discovery: Pi 0.84+ runs the provider's refreshModels hook in two
+ * Model discovery: Pi 0.84.3+ runs the provider's refreshModels hook in two
  *       phases — a cache-restore phase (allowNetwork: false, read-only
  *       context.stored snapshot) followed by a network phase with the resolved
  *       credential — at startup, after /login, when /model opens, and from
