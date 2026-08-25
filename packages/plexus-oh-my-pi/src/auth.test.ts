@@ -32,6 +32,10 @@ describe("Oh My Pi Plexus authentication", () => {
 
 		try {
 			registry.registerProvider("plexus", {
+				api: "openai-completions",
+				...getProviderApiKeyConfig(),
+			}, sourceId);
+			registry.registerProvider("plexus", {
 				api: "google-generative-ai",
 				baseUrl: "https://plexus.example.com/v1beta",
 				...getProviderApiKeyConfig(),
@@ -49,8 +53,10 @@ describe("Oh My Pi Plexus authentication", () => {
 			const model = registry.find("plexus", "gemini-test");
 			expect(model).toBeDefined();
 			const apiKey = await registry.getApiKey(model!);
+			let requestUrl: string | undefined;
 			let requestHeaders: Headers | undefined;
-			const fetch: FetchImpl = async (_url, init) => {
+			const fetch: FetchImpl = async (url, init) => {
+				requestUrl = String(url);
 				requestHeaders = new Headers(init?.headers);
 				const chunk = {
 					candidates: [{ content: { parts: [{ text: "OK" }] }, finishReason: "STOP" }],
@@ -64,9 +70,10 @@ describe("Oh My Pi Plexus authentication", () => {
 			await drain(streamGoogle(model!, {
 				messages: [{ role: "user", content: "Reply with OK only.", timestamp: 1 }],
 			}, { apiKey, fetch }));
-
+			expect(requestUrl).toBe("https://plexus.example.com/v1beta/models/gemini-test:streamGenerateContent?alt=sse");
 			expect(requestHeaders?.get("x-goog-api-key")).toBe(RESOLVED_API_KEY);
 			expect([...requestHeaders!.values()]).not.toContain(ENV_API_KEY);
+
 		} finally {
 			registry.clearSourceRegistrations(sourceId);
 			authStorage.close();

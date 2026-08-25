@@ -41,6 +41,12 @@ describe("descriptorToOhMyPiModel", () => {
 			messages: "https://plexus.example.com",
 			gemini: "https://plexus.example.com/v1beta",
 		});
+		expect(Object.fromEntries(models.map((model) => [model.id, model.api]))).toEqual({
+			chat: "openai-completions",
+			responses: "openai-responses",
+			messages: "anthropic-messages",
+			gemini: "google-generative-ai",
+		});
 	});
 
 	test("converts descriptor tiers to per-million rates", () => {

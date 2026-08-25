@@ -129454,8 +129454,7 @@ function plexusExtension(pi) {
   pi.registerProvider(PROVIDER_NAME, {
     api: "openai-completions",
     ...getProviderApiKeyConfig(),
-    baseUrl: startupBaseUrl,
-    models: startupModels,
+    ...startupModels.length > 0 ? { baseUrl: startupBaseUrl, models: startupModels } : {},
     oauth: createPlexusLoginProvider(pi)
   });
   currentModels = startupModels;
