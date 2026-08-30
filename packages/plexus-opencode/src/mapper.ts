@@ -4,6 +4,7 @@ import {
   isModelSuppressed,
   mapPreferredApi,
   type PlexusApiModel,
+  type PlexusReasoningOption,
 } from "../../plexus-models/src/index.ts"
 
 type Modality = "text" | "audio" | "image" | "video" | "pdf"
@@ -47,11 +48,48 @@ export interface ConfigModel {
     input: Modality[]
     output: Modality[]
   }
+  variants?: Record<string, Record<string, unknown>>
 }
 
 const REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"])
+const OPEN_CODE_NONE = "none"
 const DEFAULT_CONTEXT = 250_000
 const PER_TOKEN_TO_PER_MILLION = 1_000_000
+
+function normalizeReasoningEffort(value: string | null): string {
+  return value === null || value === "off" ? OPEN_CODE_NONE : value
+}
+
+function reasoningVariantSettings(preferredApi: string, effort: string): Record<string, unknown> {
+  switch (preferredApi) {
+    case "anthropic-messages":
+      return { effort }
+    case "google-generative-ai":
+      return { thinkingConfig: { includeThoughts: true, thinkingLevel: effort } }
+    default:
+      return { reasoningEffort: effort }
+  }
+}
+
+function buildReasoningVariants(
+  model: PlexusApiModel,
+  preferredApi: string,
+  hasReasoning: boolean,
+): ConfigModel["variants"] | undefined {
+  if (!hasReasoning) return undefined
+
+  const effortOption = model.reasoning_options?.find(
+    (option): option is Extract<PlexusReasoningOption, { type: "effort" }> => option.type === "effort",
+  )
+  if (!effortOption) return undefined
+
+  return Object.fromEntries(
+    effortOption.values.map((value) => {
+      const effort = normalizeReasoningEffort(value)
+      return [effort, reasoningVariantSettings(preferredApi, effort)]
+    }),
+  )
+}
 
 function resolveModelProvider(
   model: PlexusApiModel,
@@ -201,6 +239,8 @@ export function buildModels(
     const provider = resolveModelProvider(m, baseURL)
     const created = releaseDate(m.created)
     const interleaved = interleavedReasoning(m, preferredApi)
+    const hasReasoning = params.some((p) => REASONING_PARAMS.has(p))
+    const variants = buildReasoningVariants(m, preferredApi, hasReasoning)
 
     const entry: ConfigModel = {
       id: m.id,
@@ -226,12 +266,13 @@ export function buildModels(
           }
         : {}),
       ...(params.includes("tools") ? { tool_call: true } : {}),
-      ...(params.some((p) => REASONING_PARAMS.has(p)) ? { reasoning: true } : {}),
+      ...(hasReasoning ? { reasoning: true } : {}),
       ...(params.includes("temperature") ? { temperature: true } : {}),
       ...(hasNonTextInput ? { attachment: true } : {}),
       ...(pricingTiers ? { pricingTiers } : {}),
       ...(created ? { release_date: created } : {}),
       ...(interleaved ? { interleaved } : {}),
+      ...(variants ? { variants } : {}),
     }
 
     result[m.id] = entry

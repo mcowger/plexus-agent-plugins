@@ -360,8 +360,33 @@ function createLogger(client) {
 
 // src/mapper.ts
 var REASONING_PARAMS2 = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
+var OPEN_CODE_NONE = "none";
 var DEFAULT_CONTEXT = 250000;
 var PER_TOKEN_TO_PER_MILLION = 1e6;
+function normalizeReasoningEffort(value) {
+  return value === null || value === "off" ? OPEN_CODE_NONE : value;
+}
+function reasoningVariantSettings(preferredApi, effort) {
+  switch (preferredApi) {
+    case "anthropic-messages":
+      return { effort };
+    case "google-generative-ai":
+      return { thinkingConfig: { includeThoughts: true, thinkingLevel: effort } };
+    default:
+      return { reasoningEffort: effort };
+  }
+}
+function buildReasoningVariants(model, preferredApi, hasReasoning) {
+  if (!hasReasoning)
+    return;
+  const effortOption = model.reasoning_options?.find((option) => option.type === "effort");
+  if (!effortOption)
+    return;
+  return Object.fromEntries(effortOption.values.map((value) => {
+    const effort = normalizeReasoningEffort(value);
+    return [effort, reasoningVariantSettings(preferredApi, effort)];
+  }));
+}
 function resolveModelProvider(model, baseURL) {
   const preferredApi = mapPreferredApi(model.preferred_api);
   const api = adjustBaseUrl(baseURL, preferredApi, "versioned");
@@ -470,6 +495,8 @@ function buildModels(models, baseURL, suppress) {
     const provider = resolveModelProvider(m, baseURL);
     const created = releaseDate(m.created);
     const interleaved = interleavedReasoning(m, preferredApi);
+    const hasReasoning = params.some((p) => REASONING_PARAMS2.has(p));
+    const variants = buildReasoningVariants(m, preferredApi, hasReasoning);
     const entry = {
       id: m.id,
       name: m.name ?? m.id,
@@ -490,12 +517,13 @@ function buildModels(models, baseURL, suppress) {
         }
       } : {},
       ...params.includes("tools") ? { tool_call: true } : {},
-      ...params.some((p) => REASONING_PARAMS2.has(p)) ? { reasoning: true } : {},
+      ...hasReasoning ? { reasoning: true } : {},
       ...params.includes("temperature") ? { temperature: true } : {},
       ...hasNonTextInput ? { attachment: true } : {},
       ...pricingTiers ? { pricingTiers } : {},
       ...created ? { release_date: created } : {},
-      ...interleaved ? { interleaved } : {}
+      ...interleaved ? { interleaved } : {},
+      ...variants ? { variants } : {}
     };
     result[m.id] = entry;
   }
@@ -565,7 +593,8 @@ function toRuntimeModels(models, provider) {
       status: "active",
       options: {},
       headers: {},
-      release_date: model.release_date ?? ""
+      release_date: model.release_date ?? "",
+      ...model.variants ? { variants: model.variants } : {}
     };
   }
   return result;

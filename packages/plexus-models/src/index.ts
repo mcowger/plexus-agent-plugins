@@ -7,6 +7,7 @@ export type {
 	PlexusModelDescriptor,
 	PlexusModelPricing,
 	PlexusModelPricingTier,
+	PlexusReasoningOption,
 	PlexusTopProvider,
 } from "./types.ts";
 

@@ -96,6 +96,40 @@ describe("OpenCode model mapping", () => {
     expect(model?.capabilities.interleaved).toEqual({ field: "reasoning_content" })
     expect(model?.variants).toBeUndefined()
   })
+
+  test("maps Plexus reasoning efforts to OpenCode variants", () => {
+    const mapped = buildModels(
+      [{
+        id: "gpt-5.6-luna",
+        preferred_api: "responses",
+        supported_parameters: ["reasoning"],
+        reasoning_options: [{
+          type: "effort",
+          values: ["off", "low", "medium", "high", "xhigh", "max"],
+        }],
+      }],
+      "https://plexus.example.com/v1",
+    )
+
+    expect(mapped["gpt-5.6-luna"]?.variants).toEqual({
+      none: { reasoningEffort: "none" },
+      low: { reasoningEffort: "low" },
+      medium: { reasoningEffort: "medium" },
+      high: { reasoningEffort: "high" },
+      xhigh: { reasoningEffort: "xhigh" },
+      max: { reasoningEffort: "max" },
+    })
+
+    const runtime = toRuntimeModels(mapped, {
+      id: "plexus",
+      name: "Plexus",
+      source: "custom",
+      env: [],
+      options: {},
+      models: {},
+    })
+    expect(runtime["gpt-5.6-luna"]?.variants).toEqual(mapped["gpt-5.6-luna"]?.variants)
+  })
 })
 
 describe("OpenCode pricing mapping", () => {

@@ -39,6 +39,11 @@ export interface PlexusTopProvider {
 	is_moderated?: boolean;
 }
 
+export type PlexusReasoningOption =
+	| { type: "effort"; values: Array<string | null> }
+	| { type: "toggle" }
+	| { type: "budget_tokens"; min?: number; max?: number };
+
 /** Per-model object returned by the Plexus /v1/models endpoint. */
 export interface PlexusApiModel {
 	/** Required. Models without this are silently dropped during batch conversion. */
@@ -56,6 +61,7 @@ export interface PlexusApiModel {
 	pricing?: PlexusModelPricing;
 	/** Used to infer reasoning capability. */
 	supported_parameters?: string[];
+	reasoning_options?: PlexusReasoningOption[];
 	top_provider?: PlexusTopProvider;
 	/** Optional hint to look up the canonical entry in the host agent's built-in registry. */
 	pi_provider?: string;

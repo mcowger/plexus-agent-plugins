@@ -108,9 +108,7 @@ export function toRuntimeModels(
       options: {},
       headers: {},
       release_date: model.release_date ?? "",
-      // Deliberately omit variants. OpenCode populates its current native
-      // variants after provider hooks run, using api.id, api.npm, release_date,
-      // reasoning capability, output limit, and interleaved metadata above.
+      ...(model.variants ? { variants: model.variants } : {}),
     }
   }
 
