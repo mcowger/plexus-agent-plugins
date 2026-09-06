@@ -18,7 +18,7 @@
     },
     "packages/plexus-oh-my-pi": {
       "name": "@mcowger/oh-my-pi-plexus",
-      "version": "1.4.5",
+      "version": "1.4.8",
       "devDependencies": {
         "@oh-my-pi/pi-ai": "^17.1.0",
         "@oh-my-pi/pi-catalog": "^17.1.0",
@@ -34,7 +34,7 @@
     },
     "packages/plexus-opencode": {
       "name": "@mcowger/opencode-plexus",
-      "version": "1.4.5",
+      "version": "1.4.8",
       "dependencies": {
         "@opencode-ai/plugin": "^1.17.18",
         "@opencode-ai/sdk": "^1.17.18",
@@ -48,7 +48,7 @@
     },
     "packages/plexus-pi": {
       "name": "@mcowger/pi-plexus",
-      "version": "1.4.5",
+      "version": "1.4.8",
       "devDependencies": {
         "@earendil-works/pi-ai": "^0.84.3",
         "@earendil-works/pi-coding-agent": "^0.84.3",
