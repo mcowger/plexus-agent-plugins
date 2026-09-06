@@ -721,8 +721,8 @@ var PlexusProviderPlugin = async (ctx) => {
         const key = authKey ?? apiKey;
         if (!baseURL) {
           log.info("Provider hook skipped live refresh; baseURL missing");
-          const cached2 = await readCachedModels(client, suppress);
-          return cached2 ? toRuntimeModels(cached2.models, provider) : {};
+          const cached = await readCachedModels(client, suppress);
+          return cached ? toRuntimeModels(cached.models, provider) : {};
         }
         const refreshPromise = refreshModels(client, baseURL, log, key, false, suppress);
         const race = await raceWithTimeout(refreshPromise, CONFIG_HOOK_REFRESH_BUDGET_MS);

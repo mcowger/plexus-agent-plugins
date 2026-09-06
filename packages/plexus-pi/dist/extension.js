@@ -301,8 +301,6 @@ function detectOpenAICompletionsCompat(providerName, baseUrl) {
     requiresThinkingAsText: false,
     requiresReasoningContentOnAssistantMessages,
     thinkingFormat,
-    openRouterRouting: {},
-    vercelGatewayRouting: {},
     zaiToolStream: false,
     supportsStrictMode,
     sendSessionAffinityHeaders: false,
@@ -948,7 +946,7 @@ async function handleSetDefaultModel(pi, ctx, requestedModelId) {
       ctx.ui.notify("No Plexus models are available. Run /plexus refresh first.", "warning");
       return;
     }
-    const choices = currentModels.map((model2) => model2.name === model2.id ? model2.id : `${model2.name} (${model2.id})`);
+    const choices = currentModels.map((model) => model.name === model.id ? model.id : `${model.name} (${model.id})`);
     const selected = await ctx.ui.select("Select the Plexus default model:", choices);
     if (!selected)
       return;

@@ -396,8 +396,6 @@ export function detectOpenAICompletionsCompat(
 		requiresThinkingAsText: false,
 		requiresReasoningContentOnAssistantMessages,
 		thinkingFormat,
-		openRouterRouting: {},
-		vercelGatewayRouting: {},
 		zaiToolStream: false,
 		supportsStrictMode,
 		sendSessionAffinityHeaders: false,
