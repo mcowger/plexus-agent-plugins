@@ -11,7 +11,11 @@
 		"test": "bun test",
 		"postinstall": "command -v lefthook >/dev/null 2>&1 && lefthook install || true",
 		"sync-versions": "bun scripts/sync-versions.ts",
-		"release": "bun scripts/release.ts"
+		"release": "bun scripts/release.ts",
+        "code:review:staged": "cora review --staged --severity major",
+        "code:review:unstaged": "cora review --unstaged --severity major",
+        "code:review:branch": "cora review --base origin/main --severity major",
+        "code:review:commit": "cora review --commit HEAD --severity major"
 	},
 	"devDependencies": {
 		"@types/bun": "latest",

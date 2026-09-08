@@ -28,6 +28,9 @@ describe("OpenCode model mapping", () => {
       npm: "@ai-sdk/openai",
       api: "https://plexus.example.com/v1",
     })
+    // Anthropic models expose the versioned base used by OpenCode's AI SDK.
+    // In OpenCode's runtime, /v1 is the first published model so clients that
+    // inspect only the first runtime model use /v1/chat/completions.
     expect(models.claude?.provider).toEqual({
       npm: "@ai-sdk/anthropic",
       api: "https://plexus.example.com/v1",
@@ -36,6 +39,85 @@ describe("OpenCode model mapping", () => {
       npm: "@ai-sdk/google",
       api: "https://plexus.example.com/v1beta",
     })
+    expect(Object.keys(models)[0]).toBe("chat")
+  })
+
+  test("publishes /v1 models before /v1beta models without changing endpoints", () => {
+    const models = buildModels(
+      [
+        { id: "gemini-first", preferred_api: "gemini" },
+        { id: "chat-second", preferred_api: "chat_completions" },
+        { id: "claude-third", preferred_api: "messages" },
+        { id: "gemini-fourth", preferred_api: "gemini" },
+        { id: "responses-fifth", preferred_api: "responses" },
+      ],
+      "https://plexus.example.com/v1",
+    )
+
+    expect(Object.keys(models)).toEqual([
+      "chat-second",
+      "claude-third",
+      "responses-fifth",
+      "gemini-first",
+      "gemini-fourth",
+    ])
+    expect(models["chat-second"]?.provider?.api).toBe("https://plexus.example.com/v1")
+    expect(models["claude-third"]?.provider).toEqual({
+      npm: "@ai-sdk/anthropic",
+      api: "https://plexus.example.com/v1",
+    })
+    expect(models["responses-fifth"]?.provider).toEqual({
+      npm: "@ai-sdk/openai",
+      api: "https://plexus.example.com/v1",
+    })
+    expect(models["gemini-first"]?.provider).toEqual({
+      npm: "@ai-sdk/google",
+      api: "https://plexus.example.com/v1beta",
+    })
+
+    const runtime = toRuntimeModels(models, {
+      id: "plexus",
+      name: "Plexus",
+      source: "custom",
+      env: [],
+      options: {},
+      models: {},
+    })
+
+    expect(Object.keys(runtime)[0]).toBe("chat-second")
+    expect(runtime["chat-second"]?.api.url).toBe("https://plexus.example.com/v1")
+    expect(runtime["gemini-first"]?.api).toMatchObject({
+      url: "https://plexus.example.com/v1beta",
+      npm: "@ai-sdk/google",
+    })
+  })
+
+  test("orders runtime models while retaining capabilities metadata", () => {
+    const mapped = buildModels(
+      [
+        { id: "gemini-first", preferred_api: "gemini" },
+        { id: "chat-second", preferred_api: "chat_completions" },
+      ],
+      "https://plexus.example.com/v1",
+    )
+    // Simulate an unordered old cache by restoring server order before the
+    // runtime conversion.
+    const unordered = {
+      "gemini-first": mapped["gemini-first"]!,
+      "chat-second": mapped["chat-second"]!,
+    }
+    const runtime = toRuntimeModels(unordered, {
+      id: "plexus",
+      name: "Plexus",
+      source: "custom",
+      env: [],
+      options: {},
+      models: {},
+    })
+
+    expect(Object.keys(runtime)).toEqual(["chat-second", "gemini-first"])
+    expect(runtime["chat-second"]?.capabilities.input.text).toBe(true)
+    expect(runtime["gemini-first"]?.api.url).toBe("https://plexus.example.com/v1beta")
   })
 
   test("filters embedding and transcription endpoint models", () => {

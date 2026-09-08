@@ -191,6 +191,41 @@ function buildOutputModalities(model: PlexusApiModel): Modality[] | null {
 }
 
 /**
+ * Return models with /v1 endpoints before /v1beta endpoints, preserving
+ * relative order within each group.
+ *
+ * Some OpenCode clients inspect only the first runtime model when deriving a
+ * provider-wide endpoint. Gemini models resolve to /v1beta while OpenAI,
+ * Responses, and Anthropic traffic use /v1; publishing a /v1 model first
+ * keeps those clients on /v1/chat/completions for Plexus. This changes model
+ * order only. It does not change IDs, SDK packages, endpoints, or routing.
+ *
+ * Config models store the endpoint at provider.api while runtime models
+ * store it at api.url, so both shapes are accepted.
+ */
+export function orderModelsByApiBase<T extends { provider?: { api?: string }; api?: { url?: string } }>(
+  models: Record<string, T>,
+): Record<string, T> {
+  const current: Array<[string, T]> = []
+  const beta: Array<[string, T]> = []
+
+  for (const entry of Object.entries(models)) {
+    const api = (
+      entry[1].provider?.api ??
+      entry[1].api?.url ??
+      ""
+    ).trim().replace(/\/+$/, "")
+    if (api.endsWith("/v1beta")) {
+      beta.push(entry)
+    } else {
+      current.push(entry)
+    }
+  }
+
+  return Object.fromEntries([...current, ...beta])
+}
+
+/**
  * Transform a list of PlexusApiModel objects into the dict of ConfigModel
  * objects expected by OpenCode's cfg.provider.plexus.models.
  *
@@ -278,5 +313,5 @@ export function buildModels(
     result[m.id] = entry
   }
 
-  return result
+  return orderModelsByApiBase(result)
 }

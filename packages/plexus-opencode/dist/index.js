@@ -470,6 +470,19 @@ function buildOutputModalities(model) {
   }
   return ["text"];
 }
+function orderModelsByApiBase(models) {
+  const current = [];
+  const beta = [];
+  for (const entry of Object.entries(models)) {
+    const api = (entry[1].provider?.api ?? entry[1].api?.url ?? "").trim().replace(/\/+$/, "");
+    if (api.endsWith("/v1beta")) {
+      beta.push(entry);
+    } else {
+      current.push(entry);
+    }
+  }
+  return Object.fromEntries([...current, ...beta]);
+}
 function buildModels(models, baseURL, suppress) {
   const result = {};
   for (const m of models) {
@@ -527,7 +540,7 @@ function buildModels(models, baseURL, suppress) {
     };
     result[m.id] = entry;
   }
-  return result;
+  return orderModelsByApiBase(result);
 }
 
 // src/plugin.ts
@@ -597,13 +610,13 @@ function toRuntimeModels(models, provider) {
       ...model.variants ? { variants: model.variants } : {}
     };
   }
-  return result;
+  return orderModelsByApiBase(result);
 }
 function toConfigModels(models) {
-  return Object.fromEntries(Object.entries(models).map(([id, model]) => {
+  return orderModelsByApiBase(Object.fromEntries(Object.entries(models).map(([id, model]) => {
     const { pricingTiers: _pricingTiers, ...configModel } = model;
     return [id, configModel];
-  }));
+  })));
 }
 function authMetadata(auth) {
   return auth?.type === "api" ? auth.metadata : undefined;
@@ -664,7 +677,7 @@ var PlexusProviderPlugin = async (ctx) => {
       const { baseURL, apiKey } = resolveConfig(existing);
       log.info(`Resolved plexus config: baseURL=${baseURL ?? "(missing)"} apiKey=${apiKey ? "present" : "missing"}`);
       if (typeof existingOptions["baseURL"] === "string") {
-        log.warn(`Ignoring legacy provider.options.baseURL=${String(existingOptions["baseURL"])}`);
+        log.info(`Using provider.options.baseURL=${String(existingOptions["baseURL"])} as input-only OpenChamber compatibility config`);
       }
       const cachedAsync = await readCachedModels(client, suppress);
       if (cachedAsync) {
@@ -842,5 +855,6 @@ export {
   REFRESH_TTL_MS,
   buildModels,
   src_default as default,
+  orderModelsByApiBase,
   toRuntimeModels
 };

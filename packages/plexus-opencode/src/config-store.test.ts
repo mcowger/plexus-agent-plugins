@@ -50,6 +50,16 @@ describe("OpenCode config resolution", () => {
     })
   })
 
+  test("accepts options.baseURL as OpenChamber compatibility input", () => {
+    expect(
+      resolveConfig({
+        options: {
+          baseURL: "https://compat.example.com/v1",
+        },
+      } as never),
+    ).toMatchObject({ baseURL: "https://compat.example.com" })
+  })
+
   test("uses auth metadata before provider config", () => {
     expect(
       resolveConfig(

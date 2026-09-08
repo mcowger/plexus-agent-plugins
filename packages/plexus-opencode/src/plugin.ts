@@ -4,7 +4,7 @@ import { fetchPlexusModels } from "../../plexus-models/src/index.ts"
 import { filterCachedModels, readCachedModels, writeCache } from "./cache.ts"
 import { AUTH_METADATA_BASE_URL, getSuppressedModels, readStoredAuth, resolveConfig } from "./config-store.ts"
 import { createLogger } from "./log.ts"
-import { buildModels, type ConfigModel } from "./mapper.ts"
+import { buildModels, orderModelsByApiBase, type ConfigModel } from "./mapper.ts"
 import {
   CONFIG_HOOK_REFRESH_BUDGET_MS,
   OPENAI_COMPATIBLE_NPM,
@@ -112,15 +112,17 @@ export function toRuntimeModels(
     }
   }
 
-  return result
+  return orderModelsByApiBase(result)
 }
 
 function toConfigModels(models: Record<string, ConfigModel>): Record<string, ConfigModel> {
-  return Object.fromEntries(
-    Object.entries(models).map(([id, model]) => {
-      const { pricingTiers: _pricingTiers, ...configModel } = model
-      return [id, configModel]
-    }),
+  return orderModelsByApiBase(
+    Object.fromEntries(
+      Object.entries(models).map(([id, model]) => {
+        const { pricingTiers: _pricingTiers, ...configModel } = model
+        return [id, configModel]
+      }),
+    ),
   )
 }
 
@@ -274,7 +276,9 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
         `Resolved plexus config: baseURL=${baseURL ?? "(missing)"} apiKey=${apiKey ? "present" : "missing"}`,
       )
       if (typeof existingOptions["baseURL"] === "string") {
-        log.warn(`Ignoring legacy provider.options.baseURL=${String(existingOptions["baseURL"])}`)
+        log.info(
+          `Using provider.options.baseURL=${String(existingOptions["baseURL"])} as input-only OpenChamber compatibility config`,
+        )
       }
 
       // Async cache read — config() is already async, so there's no reason
@@ -309,6 +313,11 @@ export const PlexusProviderPlugin: Plugin = async (ctx) => {
       }
 
       const mergedOptions = merged["options"] as Record<string, unknown>
+      // OpenChamber reads provider.options.baseURL directly from opencode.json,
+      // but OpenCode uses provider.options.baseURL as a provider-wide override
+      // and would ignore per-model endpoints. Read baseURL as input-only
+      // compatibility config, then remove it from the in-memory OpenCode
+      // config so individual models keep their own /v1 or /v1beta routes.
       delete mergedOptions["baseURL"]
 
       if (baseURL) {
