@@ -186,6 +186,26 @@ The plugins normalize either form to the Plexus root URL for storage and derive 
 
 OpenCode stores the API key in its native auth store and stores the Plexus base URL as auth metadata on that connection. Existing `provider.plexus.options.plexusBaseURL` config is still honored as a fallback.
 
+`provider.plexus.options.baseURL` is also accepted as input-only compatibility config. Some external clients read OpenCode config files directly and only recognize `options.baseURL`. The plugin normalizes that value for Plexus discovery and then removes it from OpenCode's in-memory provider options, so individual models keep their own `/v1` or `/v1beta` endpoints instead of being overridden by a provider-wide URL.
+
+For an OpenChamber-compatible OpenCode config, omit `options.apiKey` and authenticate through `/connect`:
+
+```json
+{
+  "provider": {
+    "plexus": {
+      "options": {
+        "baseURL": "https://plexus.example.com/v1"
+      }
+    }
+  }
+}
+```
+
+Then run `/connect`, select **Plexus**, and authenticate against the same Plexus server. A raw unresolved `options.apiKey` value in this file can override the resolved runtime credential used by OpenChamber, including OpenCode `{env:NAME}` templates that OpenChamber does not expand when extra characters follow the template.
+
+The plugin publishes models with `/v1` endpoints before `/v1beta` models. This ordering helps OpenChamber versions that derive a provider-wide endpoint from the first runtime model; it does not change model endpoints or OpenCode routing. Gemini models still use `/v1beta` through `@ai-sdk/google`.
+
 The OpenCode plugin respects each model's `preferred_api` value and routes models through the matching SDK/API shape:
 
 - `chat_completions` / `openai-completions` → OpenAI-compatible chat completions
@@ -350,6 +370,7 @@ Models with a falsy `id` are skipped. Missing metadata falls back to safe defaul
 - **OpenCode** seeds the provider from the on-disk cache (or a placeholder model) once, during config loading — OpenCode's `provider.models` hook never fires for custom providers, so there is no live discovery at startup. Run `/plexus-refresh` to force a live fetch and rewrite the cache; because OpenCode has no way to hot-reload a custom provider's model list mid-session, a restart is required afterward to see the refreshed models in the picker.
 - OpenCode models retain their upstream model ID, SDK dialect, release date, and reasoning metadata so OpenCode can generate its native GPT, Claude, Gemini, and OpenAI-compatible variants and apply its current request transforms. DeepSeek models also preserve `reasoning_content` across tool-call turns.
 - OpenCode uses a 250K-token context window when Plexus supplies no context metadata; its output fallback remains 20% of that window.
+- OpenCode moves `/v1beta` models after `/v1` models in published model order. Model endpoints and per-model SDK selection are unchanged.
 - Both adapters convert Plexus's per-token base and tier rates to the per-million-token units expected by their host.
 
 ## Development
