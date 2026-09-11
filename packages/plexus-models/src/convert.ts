@@ -4,9 +4,11 @@ import { isModelSuppressed } from "./suppress.ts";
 const REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
 
 // Identifiers and API hints commonly used for endpoint-specific models that
-// cannot be used by chat-oriented agent hosts.
+// cannot be used by chat-oriented agent hosts. A bare `image` token covers the
+// trailing `-image`/`_image` suffix convention used for image-generation
+// models (e.g. gemini-3.1-flash-image) when architecture metadata is absent.
 const NON_CHAT_PATTERN =
-	/(?:^|[\W_])(?:embed(?:ding|dings)?|transcri(?:be[ds]?|ptions?)|whisper|speech[\W_]*to[\W_]*text|stt|text[\W_]*to[\W_]*speech|tts|image[\W_]*(?:gen(?:eration)?|\d+)|diffusion|dall[\W_]*e|stable[\W_]*diffusion|sdxl|dream)(?:$|[\W_])/i;
+	/(?:^|[\W_])(?:embed(?:ding|dings)?|transcri(?:be[ds]?|ptions?)|whisper|speech[\W_]*to[\W_]*text|stt|text[\W_]*to[\W_]*speech|tts|image(?:[\W_]*(?:gen(?:eration)?|\d+))?|diffusion|dall[\W_]*e|stable[\W_]*diffusion|sdxl|dream)(?:$|[\W_])/i;
 
 export type OpenAICompletionsThinkingFormat =
 	| "openai"
@@ -169,7 +171,8 @@ export function convertToDescriptor(raw: PlexusApiModel, baseUrl: string): Plexu
 
 /**
  * Returns whether a Plexus model can be presented as a chat model. Explicit
- * non-text output metadata wins; endpoint API hints and identifiers provide a
+ * non-text output metadata wins (image/audio/video output means a generation
+ * model, not a chat model); endpoint API hints and identifiers provide a
  * fallback for embedding, transcription, speech, and image-generation models.
  */
 export function isChatModel(model: PlexusApiModel): boolean {
@@ -180,8 +183,16 @@ export function isChatModel(model: PlexusApiModel): boolean {
 		return false;
 	}
 
+	// Chat models are text-output-only; empty or non-text output lists mean the
+	// model generates images/audio/video (e.g. gemini-*-image) and cannot be
+	// driven as a chat model by agent hosts.
 	const outputModalities = model.architecture?.output_modalities;
-	if (outputModalities !== undefined && !outputModalities.includes("text")) return false;
+	if (
+		outputModalities !== undefined &&
+		(outputModalities.length === 0 || outputModalities.some((m) => m !== "text"))
+	) {
+		return false;
+	}
 
 	const modality = model.architecture?.modality;
 	if (modality?.includes("->")) {
@@ -189,7 +200,12 @@ export function isChatModel(model: PlexusApiModel): boolean {
 		if (!input.toLowerCase().includes("text")) return false;
 
 		const output = modality.split("->").at(-1) ?? "";
-		if (!output.toLowerCase().includes("text")) return false;
+		const outputTokens = output
+			.toLowerCase()
+			.split(/[+,]/)
+			.map((t) => t.trim())
+			.filter((t) => t.length > 0);
+		if (outputTokens.length === 0 || outputTokens.some((t) => t !== "text")) return false;
 	}
 
 	const apiHints = Array.isArray(model.preferred_api)

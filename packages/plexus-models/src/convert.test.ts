@@ -159,6 +159,53 @@ describe("isChatModel", () => {
 		})).toBe(true);
 	});
 
+	test("rejects image-generation models by output modalities", () => {
+		expect(isChatModel({
+			id: "gemini-3.1-flash-image",
+			architecture: {
+				modality: "text+image+video+pdf->text+image",
+				input_modalities: ["text", "image", "video", "pdf"],
+				output_modalities: ["text", "image"],
+			},
+		})).toBe(false);
+		expect(isChatModel({
+			id: "gemini-3.1-flash-lite-image",
+			architecture: {
+				modality: "text+image->text+image",
+				input_modalities: ["text", "image"],
+				output_modalities: ["text", "image"],
+			},
+		})).toBe(false);
+		expect(isChatModel({
+			id: "image-output-model",
+			architecture: { output_modalities: ["text", "image"] },
+		})).toBe(false);
+		expect(isChatModel({
+			id: "gen-image-model",
+			architecture: { modality: "text->image" },
+		})).toBe(false);
+	});
+
+	test("rejects image-generation models by trailing -image identifier when metadata is absent", () => {
+		expect(isChatModel({ id: "gemini-3.1-flash-image" })).toBe(false);
+		expect(isChatModel({ id: "gemini-3.1-flash-lite-image" })).toBe(false);
+	});
+
+	test("preserves text-only-output vision models", () => {
+		expect(isChatModel({
+			id: "gemini-3.1-pro-vision",
+			architecture: { modality: "text+image->text", output_modalities: ["text"] },
+		})).toBe(true);
+		expect(isChatModel({
+			id: "vision-chat",
+			architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
+		})).toBe(true);
+		expect(isChatModel({
+			id: "gemini-3.1-flash-vision",
+			architecture: { modality: "text+image->text" },
+		})).toBe(true);
+	});
+
 	test("batch conversion excludes non-chat models", () => {
 		const descriptors = convertDescriptors(
 			[

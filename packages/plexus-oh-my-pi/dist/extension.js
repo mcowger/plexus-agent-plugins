@@ -109289,7 +109289,7 @@ function matchesPattern(id, name, shortId, pattern) {
 }
 // ../plexus-models/src/convert.ts
 var REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
-var NON_CHAT_PATTERN = /(?:^|[\W_])(?:embed(?:ding|dings)?|transcri(?:be[ds]?|ptions?)|whisper|speech[\W_]*to[\W_]*text|stt|text[\W_]*to[\W_]*speech|tts|image[\W_]*(?:gen(?:eration)?|\d+)|diffusion|dall[\W_]*e|stable[\W_]*diffusion|sdxl|dream)(?:$|[\W_])/i;
+var NON_CHAT_PATTERN = /(?:^|[\W_])(?:embed(?:ding|dings)?|transcri(?:be[ds]?|ptions?)|whisper|speech[\W_]*to[\W_]*text|stt|text[\W_]*to[\W_]*speech|tts|image(?:[\W_]*(?:gen(?:eration)?|\d+))?|diffusion|dall[\W_]*e|stable[\W_]*diffusion|sdxl|dream)(?:$|[\W_])/i;
 var API_DIALECT_MAP = {
   chat_completions: "openai-completions",
   "openai-completions": "openai-completions",
@@ -109413,15 +109413,17 @@ function isChatModel(model) {
     return false;
   }
   const outputModalities = model.architecture?.output_modalities;
-  if (outputModalities !== undefined && !outputModalities.includes("text"))
+  if (outputModalities !== undefined && (outputModalities.length === 0 || outputModalities.some((m) => m !== "text"))) {
     return false;
+  }
   const modality = model.architecture?.modality;
   if (modality?.includes("->")) {
     const input = modality.split("->")[0] ?? "";
     if (!input.toLowerCase().includes("text"))
       return false;
     const output = modality.split("->").at(-1) ?? "";
-    if (!output.toLowerCase().includes("text"))
+    const outputTokens = output.toLowerCase().split(/[+,]/).map((t) => t.trim()).filter((t) => t.length > 0);
+    if (outputTokens.length === 0 || outputTokens.some((t) => t !== "text"))
       return false;
   }
   const apiHints = Array.isArray(model.preferred_api) ? model.preferred_api.join(" ") : model.preferred_api ?? "";
