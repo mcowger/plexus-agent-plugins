@@ -41,8 +41,12 @@ const MALFORMED_LEAK_PATTERN = /(?:print\()?call:\s*default_api[.:]|default_api\
 // version preserves the finishReason text on the error message.
 const MALFORMED_DIAGNOSTIC_PATTERN = /\bmalformed[\s_-]?function[\s_-]?call\b/i;
 
+// Exact JSON.parse diagnostic emitted when an upstream response is truncated.
+const TRUNCATED_JSON_PATTERN = /\bUnexpected end of JSON input\b/i;
+
 // Sentinel prefix: retains the diagnostic AND doubles as the idempotency marker.
 const NORMALIZED_PREFIX = "MALFORMED_FUNCTION_CALL:";
+const TRUNCATED_JSON_PREFIX = "TRUNCATED_JSON_RESPONSE:";
 
 // "please retry your request" matches pi's RETRYABLE_PROVIDER_ERROR_PATTERN, so
 // the native retry gate (`isRetryableAssistantError`) classifies this transient.
@@ -50,6 +54,10 @@ const NORMALIZED_PREFIX = "MALFORMED_FUNCTION_CALL:";
 const NORMALIZED_MESSAGE =
 	`${NORMALIZED_PREFIX} Gemini emitted a malformed tool call (its internal ` +
 	`function-call syntax leaked as text). This is a transient model failure — ` +
+	`please retry your request.`;
+const TRUNCATED_JSON_MESSAGE =
+	`${TRUNCATED_JSON_PREFIX} Unexpected end of JSON input. The upstream provider ` +
+	`returned a truncated JSON response. This is a transient provider failure — ` +
 	`please retry your request.`;
 
 interface ContentBlock {
@@ -88,10 +96,10 @@ function hasToolCall(content: unknown): boolean {
 }
 
 /**
- * When `message` is a Plexus `MALFORMED_FUNCTION_CALL` failure that should be
- * retried, return a `message_end` replacement whose `errorMessage` retains the
- * diagnostic and is classified transient by pi's native retry. Otherwise return
- * `undefined` (no replacement).
+ * When `message` is a Plexus transient provider failure that should be retried,
+ * return a `message_end` replacement whose `errorMessage` retains the diagnostic
+ * and is classified transient by pi's native retry. Otherwise return `undefined`
+ * (no replacement).
  */
 export function normalizeMalformedFunctionCall<T extends AssistantMessageLike>(
 	message: T,
@@ -109,14 +117,22 @@ export function normalizeMalformedFunctionCall<T extends AssistantMessageLike>(
 	// Idempotent: this message was already normalized on a prior pass.
 	if (
 		typeof message.errorMessage === "string" &&
-		message.errorMessage.startsWith(NORMALIZED_PREFIX)
+		(message.errorMessage.startsWith(NORMALIZED_PREFIX) ||
+			message.errorMessage.startsWith(TRUNCATED_JSON_PREFIX))
 	) {
 		return undefined;
 	}
 
-	// Safety: never touch a turn that produced a structured tool call — those are
-	// not the malformed-text-leak condition and must not be reclassified/retried.
+	// Safety: never touch a turn that produced a structured tool call — retrying
+	// after one could repeat an externally visible side effect.
 	if (hasToolCall(message.content)) return undefined;
+
+	if (typeof message.errorMessage === "string" && TRUNCATED_JSON_PATTERN.test(message.errorMessage)) {
+		log("retryable-error: retagged truncated JSON response for retry", {
+			model: message.model,
+		});
+		return { message: { ...message, errorMessage: TRUNCATED_JSON_MESSAGE } };
+	}
 
 	const via = hasLeakedFunctionCall(message.content)
 		? "leak"

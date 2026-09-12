@@ -67,6 +67,36 @@ describe("normalizeMalformedFunctionCall", () => {
 		});
 	});
 
+	describe("truncated JSON", () => {
+		test("normalizes a provider-side truncated JSON response for retry", () => {
+			const result = normalizeMalformedFunctionCall(
+				malformedMessage({ errorMessage: "Unexpected end of JSON input" }),
+				PROVIDER,
+			);
+			expect(result?.message.errorMessage).toContain("Unexpected end of JSON input");
+			expect(result?.message.errorMessage).toContain("please retry your request");
+		});
+
+		test("does not normalize a truncated JSON response from another provider", () => {
+			const result = normalizeMalformedFunctionCall(
+				malformedMessage({ provider: "openai", errorMessage: "Unexpected end of JSON input" }),
+				PROVIDER,
+			);
+			expect(result).toBeUndefined();
+		});
+
+		test("does not normalize a truncated JSON response after a structured tool call", () => {
+			const result = normalizeMalformedFunctionCall(
+				malformedMessage({
+					errorMessage: "Unexpected end of JSON input",
+					content: [{ type: "toolCall", id: "abc", name: "bash", arguments: {} }],
+				}),
+				PROVIDER,
+			);
+			expect(result).toBeUndefined();
+		});
+	});
+
 	describe("idempotency", () => {
 		test("does not re-normalize an already-normalized message", () => {
 			const first = normalizeMalformedFunctionCall(malformedMessage(), PROVIDER);

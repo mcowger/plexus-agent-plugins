@@ -131,10 +131,9 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 		cachedModelCount: startupModels.length,
 	});
 
-	// Retag Gemini MALFORMED_FUNCTION_CALL failures (which pi flattens to a generic
-	// non-retryable "An unknown error occurred") so pi's native agent-turn retry
-	// recognizes them as transient and retries. Scoped to this provider's own
-	// error turns; pi drops the failed message before retrying, so no duplication.
+	// Retag known transient upstream failures so pi's native agent-turn retry
+	// recognizes them. Scoped to this provider's own error turns; pi drops the
+	// failed message before retrying, so no visible partial output is duplicated.
 	pi.on("message_end", (event) => normalizeMalformedFunctionCall(event.message, PROVIDER_NAME));
 
 	pi.registerProvider(PROVIDER_NAME, {
