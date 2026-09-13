@@ -119038,8 +119038,11 @@ function descriptorToOhMyPiModel(descriptor) {
 var PROVIDER_CONNECTION_CLOSED_PATTERN = /\bprovider connection closed\b/i;
 var NORMALIZED_PREFIX = "PROVIDER_CONNECTION_CLOSED:";
 var NORMALIZED_MESSAGE = `${NORMALIZED_PREFIX} Provider connection error: the upstream provider dropped the request. ` + "This is a transient provider failure; please retry your request.";
+function hasToolCall(content) {
+  return Array.isArray(content) && content.some((block) => block?.type === "toolCall");
+}
 function normalizeProviderConnectionClosed(message, providerName) {
-  if (!message || message.role !== "assistant" || message.provider !== providerName || message.stopReason !== "error" || typeof message.errorMessage !== "string" || message.errorMessage.startsWith(NORMALIZED_PREFIX) || !PROVIDER_CONNECTION_CLOSED_PATTERN.test(message.errorMessage)) {
+  if (!message || message.role !== "assistant" || message.provider !== providerName || message.stopReason !== "error" || typeof message.errorMessage !== "string" || message.errorMessage.startsWith(NORMALIZED_PREFIX) || hasToolCall(message.content) || !PROVIDER_CONNECTION_CLOSED_PATTERN.test(message.errorMessage)) {
     return;
   }
   log("retryable-error: retagged closed provider connection for retry", { model: message.model });

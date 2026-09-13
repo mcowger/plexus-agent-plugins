@@ -6,12 +6,21 @@ const NORMALIZED_MESSAGE =
 	`${NORMALIZED_PREFIX} Provider connection error: the upstream provider dropped the request. ` +
 	"This is a transient provider failure; please retry your request.";
 
+interface ContentBlock {
+	type?: string;
+}
+
 interface AssistantMessageLike {
 	role?: string;
 	provider?: string;
 	model?: string;
 	stopReason?: string;
 	errorMessage?: string;
+	content?: unknown;
+}
+
+function hasToolCall(content: unknown): boolean {
+	return Array.isArray(content) && (content as ContentBlock[]).some((block) => block?.type === "toolCall");
 }
 
 /**
@@ -31,6 +40,7 @@ export function normalizeProviderConnectionClosed<T extends AssistantMessageLike
 		message.stopReason !== "error" ||
 		typeof message.errorMessage !== "string" ||
 		message.errorMessage.startsWith(NORMALIZED_PREFIX) ||
+		hasToolCall(message.content) ||
 		!PROVIDER_CONNECTION_CLOSED_PATTERN.test(message.errorMessage)
 	) {
 		return;

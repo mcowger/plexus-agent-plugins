@@ -29,6 +29,14 @@ describe("normalizeProviderConnectionClosed", () => {
 		expect(AIError.retriable(AIError.classifyMessage(message))).toBe(true);
 	});
 
+	test("does not retry a closed connection after a structured tool call", () => {
+		const message = errorMessage({
+			content: [{ type: "toolCall", id: "abc", name: "bash", arguments: {} }],
+		});
+		normalizeProviderConnectionClosed(message, PROVIDER);
+		expect(message.errorMessage).toBe("Provider connection closed");
+	});
+
 	test("does not modify a different provider's error", () => {
 		const message = errorMessage({ provider: "openai" });
 		normalizeProviderConnectionClosed(message, PROVIDER);
