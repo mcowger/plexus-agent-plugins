@@ -44,9 +44,13 @@ const MALFORMED_DIAGNOSTIC_PATTERN = /\bmalformed[\s_-]?function[\s_-]?call\b/i;
 // Exact JSON.parse diagnostic emitted when an upstream response is truncated.
 const TRUNCATED_JSON_PATTERN = /\bUnexpected end of JSON input\b/i;
 
-// Sentinel prefix: retains the diagnostic AND doubles as the idempotency marker.
+// Terminal error emitted when the upstream proxy drops the active provider stream.
+const PROVIDER_CONNECTION_CLOSED_PATTERN = /\bprovider connection closed\b/i;
+
+// Sentinel prefixes retain diagnostics and double as idempotency markers.
 const NORMALIZED_PREFIX = "MALFORMED_FUNCTION_CALL:";
 const TRUNCATED_JSON_PREFIX = "TRUNCATED_JSON_RESPONSE:";
+const PROVIDER_CONNECTION_CLOSED_PREFIX = "PROVIDER_CONNECTION_CLOSED:";
 
 // "please retry your request" matches pi's RETRYABLE_PROVIDER_ERROR_PATTERN, so
 // the native retry gate (`isRetryableAssistantError`) classifies this transient.
@@ -59,6 +63,9 @@ const TRUNCATED_JSON_MESSAGE =
 	`${TRUNCATED_JSON_PREFIX} Unexpected end of JSON input. The upstream provider ` +
 	`returned a truncated JSON response. This is a transient provider failure — ` +
 	`please retry your request.`;
+const PROVIDER_CONNECTION_CLOSED_MESSAGE =
+	`${PROVIDER_CONNECTION_CLOSED_PREFIX} Provider connection closed. The upstream provider ` +
+	`dropped the request. This is a transient provider failure — please retry your request.`;
 
 interface ContentBlock {
 	type?: string;
@@ -118,7 +125,8 @@ export function normalizeMalformedFunctionCall<T extends AssistantMessageLike>(
 	if (
 		typeof message.errorMessage === "string" &&
 		(message.errorMessage.startsWith(NORMALIZED_PREFIX) ||
-			message.errorMessage.startsWith(TRUNCATED_JSON_PREFIX))
+			message.errorMessage.startsWith(TRUNCATED_JSON_PREFIX) ||
+			message.errorMessage.startsWith(PROVIDER_CONNECTION_CLOSED_PREFIX))
 	) {
 		return undefined;
 	}
@@ -132,6 +140,13 @@ export function normalizeMalformedFunctionCall<T extends AssistantMessageLike>(
 			model: message.model,
 		});
 		return { message: { ...message, errorMessage: TRUNCATED_JSON_MESSAGE } };
+	}
+
+	if (typeof message.errorMessage === "string" && PROVIDER_CONNECTION_CLOSED_PATTERN.test(message.errorMessage)) {
+		log("retryable-error: retagged closed provider connection for retry", {
+			model: message.model,
+		});
+		return { message: { ...message, errorMessage: PROVIDER_CONNECTION_CLOSED_MESSAGE } };
 	}
 
 	const via = hasLeakedFunctionCall(message.content)

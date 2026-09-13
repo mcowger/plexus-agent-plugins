@@ -28,7 +28,6 @@ jobs:
       - name: Copy README into packages
         run: |
           cp README.md packages/plexus-pi/README.md
-          cp README.md packages/plexus-opencode/README.md
           cp README.md packages/plexus-oh-my-pi/README.md
 
       - uses: actions/setup-node@v6
@@ -40,10 +39,6 @@ jobs:
       - name: Publish @mcowger/pi-plexus
         run: npm publish --access public --provenance
         working-directory: packages/plexus-pi
-
-      - name: Publish @mcowger/opencode-plexus
-        run: npm publish --access public --provenance
-        working-directory: packages/plexus-opencode
 
       - name: Publish @mcowger/oh-my-pi-plexus
         run: npm publish --access public --provenance

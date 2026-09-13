@@ -67,6 +67,28 @@ describe("normalizeMalformedFunctionCall", () => {
 		});
 	});
 
+	describe("provider connection closed", () => {
+		test("normalizes a closed provider connection for retry", () => {
+			const result = normalizeMalformedFunctionCall(
+				malformedMessage({ errorMessage: "Provider connection closed" }),
+				PROVIDER,
+			);
+			expect(result?.message.errorMessage).toContain("PROVIDER_CONNECTION_CLOSED");
+			expect(result?.message.errorMessage).toContain("please retry your request");
+		});
+
+		test("does not normalize a closed provider connection after a structured tool call", () => {
+			const result = normalizeMalformedFunctionCall(
+				malformedMessage({
+					errorMessage: "Provider connection closed",
+					content: [{ type: "toolCall", id: "abc", name: "bash", arguments: {} }],
+				}),
+				PROVIDER,
+			);
+			expect(result).toBeUndefined();
+		});
+	});
+
 	describe("truncated JSON", () => {
 		test("normalizes a provider-side truncated JSON response for retry", () => {
 			const result = normalizeMalformedFunctionCall(

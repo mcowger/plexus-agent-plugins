@@ -15,7 +15,6 @@ const root = import.meta.dir.replace(/\/scripts$/, "");
 // plexus-models is a build-time internal dep (bundled into host packages) — not published.
 const PACKAGES = [
 	"packages/plexus-pi",
-	"packages/plexus-opencode",
 	"packages/plexus-oh-my-pi",
 ];
 

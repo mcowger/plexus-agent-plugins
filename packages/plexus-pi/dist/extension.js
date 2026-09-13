@@ -680,10 +680,13 @@ function descriptorToPiModel(descriptor) {
 var MALFORMED_LEAK_PATTERN = /(?:print\()?call:\s*default_api[.:]|default_api\.\w+\s*\(/;
 var MALFORMED_DIAGNOSTIC_PATTERN = /\bmalformed[\s_-]?function[\s_-]?call\b/i;
 var TRUNCATED_JSON_PATTERN = /\bUnexpected end of JSON input\b/i;
+var PROVIDER_CONNECTION_CLOSED_PATTERN = /\bprovider connection closed\b/i;
 var NORMALIZED_PREFIX = "MALFORMED_FUNCTION_CALL:";
 var TRUNCATED_JSON_PREFIX = "TRUNCATED_JSON_RESPONSE:";
+var PROVIDER_CONNECTION_CLOSED_PREFIX = "PROVIDER_CONNECTION_CLOSED:";
 var NORMALIZED_MESSAGE = `${NORMALIZED_PREFIX} Gemini emitted a malformed tool call (its internal ` + `function-call syntax leaked as text). This is a transient model failure \u2014 ` + `please retry your request.`;
 var TRUNCATED_JSON_MESSAGE = `${TRUNCATED_JSON_PREFIX} Unexpected end of JSON input. The upstream provider ` + `returned a truncated JSON response. This is a transient provider failure \u2014 ` + `please retry your request.`;
+var PROVIDER_CONNECTION_CLOSED_MESSAGE = `${PROVIDER_CONNECTION_CLOSED_PREFIX} Provider connection closed. The upstream provider ` + `dropped the request. This is a transient provider failure \u2014 please retry your request.`;
 function hasLeakedFunctionCall(content) {
   if (!Array.isArray(content))
     return false;
@@ -701,7 +704,7 @@ function normalizeMalformedFunctionCall(message, providerName) {
   if (!message || message.role !== "assistant" || message.provider !== providerName || message.stopReason !== "error") {
     return;
   }
-  if (typeof message.errorMessage === "string" && (message.errorMessage.startsWith(NORMALIZED_PREFIX) || message.errorMessage.startsWith(TRUNCATED_JSON_PREFIX))) {
+  if (typeof message.errorMessage === "string" && (message.errorMessage.startsWith(NORMALIZED_PREFIX) || message.errorMessage.startsWith(TRUNCATED_JSON_PREFIX) || message.errorMessage.startsWith(PROVIDER_CONNECTION_CLOSED_PREFIX))) {
     return;
   }
   if (hasToolCall(message.content))
@@ -711,6 +714,12 @@ function normalizeMalformedFunctionCall(message, providerName) {
       model: message.model
     });
     return { message: { ...message, errorMessage: TRUNCATED_JSON_MESSAGE } };
+  }
+  if (typeof message.errorMessage === "string" && PROVIDER_CONNECTION_CLOSED_PATTERN.test(message.errorMessage)) {
+    log("retryable-error: retagged closed provider connection for retry", {
+      model: message.model
+    });
+    return { message: { ...message, errorMessage: PROVIDER_CONNECTION_CLOSED_MESSAGE } };
   }
   const via = hasLeakedFunctionCall(message.content) ? "leak" : typeof message.errorMessage === "string" && MALFORMED_DIAGNOSTIC_PATTERN.test(message.errorMessage) ? "diagnostic" : undefined;
   if (!via)

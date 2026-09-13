@@ -119034,6 +119034,18 @@ function descriptorToOhMyPiModel(descriptor) {
   };
 }
 
+// src/provider-connection-retry.ts
+var PROVIDER_CONNECTION_CLOSED_PATTERN = /\bprovider connection closed\b/i;
+var NORMALIZED_PREFIX = "PROVIDER_CONNECTION_CLOSED:";
+var NORMALIZED_MESSAGE = `${NORMALIZED_PREFIX} Provider connection error: the upstream provider dropped the request. ` + "This is a transient provider failure; please retry your request.";
+function normalizeProviderConnectionClosed(message, providerName) {
+  if (!message || message.role !== "assistant" || message.provider !== providerName || message.stopReason !== "error" || typeof message.errorMessage !== "string" || message.errorMessage.startsWith(NORMALIZED_PREFIX) || !PROVIDER_CONNECTION_CLOSED_PATTERN.test(message.errorMessage)) {
+    return;
+  }
+  log("retryable-error: retagged closed provider connection for retry", { model: message.model });
+  message.errorMessage = NORMALIZED_MESSAGE;
+}
+
 // src/extension.ts
 var PROVIDER_NAME = "plexus";
 function getProviderApiKeyConfig() {
@@ -119056,6 +119068,9 @@ function plexusExtension(pi) {
     oauth: createPlexusLoginProvider(pi)
   });
   currentModels = startupModels;
+  pi.on("message_end", (event) => {
+    normalizeProviderConnectionClosed(event.message, PROVIDER_NAME);
+  });
   pi.on("session_start", async (_event, ctx) => {
     const apiKey = await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME) ?? getEnvApiKey();
     const baseUrl = getBaseUrl();

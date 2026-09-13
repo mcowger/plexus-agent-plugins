@@ -5,7 +5,7 @@ import {
   mapPreferredApi,
   type PlexusApiModel,
   type PlexusReasoningOption,
-} from "../../plexus-models/src/index.ts"
+} from "../../../plexus-models/src/index.ts"
 
 type Modality = "text" | "audio" | "image" | "video" | "pdf"
 

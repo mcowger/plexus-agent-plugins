@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import type { ProviderConfig } from "@opencode-ai/sdk/v2"
-import { getEnvSuppressedModels, parseSuppressionPatterns } from "../../plexus-models/src/index.ts"
+import { getEnvSuppressedModels, parseSuppressionPatterns } from "../../../plexus-models/src/index.ts"
 import { ENV_API_KEY, ENV_API_URL, ENV_BASE_URL, PLEXUS_BASE_URL_OPTION, PLEXUS_PROVIDER_ID } from "./constants.ts"
 import { rootURL } from "./url.ts"
 

@@ -3,7 +3,7 @@ import { homedir } from "node:os"
 import { join } from "node:path"
 import type { PluginInput } from "@opencode-ai/plugin"
 import type { ConfigModel } from "./mapper.ts"
-import { isChatModel, isModelSuppressed, type PlexusApiResponse } from "../../plexus-models/src/index.ts"
+import { isChatModel, isModelSuppressed, type PlexusApiResponse } from "../../../plexus-models/src/index.ts"
 
 const PLUGIN_SUBDIR = join("plugins", "plexus")
 const CACHE_FILE = "models-cache.json"

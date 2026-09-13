@@ -20,7 +20,7 @@ var CONFIG_HOOK_REFRESH_BUDGET_MS = 3000;
 var PLACEHOLDER_MODEL_ID = "plexus-unconfigured";
 var PLEXUS_REFRESH_COMMAND = "plexus-refresh";
 
-// ../plexus-models/src/suppress.ts
+// ../../plexus-models/src/suppress.ts
 function parseSuppressionPatterns(raw) {
   if (!raw)
     return [];
@@ -69,7 +69,7 @@ function matchesPattern(id, name, shortId, pattern) {
   }
   return id === p || name === p || shortId === p;
 }
-// ../plexus-models/src/convert.ts
+// ../../plexus-models/src/convert.ts
 var REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
 var NON_CHAT_PATTERN = /(?:^|[\W_])(?:embed(?:ding|dings)?|transcri(?:be[ds]?|ptions?)|whisper|speech[\W_]*to[\W_]*text|stt|text[\W_]*to[\W_]*speech|tts|image(?:[\W_]*(?:gen(?:eration)?|\d+))?|diffusion|dall[\W_]*e|stable[\W_]*diffusion|sdxl|dream)(?:$|[\W_])/i;
 var API_DIALECT_MAP = {

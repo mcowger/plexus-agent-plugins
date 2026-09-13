@@ -28,7 +28,6 @@ Current host packages:
 | Package | Agent | Published as |
 |---|---|---|
 | `plexus-pi` | [pi](https://github.com/earendil-works/pi) | `@mcowger/pi-plexus` |
-| `plexus-opencode` | [OpenCode](https://opencode.ai) | `@mcowger/opencode-plexus` |
 | `plexus-oh-my-pi` | [Oh My Pi](https://github.com/can1357/oh-my-pi) | `@mcowger/oh-my-pi-plexus` |
 
 `plexus-oh-my-pi` is a fork-specific adapter, not a variant of `plexus-pi`. Oh My Pi is a fork of pi and ships a legacy-extension compat shim, but its native extension surface has diverged enough that a shared package would be fragile long-term:
@@ -85,17 +84,15 @@ The pi mapper resolves compat in this order:
 
 `pi_options` are stored on `PlexusModelDescriptor.piOptions` and merged last, so the server's explicit values always win. When `pi_provider` / `pi_model` resolve to a built-in pi model, the mapper also copies `thinkingLevelMap` and `headers` from that built-in model.
 
-## How model refresh works (plexus-opencode)
+## Archived OpenCode adapter
 
-OpenCode's `provider.models` hook only fires for providers already present in its models.dev-derived database, which custom providers like Plexus never are — so it cannot be used for live discovery. Instead, the plugin's `config()` hook seeds `cfg.provider.plexus.models` once at startup from the on-disk cache (or a placeholder model, so the provider survives startup and appears in `/connect` before the user has configured it).
-
-To refresh models against the live Plexus server, run the `/plexus-refresh` command. It's registered via `cfg.command` and handled in a `"command.execute.before"` hook. That hook has no `auth`/`getAuth` accessor (unlike `provider.auth.loader`), so credentials stored via `/connect` are read straight from OpenCode's on-disk `auth.json` (`readStoredAuth()` in `config-store.ts`, honoring `XDG_DATA_HOME`) and merged with env vars / `opencode.json` via `resolveConfig()`. The hook then force-fetches models bypassing the in-memory TTL cache and, on a valid response, rewrites the on-disk cache. Because OpenCode has no lightweight way to hot-reload a custom provider's model list mid-session, an OpenCode restart is required afterward to see the refreshed models in the picker. The mapper emits model-level provider overrides so each Plexus model can use the API package implied by `preferred_api`.
+`packages/deprecated/plexus-opencode` is preserved for reference only. Do not modify it, include it in workspace automation, or restore it to builds, tests, hooks, version sync, or publishing unless it is explicitly being unarchived.
 
 ## Auth flow
 
 The auth flow is the responsibility of each host adapter, but the pattern is consistent:
 
-1. User triggers the login flow (e.g. `/login plexus` in pi, `/connect` in OpenCode).
+1. User triggers the login flow (e.g. `/login plexus` in pi).
 2. Extension/plugin prompts for base URL and API key.
 3. Base URL is accepted as either the Plexus root or `/v1` API base, then stored as the canonical root URL in the agent's native config/auth metadata store.
 4. API key is stored in the host agent's own credential store.
@@ -113,13 +110,13 @@ pi's `ModelRuntime` (v0.84.0+, the adapter's minimum) runs discovery through the
 2. Write `src/mapper.ts` — translate `PlexusApiModel` (from `plexus-models`) to the host's model config shape. Import host types as `import type` only.
 3. Write `src/plugin.ts` (or `extension.ts`) — wire up the host's plugin/extension API. Use `fetchPlexusModels` from `plexus-models` for the HTTP call; call your mapper to produce host-compatible model objects.
 4. Write `src/cache.ts`, `src/log.ts`, and any config helpers — use the host's own APIs for file paths and credential storage. Copy from an existing host adapter and replace host-specific helpers.
-5. Write `package.json` — set the host's manifest field and `files`. Add `@opencode-ai/plugin` / `@earendil-works/*` etc. as `dependencies` or `peerDependencies` as required by the host.
+5. Write `package.json` — set the host's manifest field and `files`. Add the required host packages as `dependencies` or `peerDependencies`.
 6. Write `build.ts` — copy from an existing host adapter, adjusting the externals list for the new host's packages.
 7. Import `plexus-models` via relative path: `"../../plexus-models/src/index.ts"`.
 8. Update `scripts/sync-versions.ts` (`PACKAGES` array) to include the new package.
 9. Update `scripts/release.ts` to stage the new `package.json` in the release commit.
 10. Update `.github/workflows/publish.yaml` to add a publish step for the new package.
-11. The lefthook `glob` (`packages/*/src/*.ts`) already covers the new package automatically.
+11. Add the package to the root workspace and lefthook glob.
 
 ## Plexus API shape
 
@@ -129,7 +126,7 @@ The `/v1/models` endpoint returns an OpenRouter-style list. Key fields that driv
 |---|---|
 | `preferred_api` | String or array. First recognized value maps to the canonical API dialect (`openai-completions`, `anthropic-messages`, `google-generative-ai`, `openai-responses`) |
 | `supported_parameters` | Presence of `reasoning`, `include_reasoning`, or `reasoning_effort` sets `reasoning: true` |
-| `pricing.tiers` | Alternate per-token rates above `input_tokens_above`; mapped to pi `cost.tiers` and OpenCode runtime context tiers |
+| `pricing.tiers` | Alternate per-token rates above `input_tokens_above`; mapped to pi `cost.tiers` |
 | `pi_provider` / `pi_model` | Stored as `piProvider` / `piModel`; pi uses them for built-in model metadata lookup and better compat heuristics |
 | `pi_options` | Compat overrides that take precedence over heuristic and built-in detection (pi adapter only) |
 

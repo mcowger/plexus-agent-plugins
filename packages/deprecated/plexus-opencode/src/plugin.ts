@@ -1,6 +1,6 @@
 import type { Plugin } from "@opencode-ai/plugin"
 import type { Auth, Model as OpenCodeModel, Provider as OpenCodeProvider } from "@opencode-ai/sdk/v2"
-import { fetchPlexusModels } from "../../plexus-models/src/index.ts"
+import { fetchPlexusModels } from "../../../plexus-models/src/index.ts"
 import { filterCachedModels, readCachedModels, writeCache } from "./cache.ts"
 import { AUTH_METADATA_BASE_URL, getSuppressedModels, readStoredAuth, resolveConfig } from "./config-store.ts"
 import { createLogger } from "./log.ts"

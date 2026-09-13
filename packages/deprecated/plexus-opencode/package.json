@@ -1,7 +1,8 @@
 {
 	"name": "@mcowger/opencode-plexus",
 	"version": "1.4.12",
-	"description": "OpenCode plugin: Plexus provider with dynamic model discovery",
+	"private": true,
+	"description": "Archived OpenCode plugin: Plexus provider with dynamic model discovery",
 	"type": "module",
 	"module": "./dist/index.js",
 	"main": "./dist/index.js",
@@ -41,7 +42,7 @@
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/mcowger/plexus-agent-plugins.git",
-		"directory": "packages/plexus-opencode"
+		"directory": "packages/deprecated/plexus-opencode"
 	},
 	"license": "MIT"
 }

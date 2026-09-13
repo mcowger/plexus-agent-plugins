@@ -40,6 +40,7 @@ import {
 import { readCachedModelsSync, writeCachedModels, writeRawResponse } from "./cache.ts";
 import { log } from "./log.ts";
 import { descriptorToOhMyPiModel } from "./mapper.ts";
+import { normalizeProviderConnectionClosed } from "./provider-connection-retry.ts";
 
 const PROVIDER_NAME = "plexus";
 export function getProviderApiKeyConfig(): Pick<ProviderConfig, "apiKey" | "authHeader"> {
@@ -74,6 +75,12 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 		oauth: createPlexusLoginProvider(pi),
 	});
 	currentModels = startupModels;
+
+	// Retag the Plexus proxy's otherwise-unclassified closed-connection error so
+	// OMP's native turn recovery retries it using its configured retry budget.
+	pi.on("message_end", (event) => {
+		normalizeProviderConnectionClosed(event.message, PROVIDER_NAME);
+	});
 
 	// -------------------------------------------------------------------------
 	// session_start: live-refresh models using the stored API key.
