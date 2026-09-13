@@ -26,15 +26,15 @@
 		"build": "bun run build.ts"
 	},
 	"peerDependencies": {
-		"@oh-my-pi/pi-ai": ">=17.1.0",
-		"@oh-my-pi/pi-coding-agent": ">=17.1.0",
-		"@oh-my-pi/pi-utils": ">=17.1.0"
+		"@oh-my-pi/pi-ai": ">=18.1.19",
+		"@oh-my-pi/pi-coding-agent": ">=18.1.19",
+		"@oh-my-pi/pi-utils": ">=18.1.19"
 	},
 	"devDependencies": {
-		"@oh-my-pi/pi-ai": "^17.1.0",
-		"@oh-my-pi/pi-catalog": "^17.1.0",
-		"@oh-my-pi/pi-coding-agent": "^17.1.0",
-		"@oh-my-pi/pi-utils": "^17.1.0",
+		"@oh-my-pi/pi-ai": "^18.1.19",
+		"@oh-my-pi/pi-catalog": "^18.1.19",
+		"@oh-my-pi/pi-coding-agent": "^18.1.19",
+		"@oh-my-pi/pi-utils": "^18.1.19",
 		"@types/bun": "latest"
 	},
 	"repository": {

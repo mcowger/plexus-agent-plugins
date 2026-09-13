@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { streamGoogle } from "@oh-my-pi/pi-ai/providers/google";
-import type { AssistantMessageEvent, FetchImpl } from "@oh-my-pi/pi-ai/types";
+import type { AssistantMessageEvent, FetchImpl, Model } from "@oh-my-pi/pi-ai/types";
 import { ModelRegistry } from "@oh-my-pi/pi-coding-agent/config/model-registry";
 import { AuthStorage } from "@oh-my-pi/pi-coding-agent/session/auth-storage";
 import { getProviderApiKeyConfig } from "./extension.ts";
@@ -67,7 +67,7 @@ describe("Oh My Pi Plexus authentication", () => {
 				});
 			};
 
-			await drain(streamGoogle(model!, {
+			await drain(streamGoogle(model! as Model<"google-generative-ai">, {
 				messages: [{ role: "user", content: "Reply with OK only.", timestamp: 1 }],
 			}, { apiKey, fetch }));
 			expect(requestUrl).toBe("https://plexus.example.com/v1beta/models/gemini-test:streamGenerateContent?alt=sse");

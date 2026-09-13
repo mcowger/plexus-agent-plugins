@@ -10,7 +10,7 @@
 	],
 	"scripts": {
 		"build": "bun run --cwd packages/plexus-pi build.ts && bun run --cwd packages/plexus-oh-my-pi build.ts",
-		"test": "bun test packages/plexus-models/src packages/plexus-pi/src packages/plexus-oh-my-pi/src",
+		"test": "bun test --isolate packages/plexus-models/src packages/plexus-pi/src packages/plexus-oh-my-pi/src",
 		"postinstall": "command -v lefthook >/dev/null 2>&1 && lefthook install || true",
 		"sync-versions": "bun scripts/sync-versions.ts",
 		"release": "bun scripts/release.ts",
@@ -24,6 +24,6 @@
 		"lefthook": "latest"
 	},
 	"peerDependencies": {
-		"typescript": "^5"
+		"typescript": "^7.0.2"
 	}
 }
