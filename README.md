@@ -56,6 +56,8 @@ Then register the path in `~/.pi/agent/settings.json`:
 
 ### OpenCode
 
+> **Note:** This plugin is no longer maintained and won't receive further updates. In my testing, OpenCode has been notably slower and less token-efficient than pi and Oh My Pi.
+
 #### Option 1 — npm (recommended)
 
 ```sh
