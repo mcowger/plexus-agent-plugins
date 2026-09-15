@@ -20,7 +20,6 @@ const ENV_VAR_NAME_PREFIX_RE = /^[A-Za-z_][A-Za-z0-9_]*/;
 
 interface PlexusConfig {
 	baseUrl?: string;
-	defaultModel?: string;
 	suppressModels?: string | string[];
 	suppress?: string | string[];
 }
@@ -96,14 +95,14 @@ const normalizeConfigBaseUrl = (raw: string): string => {
 	return root.endsWith("/v1") ? root.slice(0, -3) : root;
 };
 
-const normalizeApiBase = (raw: string): string => {
+export const toPlexusApiBase = (raw: string): string => {
 	const root = normalizeConfigBaseUrl(raw);
 	return root ? `${root}/v1` : "";
 };
 
 /** Cached parsed config, resolved once per process and invalidated on write.
  *  Avoids re-issuing a sync file read on every getBaseUrl/getModelsUrl/
- *  getDefaultModel call. */
+ *  getBaseUrl call. */
 let cachedConfig: PlexusConfig | null = null;
 
 export function getConfigSync(): PlexusConfig {
@@ -118,33 +117,27 @@ export function getConfigSync(): PlexusConfig {
 	return cachedConfig;
 }
 
-export async function saveBaseUrl(baseUrl: string, defaultModel?: string): Promise<void> {
+export async function saveBaseUrl(baseUrl: string): Promise<void> {
 	await mkdir(getConfigDir(), { recursive: true });
-	const existing = getConfigSync();
+	const { defaultModel: _defaultModel, ...existing } = getConfigSync() as PlexusConfig & { defaultModel?: unknown };
 	const config: PlexusConfig = {
 		...existing,
 		baseUrl: normalizeConfigBaseUrl(baseUrl),
-		...(defaultModel !== undefined && { defaultModel }),
 	};
 	await writeFile(getConfigPath(), `${JSON.stringify(config, null, 2)}\n`, "utf8");
 	cachedConfig = config;
 }
 
-export async function saveDefaultModel(defaultModel: string): Promise<void> {
-	await mkdir(getConfigDir(), { recursive: true });
-	const config: PlexusConfig = { ...getConfigSync(), defaultModel };
-	await writeFile(getConfigPath(), `${JSON.stringify(config, null, 2)}\n`, "utf8");
-	cachedConfig = config;
-}
+export type BaseUrlSource = "PLEXUS_API_URL" | "PLEXUS_BASE_URL" | "saved" | "none";
 
-export function getRawBaseUrl(): string | null {
+export function getBaseUrlResolution(): { baseUrl: string | null; source: BaseUrlSource } {
 	const config = getConfigSync();
-	return (
-		resolveStringOption(process.env[ENV_API_URL]) ??
-		resolveStringOption(process.env[ENV_BASE_URL]) ??
-		resolveStringOption(config.baseUrl) ??
-		null
-	);
+	const apiUrl = resolveStringOption(process.env[ENV_API_URL]);
+	if (apiUrl) return { baseUrl: apiUrl, source: ENV_API_URL };
+	const baseUrl = resolveStringOption(process.env[ENV_BASE_URL]);
+	if (baseUrl) return { baseUrl, source: ENV_BASE_URL };
+	const saved = resolveStringOption(config.baseUrl);
+	return { baseUrl: saved ?? null, source: saved ? "saved" : "none" };
 }
 
 export function getEnvApiKey(): string | null {
@@ -153,18 +146,14 @@ export function getEnvApiKey(): string | null {
 
 /** Returns <baseUrl>/v1/models, or null. */
 export function getModelsUrl(): string | null {
-	const raw = getRawBaseUrl();
-	return raw ? `${normalizeApiBase(raw)}/models` : null;
+	const { baseUrl } = getBaseUrlResolution();
+	return baseUrl ? `${toPlexusApiBase(baseUrl)}/models` : null;
 }
 
-/** Returns <baseUrl>/v1, or null. */
+/** Returns the Plexus OpenAI API base, or null. Per-model dialects are adjusted later. */
 export function getBaseUrl(): string | null {
-	const raw = getRawBaseUrl();
-	return raw ? normalizeApiBase(raw) : null;
-}
-
-export function getDefaultModel(): string | null {
-	return getConfigSync().defaultModel ?? null;
+	const { baseUrl } = getBaseUrlResolution();
+	return baseUrl ? toPlexusApiBase(baseUrl) : null;
 }
 
 export function getSuppressedModels(): string[] {

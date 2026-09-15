@@ -14,6 +14,7 @@
  * Commands:
  *   /login plexus   — set base URL and API key using pi's native login UI
  *   /plexus refresh — re-fetch models from the Plexus endpoint
+ *   /plexus status  — show effective configuration and catalog state
  */
 
 // Type-only — erased at runtime, never resolved by the module loader
@@ -36,23 +37,16 @@ import {
 	convertDescriptors,
 	fetchPlexusModels,
 	isModelSuppressed,
-	type PlexusModelDescriptor,
 } from "../../plexus-models/src/index.ts";
 import {
 	getBaseUrl,
+	getBaseUrlResolution,
 	getEnvApiKey,
 	getModelsUrl,
 	getSuppressedModels,
 	saveBaseUrl,
-	saveDefaultModel,
 } from "./config.ts";
-import {
-	readCachedEtag,
-	readCachedModelsSync,
-	writeCachedEtag,
-	writeCachedModels,
-	writeRawResponse,
-} from "./cache.ts";
+import { readStoredModelsSync } from "./cache.ts";
 import { log } from "./log.ts";
 import { descriptorToPiModel, MINIMUM_OUTPUT_TOKENS } from "./mapper.ts";
 import { normalizeMalformedFunctionCall } from "./gemini-malformed-retry.ts";
@@ -64,17 +58,8 @@ const PLACEHOLDER_BASE_URL = "http://localhost/v1";
 
 type PlexusCredentials = OAuthCredentials & { plexusBaseUrl?: string };
 
-// Keep the current model list in module scope so setDefaultModel can reference it.
 let currentModels: ProviderModelConfig[] = [];
-
-export function cachedDescriptorsToPiModels(
-	descriptors: PlexusModelDescriptor[],
-	suppressPatterns?: string[],
-): ProviderModelConfig[] {
-	return descriptors
-		.filter((descriptor) => !isModelSuppressed({ id: descriptor.id, name: descriptor.name }, suppressPatterns))
-		.map(descriptorToPiModel);
-}
+let catalogSource: "host store" | "live refresh" | "none" = "none";
 
 export function enforceMinimumOutputTokens(payload: unknown): unknown {
 	if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
@@ -109,17 +94,13 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	const startupBaseUrl = getBaseUrl();
 	const suppressPatterns = getSuppressedModels();
 
-	const cached = readCachedModelsSync();
-	let startupModels: ProviderModelConfig[] = [];
-	if (cached?.models && cached.models.length > 0) {
-		startupModels = cachedDescriptorsToPiModels(cached.models, suppressPatterns);
-	} else if (cached?.piModels && cached.piModels.length > 0) {
-		startupModels = cached.piModels.filter(
-			(m) => !isModelSuppressed({ id: m.id, name: m.name }, suppressPatterns),
-		);
-	}
+	const storedCatalog = readStoredModelsSync();
+	const startupModels = (storedCatalog?.models ?? []).filter(
+		(model) => !isModelSuppressed({ id: model.id, name: model.name }, suppressPatterns),
+	);
 
 	currentModels = startupModels;
+	catalogSource = startupModels.length > 0 ? "host store" : "none";
 
 	pi.on("before_provider_request", (event, ctx) => (
 		ctx.model?.provider === PROVIDER_NAME ? enforceMinimumOutputTokens(event.payload) : undefined
@@ -128,7 +109,7 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	log("startup", {
 		baseUrl: startupBaseUrl,
 		hasEnvApiKey: !!envApiKey,
-		cachedModelCount: startupModels.length,
+		hostStoredModelCount: startupModels.length,
 	});
 
 	// Retag known transient upstream failures so pi's native agent-turn retry
@@ -153,48 +134,19 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	// /plexus command
 	// -------------------------------------------------------------------------
 	pi.registerCommand("plexus", {
-		description: "Plexus provider commands: refresh, set-default-model (setup: /login plexus)",
+		description: "Plexus provider commands: refresh, status (setup: /login plexus)",
 		getArgumentCompletions: (prefix) => {
 			const subcommands = [
 				{ value: "refresh", label: "refresh", description: "Refresh Plexus models from the API" },
-				{ value: "set-default-model", label: "set-default-model", description: "Choose the model Pi should use by default" },
+				{ value: "status", label: "status", description: "Show Plexus configuration and catalog status" },
 			];
-
-			if (!prefix.includes(" ")) {
-				return subcommands.filter((command) => command.value.startsWith(prefix));
-			}
-
-			const [subcommand, ...rest] = prefix.split(/\s+/);
-			if (subcommand !== "set-default-model") return null;
-
-			const modelPrefix = rest.join(" ");
-			const choices = currentModels.map((model) => ({
-				value: model.id,
-				label: model.name === model.id ? model.id : `${model.name} (${model.id})`,
-			}));
-			const filtered = choices.filter((choice) =>
-				choice.value.toLowerCase().startsWith(modelPrefix.toLowerCase()),
-			);
-			return filtered.length > 0 ? filtered : null;
+			return prefix.includes(" ") ? null : subcommands.filter((command) => command.value.startsWith(prefix));
 		},
 		handler: async (args, ctx) => {
-			const trimmed = args.trim();
-			const sub = trimmed.toLowerCase();
-
-			if (sub === "refresh" || sub === "") {
-				await handleRefresh(ctx);
-				return;
-			}
-
-			if (sub === "set-default-model" || sub.startsWith("set-default-model ")) {
-				await handleSetDefaultModel(pi, ctx, trimmed.slice("set-default-model".length).trim());
-				return;
-			}
-
-			ctx.ui.notify(
-				`Unknown sub-command: "${args}". Use /login plexus, /plexus refresh, or /plexus set-default-model.`,
-				"warning",
-			);
+			const sub = args.trim().toLowerCase();
+			if (sub === "refresh" || sub === "") return handleRefresh(ctx);
+			if (sub === "status") return handleStatus(ctx);
+			ctx.ui.notify(`Unknown sub-command: "${args}". Use /login plexus, /plexus refresh, or /plexus status.`, "warning");
 		},
 	});
 }
@@ -232,22 +184,8 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 		);
 	}
 
-	const storedEtag = await readCachedEtag();
-
 	try {
-		const { models: apiModels, raw, etag, notModified } = await fetchPlexusModels(
-			apiKey,
-			modelsUrl,
-			undefined,
-			storedEtag,
-			context.signal,
-		);
-
-		if (notModified) {
-			log("refreshModels: not modified", { etag: storedEtag });
-			const restored = await restoreStoredModels(context);
-			if (restored) return restored;
-		}
+		const { models: apiModels } = await fetchPlexusModels(apiKey, modelsUrl, undefined, undefined, context.signal);
 
 		const descriptors = convertDescriptors(apiModels, baseUrl, suppress);
 		const piModels = descriptors.map(descriptorToPiModel);
@@ -258,17 +196,12 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 			persist: { models: piModels as unknown as Model<Api>[], checkedAt: Date.now() },
 			update: () => {
 				currentModels = piModels;
+				catalogSource = "live refresh";
 			},
 		});
 		if (!published) {
 			log("refreshModels: publication superseded by a newer refresh", {});
 		}
-
-		await Promise.all([
-			writeCachedModels(descriptors, etag),
-			writeCachedEtag(etag),
-			raw ? writeRawResponse(raw) : Promise.resolve(),
-		]);
 
 		log("refreshModels: fetched", { count: piModels.length });
 		return piModels;
@@ -292,6 +225,7 @@ async function restoreStoredModels(
 	await context.publish({
 		update: () => {
 			currentModels = models;
+			catalogSource = "host store";
 		},
 	});
 	log("refreshModels: restored from store", { count: models.length });
@@ -380,48 +314,13 @@ async function handleRefresh(ctx: ExtensionCommandContext): Promise<void> {
 	);
 }
 
-async function handleSetDefaultModel(
-	pi: ExtensionAPI,
-	ctx: ExtensionCommandContext,
-	requestedModelId: string,
-): Promise<void> {
-	let modelId = requestedModelId;
-
-	if (!modelId) {
-		if (currentModels.length === 0) {
-			ctx.ui.notify("No Plexus models are available. Run /plexus refresh first.", "warning");
-			return;
-		}
-
-		const choices = currentModels.map((model) =>
-			model.name === model.id ? model.id : `${model.name} (${model.id})`,
-		);
-		const selected = await ctx.ui.select("Select the Plexus default model:", choices);
-		if (!selected) return;
-
-		const selectedIndex = choices.indexOf(selected);
-		modelId = currentModels[selectedIndex]?.id ?? "";
-	}
-
-	const model = currentModels.find((candidate) => candidate.id === modelId);
-	if (!model) {
-		ctx.ui.notify(
-			`Plexus model not found: "${modelId}". Run /plexus refresh and choose a model from the available list.`,
-			"error",
-		);
-		return;
-	}
-
-	await saveDefaultModel(model.id);
-	// Apply explicit choices immediately. Session startup never applies this
-	// saved value, so it cannot override the model selected for a new session.
-	const registryModel = ctx.modelRegistry.find(PROVIDER_NAME, model.id) ?? model;
-	// biome-ignore lint/suspicious/noExplicitAny: pi.setModel generic constraint
-	const active = await pi.setModel(registryModel as any);
-	ctx.ui.notify(
-		active
-			? `Plexus model selected: ${model.id}.`
-			: `Plexus model ${model.id} was saved but could not be selected in this session.`,
-		active ? "info" : "warning",
-	);
+async function handleStatus(ctx: ExtensionCommandContext): Promise<void> {
+	const baseUrl = getBaseUrlResolution();
+	const apiKey = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER_NAME);
+	ctx.ui.notify([
+		`Plexus base URL: ${baseUrl.baseUrl ?? "not configured"} (${baseUrl.source})`,
+		`API key: ${apiKey ? (getEnvApiKey() ? "host credential or PLEXUS_API_KEY fallback" : "host credential") : "not configured"}`,
+		`Catalog: ${currentModels.length} models (${catalogSource})`,
+		"Default model: managed by Pi. Use /model and save the selection there.",
+	].join("\n"), "info");
 }

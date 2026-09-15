@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { getSuppressedModels, resolveConfigTemplate } from "./config.ts";
+import { getSuppressedModels, resolveConfigTemplate, toPlexusApiBase } from "./config.ts";
 
 const ORIGINAL_ENV = { ...process.env };
 
 afterEach(() => {
 	process.env = { ...ORIGINAL_ENV };
+});
+
+test("builds Plexus endpoints once before model dialect adjustment", () => {
+	expect(toPlexusApiBase("https://plexus.example.com")).toBe("https://plexus.example.com/v1");
+	expect(toPlexusApiBase("https://plexus.example.com/v1/")).toBe("https://plexus.example.com/v1");
 });
 
 describe("oh-my-pi config template resolution", () => {

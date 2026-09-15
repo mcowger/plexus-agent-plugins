@@ -12,7 +12,7 @@ Exposes models from a self-hosted [Plexus](https://github.com/mcowger/plexus) AI
 ## Prerequisites
 
 - A running Plexus instance
-- pi 0.81.0 or later (for `plexus-pi`)
+- pi 0.85.1 or later (for `plexus-pi`)
 
 ## Installation
 
@@ -109,12 +109,13 @@ To force a model refresh:
 /plexus refresh
 ```
 
-Select a Plexus model explicitly for the current session. With no model ID, Pi opens a selector; you can also pass the exact Plexus model ID directly. This explicit choice is not applied automatically when starting a new session:
+Inspect the effective URL, authentication availability, and catalog source without exposing a credential:
 
 ```
-/plexus set-default-model
-/plexus set-default-model claude-sonnet-4-5
+/plexus status
 ```
+
+Select a Plexus model in `/model`. Save its startup default with the host's normal model-picker action; Plexus does not maintain a separate default-model setting.
 
 Use `/login plexus` for setup and `/logout plexus` to remove stored credentials.
 
@@ -126,35 +127,32 @@ Run inside Oh My Pi using the native login flow:
 /login plexus
 ```
 
-Same prompts and `/plexus refresh` / `/plexus set-default-model` commands as pi (see above) — `plexus-oh-my-pi` mirrors the pi adapter's behavior, adjusted for Oh My Pi's own runtime packages and built-in model registry.
+Same prompts and `/plexus refresh` / `/plexus status` commands as pi (see above). Save the selected startup model through OMP's normal `/model` or `/models` flow.
 
 ## Configuration files
 
-### pi
+### Connection state
 
-```
-~/.pi/agent/extensions/plexus/
-  config.json                  # base URL and model preference metadata
-  plexus-models-cache.json     # last-fetched model list (startup cache)
-  plexus-models-response.json  # raw API response (diagnostics)
-  plexus.log                   # extension activity log
+Each adapter stores only non-secret Plexus settings in its own `config.json`:
+
+```text
+<agent-dir>/extensions/plexus/config.json  # base URL and optional model suppression
 ```
 
-The API key is stored through pi's own auth storage. `PLEXUS_API_URL` or `PLEXUS_BASE_URL` can be used as an environment override.
+Credentials stay in the host credential store (`auth.json` for Pi, `agent.db` for OMP). Model catalogs stay in the host model registry/store. The extension no longer writes a second model cache, ETag file, raw API response, or default-model preference.
 
-### Oh My Pi
+At runtime, configuration resolves as follows:
 
+```text
+base URL: PLEXUS_API_URL → PLEXUS_BASE_URL → saved Plexus base URL
+API key: host credential store → PLEXUS_API_KEY process fallback
+catalog: host model store → live Plexus refresh
+startup model: host model-picker preference
 ```
-~/.omp/agent/extensions/plexus/
-  config.json                  # base URL and model preference metadata
-  plexus-models-cache.json     # last-fetched model list (startup cache)
-  plexus-models-response.json  # raw API response (diagnostics)
-  plexus.log                   # extension activity log
-```
 
-Same layout as pi, rooted under `~/.omp/agent` instead of `~/.pi/agent` since Oh My Pi resolves its own agent directory.
+`PLEXUS_API_URL` and `PLEXUS_BASE_URL` are process-only URL overrides; `PLEXUS_API_KEY` is a process-only credential fallback. None are persisted. `/plexus status` reports the effective URL source, whether auth is available, and catalog state without exposing credentials.
 
-Both adapters also accept pi-style environment interpolation in configured strings, such as `${PLEXUS_API_URL}` or `$PLEXUS_API_KEY`. This is useful when checking non-secret config into an agent config file while keeping the actual values in the environment.
+Plexus accepts a root URL or a `/v1` API URL. The adapter normalizes that only for the Plexus discovery request. Each model then receives its own API-specific base URL: OpenAI stays on `/v1`, Anthropic uses the root, and Google uses `/v1beta`.
 
 ---
 
@@ -200,16 +198,15 @@ packages/
     src/
       extension.ts      # entry point: commands, session refresh, auth flow
       mapper.ts         # PlexusModelDescriptor → pi ProviderModelConfig
-      config.ts         # base URL / default model config I/O
-      cache.ts          # model cache I/O
+      config.ts         # base URL / suppression config I/O
+      cache.ts          # Pi native model-store restore
       log.ts            # append-only log
     package.json        # declares pi.extensions entry point
   plexus-oh-my-pi/      # Oh My Pi host adapter (fork of pi; own runtime packages + catalog)
     src/
       extension.ts      # entry point: commands, session refresh, auth flow
       mapper.ts         # PlexusModelDescriptor → Oh My Pi ProviderModelConfig
-      config.ts         # base URL / default model config I/O
-      cache.ts          # model cache I/O
+      config.ts         # base URL / suppression config I/O
       log.ts            # append-only log
     package.json        # declares omp.extensions entry point
 ```

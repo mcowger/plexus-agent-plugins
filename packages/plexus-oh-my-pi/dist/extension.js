@@ -432682,43 +432682,6 @@ function getEnvSuppressedModels() {
   const raw = env.PLEXUS_SUPPRESS_MODELS ?? env.PLEXUS_EXCLUDE_MODELS;
   return parseSuppressionPatterns(raw);
 }
-function isModelSuppressed(model, patterns) {
-  const envPatterns = getEnvSuppressedModels();
-  const explicitPatterns = parseSuppressionPatterns(patterns);
-  const allPatterns = [...envPatterns, ...explicitPatterns];
-  if (allPatterns.length === 0)
-    return false;
-  const id = model.id.toLowerCase();
-  const name = (model.name ?? "").toLowerCase();
-  const shortId = id.includes("/") ? id.split("/").pop() : id.includes(":") ? id.split(":").pop() : id;
-  for (const pattern of allPatterns) {
-    if (matchesPattern(id, name, shortId, pattern)) {
-      return true;
-    }
-  }
-  return false;
-}
-function matchesPattern(id, name, shortId, pattern) {
-  const p = pattern.toLowerCase();
-  if (p.startsWith("regex:")) {
-    try {
-      const re = new RegExp(pattern.slice(6), "i");
-      return re.test(id) || re.test(name) || re.test(shortId);
-    } catch {
-      return false;
-    }
-  }
-  if (p.includes("*") || p.includes("?")) {
-    const regexStr = "^" + p.replace(/([.+^${}()|[\]\\])/g, "\\$1").replace(/\*/g, ".*").replace(/\?/g, ".") + "$";
-    try {
-      const re = new RegExp(regexStr, "i");
-      return re.test(id) || re.test(name) || re.test(shortId);
-    } catch {
-      return false;
-    }
-  }
-  return id === p || name === p || shortId === p;
-}
 // ../plexus-models/src/convert.ts
 var REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
 var NON_CHAT_PATTERN = /(?:^|[\W_])(?:embed(?:ding|dings)?|transcri(?:be[ds]?|ptions?)|whisper|speech[\W_]*to[\W_]*text|stt|text[\W_]*to[\W_]*speech|tts|image(?:[\W_]*(?:gen(?:eration)?|\d+))?|diffusion|dall[\W_]*e|stable[\W_]*diffusion|sdxl|dream)(?:$|[\W_])/i;
@@ -433092,7 +433055,7 @@ var normalizeConfigBaseUrl = (raw) => {
   const root = normalizeRoot(raw);
   return root.endsWith("/v1") ? root.slice(0, -3) : root;
 };
-var normalizeApiBase = (raw) => {
+var toPlexusApiBase = (raw) => {
   const root = normalizeConfigBaseUrl(raw);
   return root ? `${root}/v1` : "";
 };
@@ -433109,39 +433072,38 @@ function getConfigSync() {
   cachedConfig = {};
   return cachedConfig;
 }
-async function saveBaseUrl(baseUrl, defaultModel) {
+async function saveBaseUrl(baseUrl) {
   await mkdir(getConfigDir(), { recursive: true });
-  const existing = getConfigSync();
+  const { defaultModel: _defaultModel, ...existing } = getConfigSync();
   const config = {
     ...existing,
-    baseUrl: normalizeConfigBaseUrl(baseUrl),
-    ...defaultModel !== undefined && { defaultModel }
+    baseUrl: normalizeConfigBaseUrl(baseUrl)
   };
   await writeFile(getConfigPath(), `${JSON.stringify(config, null, 2)}
 `, "utf8");
   cachedConfig = config;
 }
-async function saveDefaultModel(defaultModel) {
-  await mkdir(getConfigDir(), { recursive: true });
-  const config = { ...getConfigSync(), defaultModel };
-  await writeFile(getConfigPath(), `${JSON.stringify(config, null, 2)}
-`, "utf8");
-  cachedConfig = config;
-}
-function getRawBaseUrl() {
+function getBaseUrlResolution() {
   const config = getConfigSync();
-  return resolveStringOption(process.env[ENV_API_URL]) ?? resolveStringOption(process.env[ENV_BASE_URL]) ?? resolveStringOption(config.baseUrl) ?? null;
+  const apiUrl = resolveStringOption(process.env[ENV_API_URL]);
+  if (apiUrl)
+    return { baseUrl: apiUrl, source: ENV_API_URL };
+  const baseUrl = resolveStringOption(process.env[ENV_BASE_URL]);
+  if (baseUrl)
+    return { baseUrl, source: ENV_BASE_URL };
+  const saved = resolveStringOption(config.baseUrl);
+  return { baseUrl: saved ?? null, source: saved ? "saved" : "none" };
 }
 function getEnvApiKey() {
   return resolveStringOption(process.env[ENV_API_KEY]) ?? null;
 }
 function getModelsUrl() {
-  const raw = getRawBaseUrl();
-  return raw ? `${normalizeApiBase(raw)}/models` : null;
+  const { baseUrl } = getBaseUrlResolution();
+  return baseUrl ? `${toPlexusApiBase(baseUrl)}/models` : null;
 }
 function getBaseUrl() {
-  const raw = getRawBaseUrl();
-  return raw ? normalizeApiBase(raw) : null;
+  const { baseUrl } = getBaseUrlResolution();
+  return baseUrl ? toPlexusApiBase(baseUrl) : null;
 }
 function getSuppressedModels() {
   const config = getConfigSync();
@@ -433150,59 +433112,12 @@ function getSuppressedModels() {
   return [...envSuppressed, ...configSuppressed];
 }
 
-// src/cache.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
-import { mkdir as mkdir2, writeFile as writeFile2 } from "fs/promises";
+// src/log.ts
+import { mkdir as mkdir2, appendFile } from "fs/promises";
 import { join as join2 } from "path";
 import { getAgentDir as getAgentDir2 } from "@oh-my-pi/pi-utils";
 var getCacheDir = () => join2(getAgentDir2(), "extensions", "plexus");
-var getModelsCachePath = () => join2(getCacheDir(), "plexus-models-cache.json");
-var getRawResponsePath = () => join2(getCacheDir(), "plexus-models-response.json");
-function parseCacheData(raw) {
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-      return null;
-    const obj = parsed;
-    if (!Array.isArray(obj["models"]))
-      return null;
-    return {
-      models: obj["models"],
-      timestamp: typeof obj["timestamp"] === "number" ? obj["timestamp"] : 0,
-      etag: typeof obj["etag"] === "string" ? obj["etag"] : undefined
-    };
-  } catch {
-    return null;
-  }
-}
-function readCachedModelsSync() {
-  try {
-    const p = getModelsCachePath();
-    if (!existsSync2(p))
-      return null;
-    return parseCacheData(readFileSync2(p, "utf8"));
-  } catch {
-    return null;
-  }
-}
-async function writeCachedModels(models, etag) {
-  await mkdir2(getCacheDir(), { recursive: true });
-  const payload = { models, timestamp: Date.now(), etag };
-  await writeFile2(getModelsCachePath(), `${JSON.stringify(payload, null, 2)}
-`, "utf8");
-}
-async function writeRawResponse(data) {
-  await mkdir2(getCacheDir(), { recursive: true });
-  await writeFile2(getRawResponsePath(), `${JSON.stringify(data, null, 2)}
-`, "utf8");
-}
-
-// src/log.ts
-import { mkdir as mkdir3, appendFile } from "fs/promises";
-import { join as join3 } from "path";
-import { getAgentDir as getAgentDir3 } from "@oh-my-pi/pi-utils";
-var getCacheDir2 = () => join3(getAgentDir3(), "extensions", "plexus");
-var getLogPath = () => join3(getCacheDir2(), "plexus.log");
+var getLogPath = () => join2(getCacheDir(), "plexus.log");
 var dirEnsured = false;
 function log(message, data) {
   writeLogLine(message, data);
@@ -433210,7 +433125,7 @@ function log(message, data) {
 async function writeLogLine(message, data) {
   try {
     if (!dirEnsured) {
-      await mkdir3(getCacheDir2(), { recursive: true });
+      await mkdir2(getCacheDir(), { recursive: true });
       dirEnsured = true;
     }
     const ts = new Date().toISOString();
@@ -440221,22 +440136,16 @@ function getProviderApiKeyConfig() {
   return Bun.env[ENV_API_KEY]?.trim() ? { apiKey: ENV_API_KEY, authHeader: true } : {};
 }
 var currentModels = [];
+var catalogSource = "none";
 function plexusExtension(pi) {
-  const cached = readCachedModelsSync();
-  const suppressPatterns = getSuppressedModels();
-  const startupBaseUrl = getBaseUrl() ?? "http://localhost/v1";
-  const startupModels = (cached?.models ?? []).filter((m) => !isModelSuppressed({ id: m.id, name: m.name }, suppressPatterns)).map(descriptorToOhMyPiModel);
-  log("startup", {
-    cachedModelCount: startupModels.length,
-    startupBaseUrl
-  });
+  const startupBaseUrl = getBaseUrl();
+  log("startup", { catalogSource, startupBaseUrl });
   pi.registerProvider(PROVIDER_NAME, {
     api: "openai-completions",
     ...getProviderApiKeyConfig(),
-    ...startupModels.length > 0 ? { baseUrl: startupBaseUrl, models: startupModels } : {},
+    ...startupBaseUrl ? { baseUrl: startupBaseUrl } : {},
     oauth: createPlexusLoginProvider(pi)
   });
-  currentModels = startupModels;
   pi.on("message_end", (event) => {
     normalizeProviderConnectionClosed(event.message, PROVIDER_NAME);
   });
@@ -440251,38 +440160,21 @@ function plexusExtension(pi) {
     await doRefresh(pi, apiKey, ctx);
   });
   pi.registerCommand("plexus", {
-    description: "Plexus provider commands: refresh, set-default-model (setup: /login plexus)",
+    description: "Plexus provider commands: refresh, status (setup: /login plexus)",
     getArgumentCompletions: (prefix) => {
       const subcommands = [
         { value: "refresh", label: "refresh", description: "Refresh Plexus models from the API" },
-        { value: "set-default-model", label: "set-default-model", description: "Choose the model Oh My Pi should use by default" }
+        { value: "status", label: "status", description: "Show Plexus configuration and catalog status" }
       ];
-      if (!prefix.includes(" ")) {
-        return subcommands.filter((command) => command.value.startsWith(prefix));
-      }
-      const [subcommand, ...rest] = prefix.split(/\s+/);
-      if (subcommand !== "set-default-model")
-        return null;
-      const modelPrefix = rest.join(" ");
-      const choices = currentModels.map((model) => ({
-        value: model.id,
-        label: model.name === model.id ? model.id : `${model.name} (${model.id})`
-      }));
-      const filtered = choices.filter((choice) => choice.value.toLowerCase().startsWith(modelPrefix.toLowerCase()));
-      return filtered.length > 0 ? filtered : null;
+      return prefix.includes(" ") ? null : subcommands.filter((command) => command.value.startsWith(prefix));
     },
     handler: async (args, ctx) => {
-      const trimmed = args.trim();
-      const sub = trimmed.toLowerCase();
-      if (sub === "refresh" || sub === "") {
-        await handleRefresh(pi, ctx);
-        return;
-      }
-      if (sub === "set-default-model" || sub.startsWith("set-default-model ")) {
-        await handleSetDefaultModel(pi, ctx, trimmed.slice("set-default-model".length).trim());
-        return;
-      }
-      ctx.ui.notify(`Unknown sub-command: "${args}". Use /login plexus, /plexus refresh, or /plexus set-default-model.`, "warning");
+      const sub = args.trim().toLowerCase();
+      if (sub === "refresh" || sub === "")
+        return handleRefresh(pi, ctx);
+      if (sub === "status")
+        return handleStatus(ctx);
+      ctx.ui.notify(`Unknown sub-command: "${args}". Use /login plexus, /plexus refresh, or /plexus status.`, "warning");
     }
   });
 }
@@ -440315,29 +440207,16 @@ async function handleRefresh(pi, ctx) {
   ctx.ui.notify("Refreshing Plexus models\u2026", "info");
   await doRefresh(pi, apiKey, ctx);
 }
-async function handleSetDefaultModel(pi, ctx, requestedModelId) {
-  let modelId = requestedModelId;
-  if (!modelId) {
-    if (currentModels.length === 0) {
-      ctx.ui.notify("No Plexus models are available. Run /plexus refresh first.", "warning");
-      return;
-    }
-    const choices = currentModels.map((model) => model.name === model.id ? model.id : `${model.name} (${model.id})`);
-    const selected = await ctx.ui.select("Select the Plexus default model:", choices);
-    if (!selected)
-      return;
-    const selectedIndex = choices.indexOf(selected);
-    modelId = currentModels[selectedIndex]?.id ?? "";
-  }
-  const model = currentModels.find((candidate) => candidate.id === modelId);
-  if (!model) {
-    ctx.ui.notify(`Plexus model not found: "${modelId}". Run /plexus refresh and choose a model from the available list.`, "error");
-    return;
-  }
-  await saveDefaultModel(model.id);
-  const registryModel = ctx.modelRegistry.find(PROVIDER_NAME, model.id) ?? model;
-  const active = await pi.setModel(registryModel);
-  ctx.ui.notify(active ? `Plexus model selected: ${model.id}.` : `Plexus model ${model.id} was saved but could not be selected in this session.`, active ? "info" : "warning");
+async function handleStatus(ctx) {
+  const baseUrl = getBaseUrlResolution();
+  const apiKey = await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME);
+  ctx.ui.notify([
+    `Plexus base URL: ${baseUrl.baseUrl ?? "not configured"} (${baseUrl.source})`,
+    `API key: ${apiKey ? getEnvApiKey() ? "host credential or PLEXUS_API_KEY fallback" : "host credential" : "not configured"}`,
+    `Catalog: ${currentModels.length} models (${catalogSource})`,
+    "Default model: managed by OMP. Use /model or /models to save the selection there."
+  ].join(`
+`), "info");
 }
 async function doRefresh(pi, apiKey, ctx) {
   const modelsUrl = getModelsUrl();
@@ -440349,19 +440228,12 @@ async function doRefresh(pi, apiKey, ctx) {
     return;
   }
   try {
-    const cached = readCachedModelsSync();
-    const { models: apiModels, raw, etag, notModified } = await fetchPlexusModels(apiKey, modelsUrl, undefined, cached?.etag);
-    if (notModified) {
-      log("doRefresh: not modified", { etag: cached?.etag });
-      if (ctx)
-        ctx.ui.notify(`Refreshed ${currentModels.length} Plexus models (not modified)`, "info");
-      return;
-    }
+    const { models: apiModels } = await fetchPlexusModels(apiKey, modelsUrl);
     const suppressPatterns = getSuppressedModels();
     const descriptors = convertDescriptors(apiModels, baseUrl, suppressPatterns);
     const ohMyPiModels = descriptors.map(descriptorToOhMyPiModel);
-    await Promise.all([writeCachedModels(descriptors, etag), raw ? writeRawResponse(raw) : Promise.resolve()]);
     currentModels = ohMyPiModels;
+    catalogSource = "live refresh";
     pi.registerProvider(PROVIDER_NAME, {
       api: "openai-completions",
       ...getProviderApiKeyConfig(),
