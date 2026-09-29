@@ -8,11 +8,13 @@ Exposes models from a self-hosted [Plexus](https://github.com/mcowger/plexus) AI
 |---|---|---|
 | `plexus-pi` | [pi](https://github.com/earendil-works/pi) | `@mcowger/pi-plexus` |
 | `plexus-oh-my-pi` | [Oh My Pi](https://github.com/can1357/oh-my-pi) | `@mcowger/oh-my-pi-plexus` |
+| `plexus-opencode-v2` | [OpenCode](https://github.com/anomalyco/opencode) V2 | `@mcowger/opencode-plexus` |
 
 ## Prerequisites
 
 - A running Plexus instance
 - pi 0.85.1 or later (for `plexus-pi`)
+- OpenCode V2 (for `plexus-opencode-v2`)
 
 ## Installation
 
@@ -86,6 +88,28 @@ Then register the path in `~/.omp/agent/settings.json`:
 }
 ```
 
+### OpenCode (V2)
+
+Add the plugin to `~/.config/opencode/opencode.jsonc`, either from npm or from a local clone (local plugins must point at the package directory, not a file):
+
+```jsonc
+{
+  "plugins": ["@mcowger/opencode-plexus"]
+  // or: ["file:///home/you/code/plexus-agent-plugins/packages/plexus-opencode-v2"]
+}
+```
+
+If you use `experimental.policies` to restrict providers, policies are last-match-wins — put the `plexus` allow **after** any `"*"` deny:
+
+```jsonc
+"policies": [
+  { "action": "provider.use", "resource": "*", "effect": "deny" },
+  { "action": "provider.use", "resource": "plexus", "effect": "allow" }
+]
+```
+
+Restart the service (`opencode service stop && opencode service start`) after changing plugins.
+
 ---
 
 ## First-time setup
@@ -128,6 +152,18 @@ Run inside Oh My Pi using the native login flow:
 ```
 
 Same prompts and `/plexus refresh` / `/plexus status` commands as pi (see above). Save the selected startup model through OMP's normal `/model` or `/models` flow.
+
+### OpenCode (V2)
+
+Run `/connect` and pick **Plexus**. You will be prompted for the Plexus base URL and API key; models load immediately — no restart needed. Disconnecting, reconnecting, or rotating the key also reloads the model list.
+
+To force a model refresh:
+
+```
+/plexus-refresh
+```
+
+`PLEXUS_API_URL` / `PLEXUS_BASE_URL` / `PLEXUS_API_KEY` env vars and plugin options (`plexusBaseURL`, `suppressModels`) are also honored. Until a URL is configured, the provider shows a single `plexus-unconfigured` placeholder. Plugin logs are written to `~/.local/share/opencode/plugins/plexus/plugin.log` (the OpenCode service discards plugin stdout).
 
 ## Configuration files
 
@@ -209,6 +245,14 @@ packages/
       config.ts         # base URL / suppression config I/O
       log.ts            # append-only log
     package.json        # declares omp.extensions entry point
+  plexus-opencode-v2/   # OpenCode V2 provider plugin
+    src/
+      plugin.ts         # entry point: provider/integration transforms, /plexus-refresh, credential watcher
+      mapper.ts         # PlexusModelDescriptor → OpenCode Model.Info
+      config-store.ts   # base URL / API key / suppression resolution
+      cache.ts          # model cache I/O
+      log.ts            # console + file log
+    server.js           # root entrypoint required by OpenCode for directory plugins
 ```
 
 `plexus-models` has zero imports from any agent framework. Each host adapter imports it via a relative path.
@@ -247,6 +291,6 @@ The pre-commit hook (via lefthook) rebuilds the active dist artifacts automatica
 
 ## Archived adapters
 
-`packages/deprecated/plexus-opencode` is preserved for reference but is archived. It is private and excluded from builds, tests, hooks, version sync, and publishing. In my testing, OpenCode was notably slower and less token-efficient than pi and Oh My Pi.
+`packages/deprecated/plexus-opencode` (the OpenCode V1 adapter) is preserved for reference but is archived. It is private and excluded from builds, tests, hooks, version sync, and publishing. It is superseded by `plexus-opencode-v2`.
 
 To add support for a new host agent, see [AGENTS.md](AGENTS.md).

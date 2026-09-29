@@ -29,6 +29,7 @@ Current host packages:
 |---|---|---|
 | `plexus-pi` | [pi](https://github.com/earendil-works/pi) | `@mcowger/pi-plexus` |
 | `plexus-oh-my-pi` | [Oh My Pi](https://github.com/can1357/oh-my-pi) | `@mcowger/oh-my-pi-plexus` |
+| `plexus-opencode-v2` | [OpenCode](https://github.com/anomalyco/opencode) V2 | `@mcowger/opencode-plexus` |
 
 `plexus-oh-my-pi` is a fork-specific adapter, not a variant of `plexus-pi`. Oh My Pi is a fork of pi and ships a legacy-extension compat shim, but its native extension surface has diverged enough that a shared package would be fragile long-term:
 
@@ -84,9 +85,21 @@ The pi mapper resolves compat in this order:
 
 `pi_options` are stored on `PlexusModelDescriptor.piOptions` and merged last, so the server's explicit values always win. When `pi_provider` / `pi_model` resolve to a built-in pi model, the mapper also copies `thinkingLevelMap` and `headers` from that built-in model.
 
+## How the OpenCode V2 plugin works (plexus-opencode-v2)
+
+OpenCode V2 source lives at `~/workspace/opencode` (anomalyco/opencode). Read it there, not in `node_modules` or bundled binaries.
+
+- Entry: `Plugin.define({ id, setup(ctx) })`. OpenCode resolves directory plugins via `<dir>/server.*` or `<dir>/index.*` — `package.json` `main` is ignored — so the package ships a root `server.js` re-exporting `dist/index.js`. Configured plugin paths must be directories.
+- Setup fetches `/v1/models` (falling back to cache, then a `plexus-unconfigured` placeholder) and registers a single `plexus` provider via `ctx.provider.transform`, using `aisdk:@ai-sdk/openai-compatible` (rewritten by core to `@opencode/ai/providers/openai-compatible`; per-model packages select anthropic/google).
+- `ctx.integration.transform` always creates the `plexus` integration (`editor.update` creates when missing) with a key method plus a base-URL form field. It must exist: a stored plexus credential becomes the provider's `sourceConnection`, and core hides providers whose `sourceConnection` has no matching integration connection.
+- `/plexus-refresh` force-refetches, calls `ctx.provider.reload()`, and reports via `ctx.session.synthetic({ resume: false })` so the model is not invoked.
+- A `ctx.event.subscribe()` watcher reloads on `credential.updated` / `credential.switched`, so `/connect`, disconnect, and key rotation apply without a restart.
+- The OpenCode service discards plugin stdout; logs are also appended to `<XDG_DATA_HOME|~/.local/share>/opencode/plugins/plexus/plugin.log`.
+- `experimental.policies` are last-match-wins: a `plexus` allow must come after a `*` deny.
+
 ## Archived OpenCode adapter
 
-`packages/deprecated/plexus-opencode` is preserved for reference only. Do not modify it, include it in workspace automation, or restore it to builds, tests, hooks, version sync, or publishing unless it is explicitly being unarchived.
+`packages/deprecated/plexus-opencode` (V1) is preserved for reference only. Do not modify it, include it in workspace automation, or restore it to builds, tests, hooks, version sync, or publishing unless it is explicitly being unarchived.
 
 ## Auth flow
 
