@@ -151,6 +151,28 @@ async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_F
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { homedir } from "os";
 import { join } from "path";
+
+// src/constants.ts
+var PLEXUS_PROVIDER_ID = "plexus";
+var PLEXUS_PROVIDER_NAME = "Plexus";
+var PLEXUS_PLUGIN_ID = "@mcowger/opencode-plexus";
+var PLEXUS_INTEGRATION_ID = "plexus";
+var OPENAI_COMPATIBLE_PKG = "aisdk:@ai-sdk/openai-compatible";
+var ANTHROPIC_PKG = "aisdk:@ai-sdk/anthropic";
+var GOOGLE_PKG = "aisdk:@ai-sdk/google";
+var OPENAI_RESPONSES_PKG = "aisdk:@ai-sdk/openai";
+var PLEXUS_BASE_URL_OPTION = "plexusBaseURL";
+var ENV_BASE_URL = "PLEXUS_BASE_URL";
+var ENV_API_URL = "PLEXUS_API_URL";
+var ENV_API_KEY = "PLEXUS_API_KEY";
+var PLEXUS_SUPPRESS_MODELS_OPTION = "suppressModels";
+var MODELS_FETCH_TIMEOUT_MS = 1e4;
+var REFRESH_TTL_MS = 60000;
+var CACHE_VERSION = 2;
+var PLACEHOLDER_MODEL_ID = "plexus-unconfigured";
+var PLEXUS_REFRESH_COMMAND = "plexus-refresh";
+
+// src/cache.ts
 var PLUGIN_SUBDIR = join("plugins", "plexus");
 var CACHE_FILE = "models-cache-v2.json";
 var RAW_FILE = "models-raw.json";
@@ -176,13 +198,14 @@ async function readCachedModels(suppress) {
   try {
     const content = await readFile(join(getDir(), CACHE_FILE), "utf8");
     const parsed = JSON.parse(content);
-    if (parsed && Array.isArray(parsed.models)) {
-      return {
-        models: filterCachedModels(parsed.models, suppress),
-        etag: typeof parsed.etag === "string" ? parsed.etag : undefined
-      };
-    }
-    return null;
+    if (!parsed || !Array.isArray(parsed.models))
+      return null;
+    if (parsed.version !== CACHE_VERSION)
+      return null;
+    return {
+      models: filterCachedModels(parsed.models, suppress),
+      etag: typeof parsed.etag === "string" ? parsed.etag : undefined
+    };
   } catch {
     return null;
   }
@@ -191,7 +214,7 @@ async function writeCache(models, raw, etag) {
   try {
     const dir = getDir();
     await mkdir(dir, { recursive: true });
-    const cache = { models, timestamp: Date.now(), etag };
+    const cache = { version: CACHE_VERSION, models, timestamp: Date.now(), etag };
     await writeFile(join(dir, CACHE_FILE), JSON.stringify(cache, null, 2) + `
 `, "utf8");
     if (raw !== undefined) {
@@ -200,24 +223,6 @@ async function writeCache(models, raw, etag) {
     }
   } catch {}
 }
-
-// src/constants.ts
-var PLEXUS_PROVIDER_ID = "plexus";
-var PLEXUS_PROVIDER_NAME = "Plexus";
-var PLEXUS_PLUGIN_ID = "@mcowger/opencode-plexus";
-var PLEXUS_INTEGRATION_ID = "plexus";
-var OPENAI_COMPATIBLE_PKG = "aisdk:@ai-sdk/openai-compatible";
-var ANTHROPIC_PKG = "aisdk:@ai-sdk/anthropic";
-var GOOGLE_PKG = "aisdk:@ai-sdk/google";
-var PLEXUS_BASE_URL_OPTION = "plexusBaseURL";
-var ENV_BASE_URL = "PLEXUS_BASE_URL";
-var ENV_API_URL = "PLEXUS_API_URL";
-var ENV_API_KEY = "PLEXUS_API_KEY";
-var PLEXUS_SUPPRESS_MODELS_OPTION = "suppressModels";
-var MODELS_FETCH_TIMEOUT_MS = 1e4;
-var REFRESH_TTL_MS = 60000;
-var PLACEHOLDER_MODEL_ID = "plexus-unconfigured";
-var PLEXUS_REFRESH_COMMAND = "plexus-refresh";
 
 // src/url.ts
 function trimURL(s) {
@@ -391,8 +396,9 @@ function resolveModelPackage(preferredApi) {
       return ANTHROPIC_PKG;
     case "google-generative-ai":
       return GOOGLE_PKG;
-    case "openai-completions":
     case "openai-responses":
+      return OPENAI_RESPONSES_PKG;
+    case "openai-completions":
     default:
       return;
   }
@@ -791,12 +797,14 @@ var plugin_default = Plugin.define({
 var src_default = plugin_default;
 export {
   ANTHROPIC_PKG,
+  CACHE_VERSION,
   ENV_API_KEY,
   ENV_API_URL,
   ENV_BASE_URL,
   GOOGLE_PKG,
   MODELS_FETCH_TIMEOUT_MS,
   OPENAI_COMPATIBLE_PKG,
+  OPENAI_RESPONSES_PKG,
   PLACEHOLDER_MODEL_ID,
   PLEXUS_BASE_URL_OPTION,
   PLEXUS_INTEGRATION_ID,

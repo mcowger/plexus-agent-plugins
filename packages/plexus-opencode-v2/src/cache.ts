@@ -7,6 +7,7 @@ import {
 	type PlexusApiResponse,
 } from "../../plexus-models/src/index.ts";
 import type { CachedModel } from "./mapper.ts";
+import { CACHE_VERSION } from "./constants.ts";
 
 const PLUGIN_SUBDIR = join("plugins", "plexus");
 const CACHE_FILE = "models-cache-v2.json";
@@ -19,6 +20,7 @@ export function getDir(): string {
 }
 
 export interface ModelCacheFile {
+	version?: number;
 	models: CachedModel[];
 	timestamp: number;
 	etag?: string;
@@ -53,13 +55,14 @@ export async function readCachedModels(
 	try {
 		const content = await readFile(join(getDir(), CACHE_FILE), "utf8");
 		const parsed = JSON.parse(content) as ModelCacheFile;
-		if (parsed && Array.isArray(parsed.models)) {
-			return {
-				models: filterCachedModels(parsed.models, suppress),
-				etag: typeof parsed.etag === "string" ? parsed.etag : undefined,
-			};
-		}
-		return null;
+		if (!parsed || !Array.isArray(parsed.models)) return null;
+		// Discard caches written by a different mapper version: the stored
+		// models are already mapped, so reusing them would mask a mapper fix.
+		if (parsed.version !== CACHE_VERSION) return null;
+		return {
+			models: filterCachedModels(parsed.models, suppress),
+			etag: typeof parsed.etag === "string" ? parsed.etag : undefined,
+		};
 	} catch {
 		return null;
 	}
@@ -75,7 +78,7 @@ export async function writeCache(
 		const dir = getDir();
 		await mkdir(dir, { recursive: true });
 
-		const cache: ModelCacheFile = { models, timestamp: Date.now(), etag };
+		const cache: ModelCacheFile = { version: CACHE_VERSION, models, timestamp: Date.now(), etag };
 		await writeFile(join(dir, CACHE_FILE), JSON.stringify(cache, null, 2) + "\n", "utf8");
 
 		if (raw !== undefined) {

@@ -9,6 +9,13 @@ export const PLEXUS_INTEGRATION_ID = "plexus";
 export const OPENAI_COMPATIBLE_PKG = "aisdk:@ai-sdk/openai-compatible";
 export const ANTHROPIC_PKG = "aisdk:@ai-sdk/anthropic";
 export const GOOGLE_PKG = "aisdk:@ai-sdk/google";
+/** Responses-dialect runtime for Plexus models whose `preferred_api` is
+ *  `responses`. `@ai-sdk/openai-compatible` speaks only the chat-completions
+ *  wire protocol (`/chat/completions`), so responses models must select the
+ *  OpenAI Responses protocol instead. Core rewrites `@ai-sdk/openai` to
+ *  `@opencode/ai/providers/openai`, whose default model export is the
+ *  Responses route (`/responses`, bearer auth, honors `baseURL`). */
+export const OPENAI_RESPONSES_PKG = "aisdk:@ai-sdk/openai";
 
 /** Plugin-options / credential-metadata key carrying the Plexus root URL. */
 export const PLEXUS_BASE_URL_OPTION = "plexusBaseURL";
@@ -20,6 +27,12 @@ export const PLEXUS_SUPPRESS_MODELS_OPTION = "suppressModels";
 
 export const MODELS_FETCH_TIMEOUT_MS = 10_000;
 export const REFRESH_TTL_MS = 60_000;
+
+/** Cache schema version. Bump whenever the mapper output shape or dialect
+ *  handling changes: the model cache stores *mapped* models and is otherwise
+ *  reused verbatim on an unchanged server etag, so a mapper change would be
+ *  masked until the raw Plexus response itself changed. */
+export const CACHE_VERSION = 2;
 
 /** Sentinel model published when no baseURL is configured yet, so the
  *  provider survives OpenCode's "zero-models → delete" pruning and still

@@ -6,7 +6,7 @@ import {
 	type PlexusApiModel,
 	type PlexusReasoningOption,
 } from "../../plexus-models/src/index.ts";
-import { ANTHROPIC_PKG, GOOGLE_PKG } from "./constants.ts";
+import { ANTHROPIC_PKG, GOOGLE_PKG, OPENAI_RESPONSES_PKG } from "./constants.ts";
 
 export type Modality = "text" | "audio" | "image" | "video" | "pdf";
 
@@ -107,9 +107,10 @@ function buildReasoningVariants(
 }
 
 /**
- * Per-model runtime package override. Only anthropic and google dialects need
- * one; openai-completions and openai-responses both use the provider-level
- * openai-compatible runtime.
+ * Per-model runtime package override. anthropic and google dialects need their
+ * own SDK runtimes; openai-responses needs the OpenAI Responses runtime
+ * (`/responses`), and openai-completions falls through to the provider-level
+ * openai-compatible runtime (`/chat/completions`).
  */
 function resolveModelPackage(preferredApi: string): string | undefined {
 	switch (preferredApi) {
@@ -117,8 +118,9 @@ function resolveModelPackage(preferredApi: string): string | undefined {
 			return ANTHROPIC_PKG;
 		case "google-generative-ai":
 			return GOOGLE_PKG;
-		case "openai-completions":
 		case "openai-responses":
+			return OPENAI_RESPONSES_PKG;
+		case "openai-completions":
 		default:
 			return undefined;
 	}

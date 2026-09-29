@@ -99,9 +99,9 @@ describe("buildModels (V2 Model.Info)", () => {
 		}
 	});
 
-	test("responses model uses the provider-level openai-compatible runtime on /v1", () => {
+	test("responses model selects the Responses runtime on /v1", () => {
 		const m = byId.get("gpt-6.1-sol");
-		expect(m?.package).toBeUndefined();
+		expect(m?.package).toBe("aisdk:@ai-sdk/openai");
 		expect(m?.settings?.baseURL).toBe("https://plexus.example.com/v1");
 		expect(m?.capabilities).toEqual({ tools: true, input: ["text", "image", "pdf"], output: ["text"] });
 		expect(m?.limit).toEqual({ context: 1050000, output: 128000 });
