@@ -218,6 +218,33 @@ describe("isChatModel", () => {
 
 		expect(descriptors.map((model) => model.id)).toEqual(["chat-model"]);
 	});
+
+	test("rejects non-text capability types advertised by the server", () => {
+		expect(isChatModel({ id: "chat-model", type: "text" })).toBe(true);
+		expect(isChatModel({ id: "embed-model", type: "embeddings" })).toBe(false);
+		expect(isChatModel({ id: "stt-model", type: "transcriptions" })).toBe(false);
+		expect(isChatModel({ id: "tts-model", type: "speech" })).toBe(false);
+		expect(isChatModel({ id: "img-model", type: "image" })).toBe(false);
+		expect(isChatModel({ id: "jev-model", type: "decisions" })).toBe(false);
+	});
+
+	test("falls back to heuristics when the server omits the type field", () => {
+		expect(isChatModel({ id: "chat-model" })).toBe(true);
+		expect(isChatModel({ id: "text-embedding-3-small" })).toBe(false);
+	});
+
+	test("batch conversion excludes non-text capability types", () => {
+		const descriptors = convertDescriptors(
+			[
+				{ id: "chat-model", type: "text" },
+				{ id: "embed-model", type: "embeddings" },
+				{ id: "legacy-model" },
+			],
+			"https://plexus.example.com/v1",
+		);
+
+		expect(descriptors.map((model) => model.id)).toEqual(["chat-model", "legacy-model"]);
+	});
 });
 
 describe("inferReasoning", () => {

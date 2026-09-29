@@ -178,6 +178,12 @@ export function convertToDescriptor(raw: PlexusApiModel, baseUrl: string): Plexu
 export function isChatModel(model: PlexusApiModel): boolean {
 	if (!model.id) return false;
 
+	// Server-advertised capability type wins when present. Only `text`
+	// models are chat-capable; `embeddings`, `transcriptions`, `speech`,
+	// `image`, and `decisions` aliases are endpoint-specific. Absent on
+	// responses from older servers, which fall through to the heuristics below.
+	if (model.type !== undefined && model.type !== "text") return false;
+
 	const inputModalities = model.architecture?.input_modalities;
 	if (inputModalities !== undefined && inputModalities.length > 0 && !inputModalities.includes("text")) {
 		return false;

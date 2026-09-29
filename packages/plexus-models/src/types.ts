@@ -51,6 +51,14 @@ export interface PlexusApiModel {
 	object?: string;
 	created?: number;
 	owned_by?: string;
+	/**
+	 * Alias capability type — what the model produces. One of `text`,
+	 * `embeddings`, `transcriptions`, `speech`, `image`, `decisions`.
+	 * The server defaults this to `text` when the alias has no explicit type.
+	 * Chat-capable agent hosts only consume `text` models; absent on
+	 * responses from older servers, which fall back to heuristic detection.
+	 */
+	type?: string;
 	/** API dialect hint(s). May be a single string or an array; first recognized entry wins. */
 	preferred_api?: string | string[];
 	/** Human-readable display name. Falls back to id when absent. */

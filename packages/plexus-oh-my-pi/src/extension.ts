@@ -26,7 +26,7 @@
  */
 
 // Type-only — erased at runtime, never resolved by the module loader
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ProviderConfig } from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ProviderConfig, ProviderModelConfig } from "@oh-my-pi/pi-coding-agent";
 import type { Api, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai";
 import { convertDescriptors, fetchPlexusModels } from "../../plexus-models/src/index.ts";
 import {
@@ -64,6 +64,7 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 		api: "openai-completions" as Api,
 		...getProviderApiKeyConfig(),
 		...(startupBaseUrl ? { baseUrl: startupBaseUrl } : {}),
+		fetchDynamicModels: fetchPlexusModelConfigs,
 		oauth: createPlexusLoginProvider(pi),
 	});
 
@@ -160,6 +161,21 @@ async function handleStatus(ctx: ExtensionCommandContext): Promise<void> {
 // ---------------------------------------------------------------------------
 // Core refresh logic
 // ---------------------------------------------------------------------------
+async function fetchPlexusModelConfigs(
+	apiKey: string | undefined,
+): Promise<readonly ProviderModelConfig[]> {
+	const key = apiKey ?? getEnvApiKey();
+	const modelsUrl = getModelsUrl();
+	const baseUrl = getBaseUrl();
+	if (!key || !modelsUrl || !baseUrl) return [];
+	const { models: apiModels } = await fetchPlexusModels(key, modelsUrl);
+	const descriptors = convertDescriptors(apiModels, baseUrl, getSuppressedModels());
+	const models = descriptors.map(descriptorToOhMyPiModel);
+	currentModels = [...models];
+	catalogSource = "live refresh";
+	return models;
+}
+
 async function doRefresh(
 	pi: ExtensionAPI,
 	apiKey: string,
@@ -188,6 +204,7 @@ async function doRefresh(
 			...getProviderApiKeyConfig(),
 			baseUrl,
 			models: ohMyPiModels,
+			fetchDynamicModels: fetchPlexusModelConfigs,
 			oauth: createPlexusLoginProvider(pi),
 		});
 

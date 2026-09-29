@@ -16156,6 +16156,8 @@ function convertToDescriptor(raw, baseUrl) {
 function isChatModel(model) {
   if (!model.id)
     return false;
+  if (model.type !== undefined && model.type !== "text")
+    return false;
   const inputModalities = model.architecture?.input_modalities;
   if (inputModalities !== undefined && inputModalities.length > 0 && !inputModalities.includes("text")) {
     return false;
@@ -23202,6 +23204,7 @@ function plexusExtension(pi) {
     api: "openai-completions",
     ...getProviderApiKeyConfig(),
     ...startupBaseUrl ? { baseUrl: startupBaseUrl } : {},
+    fetchDynamicModels: fetchPlexusModelConfigs,
     oauth: createPlexusLoginProvider(pi)
   });
   pi.on("message_end", (event) => {
@@ -23276,6 +23279,19 @@ async function handleStatus(ctx) {
   ].join(`
 `), "info");
 }
+async function fetchPlexusModelConfigs(apiKey) {
+  const key = apiKey ?? getEnvApiKey();
+  const modelsUrl = getModelsUrl();
+  const baseUrl = getBaseUrl();
+  if (!key || !modelsUrl || !baseUrl)
+    return [];
+  const { models: apiModels } = await fetchPlexusModels(key, modelsUrl);
+  const descriptors = convertDescriptors(apiModels, baseUrl, getSuppressedModels());
+  const models = descriptors.map(descriptorToOhMyPiModel);
+  currentModels = [...models];
+  catalogSource = "live refresh";
+  return models;
+}
 async function doRefresh(pi, apiKey, ctx) {
   const modelsUrl = getModelsUrl();
   const baseUrl = getBaseUrl();
@@ -23297,6 +23313,7 @@ async function doRefresh(pi, apiKey, ctx) {
       ...getProviderApiKeyConfig(),
       baseUrl,
       models: ohMyPiModels,
+      fetchDynamicModels: fetchPlexusModelConfigs,
       oauth: createPlexusLoginProvider(pi)
     });
     log("doRefresh: registered", { count: ohMyPiModels.length });

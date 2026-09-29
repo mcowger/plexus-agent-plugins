@@ -169,6 +169,8 @@ function convertToDescriptor(raw, baseUrl) {
 function isChatModel(model) {
   if (!model.id)
     return false;
+  if (model.type !== undefined && model.type !== "text")
+    return false;
   const inputModalities = model.architecture?.input_modalities;
   if (inputModalities !== undefined && inputModalities.length > 0 && !inputModalities.includes("text")) {
     return false;
