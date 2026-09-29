@@ -1,6 +1,6 @@
 {
 	"name": "@mcowger/opencode-plexus",
-	"version": "1.6.1",
+	"version": "1.7.0",
 	"description": "Plexus AI proxy plugin for OpenCode V2 with dynamic model discovery",
 	"type": "module",
 	"module": "./dist/index.js",
