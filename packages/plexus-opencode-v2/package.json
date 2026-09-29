@@ -1,0 +1,47 @@
+{
+	"name": "@mcowger/opencode-plexus",
+	"version": "1.6.1",
+	"description": "Plexus AI proxy plugin for OpenCode V2 with dynamic model discovery",
+	"type": "module",
+	"module": "./dist/index.js",
+	"main": "./dist/index.js",
+	"exports": {
+		".": "./dist/index.js",
+		"./server": "./dist/index.js"
+	},
+	"files": [
+		"dist/index.js",
+		"server.js",
+		"package.json",
+		"README.md"
+	],
+	"keywords": [
+		"plexus",
+		"opencode",
+		"ai",
+		"coding-agent",
+		"extension",
+		"plugin"
+	],
+	"scripts": {
+		"build": "bun run build.ts"
+	},
+	"dependencies": {
+		"@opencode/plugin": "^2.0.19"
+	},
+	"peerDependencies": {
+		"typescript": "^7.0.2"
+	},
+	"devDependencies": {
+		"@types/bun": "latest"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/mcowger/plexus-agent-plugins.git",
+		"directory": "packages/plexus-opencode-v2"
+	},
+	"license": "MIT"
+}
