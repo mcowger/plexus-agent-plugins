@@ -51,14 +51,18 @@ export interface ServiceTierDialect {
 	readonly id: string;
 	/** Provider API dialects this applies to (e.g. "openai-responses"). */
 	readonly apis: readonly string[];
-	/** Request payload field that carries the tier. */
-	readonly parameter: string;
 	/** Non-default tiers this dialect knows how to request. */
 	readonly tiers: readonly ActiveServiceTier[];
 	/** Whether the dialect recognizes this model family at all. */
 	supportsModel(modelId: string): boolean;
 	/** Whether this specific model supports a non-default tier. */
 	supportsTier(modelId: string, tier: ActiveServiceTier): boolean;
+	/** Merge the tier's request fields into a copy of the payload. */
+	inject(
+		payload: Record<string, unknown>,
+		modelId: string,
+		tier: ActiveServiceTier,
+	): Record<string, unknown>;
 }
 
 // --- OpenAI Responses dialects ---------------------------------------------
@@ -107,7 +111,6 @@ const ULTRAFAST_FAMILIES = [/^gpt-6(?:\.\d+)?-astra(?=$|-)/i, /^gpt-5\.6-sol(?=$
 const OPENAI_RESPONSES_DIALECT: ServiceTierDialect = {
 	id: "openai-responses",
 	apis: OPENAI_RESPONSES_APIS,
-	parameter: "service_tier",
 	tiers: ["priority", "flex", "ultrafast"],
 	supportsModel: isPriorityEligible,
 	supportsTier(modelId, tier) {
@@ -120,10 +123,51 @@ const OPENAI_RESPONSES_DIALECT: ServiceTierDialect = {
 				return ULTRAFAST_FAMILIES.some((pattern) => pattern.test(modelId));
 		}
 	},
+	inject(payload, _modelId, tier) {
+		return { ...payload, service_tier: tier };
+	},
+};
+
+// --- Anthropic Messages dialect --------------------------------------------
+
+// Claude Fast mode is a research-preview beta: it needs both `speed: "fast"`
+// in the body and the `fast-mode-2026-02-01` beta flag, which the Anthropic SDK
+// turns into the `anthropic-beta` header. Appending to the params `betas` array
+// (rather than mutating headers) preserves the betas pi-ai already computed.
+// First-party Claude API only; available on these models.
+const ANTHROPIC_MESSAGES_APIS = ["anthropic-messages"] as const;
+const ANTHROPIC_FAST_MODE_BETA = "fast-mode-2026-02-01";
+const CLAUDE_FAST_FAMILIES = [/^claude-opus-5(?=$|-)/i, /^claude-opus-4-8(?=$|-)/i];
+
+const ANTHROPIC_MESSAGES_DIALECT: ServiceTierDialect = {
+	id: "anthropic-messages",
+	apis: ANTHROPIC_MESSAGES_APIS,
+	tiers: ["priority"],
+	supportsModel(modelId) {
+		return /^claude-/i.test(modelId.trim());
+	},
+	supportsTier(modelId, tier) {
+		return (
+			tier === "priority" &&
+			CLAUDE_FAST_FAMILIES.some((pattern) => pattern.test(modelId.trim()))
+		);
+	},
+	inject(payload, _modelId, _tier) {
+		const existing = Array.isArray(payload.betas)
+			? payload.betas.filter((beta): beta is string => typeof beta === "string")
+			: [];
+		const betas = existing.includes(ANTHROPIC_FAST_MODE_BETA)
+			? existing
+			: [...existing, ANTHROPIC_FAST_MODE_BETA];
+		return { ...payload, speed: "fast", betas };
+	},
 };
 
 /** Every registered dialect. Add new APIs/services here. */
-export const SERVICE_TIER_DIALECTS: readonly ServiceTierDialect[] = [OPENAI_RESPONSES_DIALECT];
+export const SERVICE_TIER_DIALECTS: readonly ServiceTierDialect[] = [
+	OPENAI_RESPONSES_DIALECT,
+	ANTHROPIC_MESSAGES_DIALECT,
+];
 
 export function dialectForApi(
 	api: string | undefined,
@@ -170,7 +214,7 @@ export function applyServiceTier(
 	}
 	if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
 
-	return { ...(payload as Record<string, unknown>), [dialect.parameter]: tier };
+	return dialect.inject(payload as Record<string, unknown>, model.id, tier);
 }
 
 // --- Notification ----------------------------------------------------------

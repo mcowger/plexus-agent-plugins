@@ -139,13 +139,18 @@ Inspect the effective URL, authentication availability, and catalog source witho
 /plexus status
 ```
 
-Choose the per-session OpenAI service tier:
+Choose the per-session service tier for eligible Plexus models:
 
 ```
 /service-tier fast
 ```
 
-Tiers are `default` (aliases `off`, `none`), `fast` (alias `priority`), `flex`, and `ultrafast`; `/service-tier status` reports the active tier and whether the current model supports it. Eligibility follows OpenAI's per-tier model support: `priority` covers the Fast-mode set (GPT-5 and newer, GPT-4.1+, GPT-4o, and o3/o4-mini), while `flex` and `ultrafast` are limited to their documented models. The tier is injected as `service_tier` only for eligible Plexus models and resets to `default` on every session start. `/plexus-service-tier` is an alias for the same command.
+Tiers are `default` (aliases `off`, `none`), `fast` (alias `priority`), `flex`, and `ultrafast`; `/service-tier status` reports the active tier and whether the current model supports it. The tier is applied per API:
+
+- **OpenAI Responses** models get a `service_tier` field. `priority` covers OpenAI's Fast-mode set (GPT-5 and newer, GPT-4.1+, GPT-4o, and o3/o4-mini); `flex` and `ultrafast` are limited to their documented models.
+- **Anthropic Messages** models use Claude Fast mode (`speed: "fast"` plus the `anthropic-beta: fast-mode-2026-02-01` flag) for `priority`, on `claude-opus-5` and `claude-opus-4-8`; `flex` and `ultrafast` are unsupported. This is a first-party research-preview feature, so it only works when the upstream allows it.
+
+The tier resets to `default` on every session start. `/plexus-service-tier` is an alias for the same command.
 
 Select a Plexus model in `/model`. Save its startup default with the host's normal model-picker action; Plexus does not maintain a separate default-model setting.
 

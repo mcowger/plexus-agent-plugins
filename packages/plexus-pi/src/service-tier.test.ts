@@ -151,10 +151,10 @@ describe("applyServiceTier", () => {
 		const dialect: ServiceTierDialect = {
 			id: "future-api",
 			apis: ["future-responses"],
-			parameter: "tier",
 			tiers: ["priority"],
 			supportsModel: () => true,
 			supportsTier: (_id, tier) => tier === "priority",
+			inject: (payload) => ({ ...payload, tier: "priority" }),
 		};
 		const payload = { model: "future-1" };
 		expect(
@@ -169,6 +169,56 @@ describe("applyServiceTier", () => {
 				dialects: [dialect],
 			}),
 		).toBe(payload);
+	});
+});
+
+describe("anthropic-messages dialect", () => {
+	const claude = (id: string): ServiceTierModel => ({
+		provider: "plexus",
+		api: "anthropic-messages",
+		id,
+	});
+
+	test("injects Claude Fast mode for eligible Opus models", () => {
+		for (const id of ["claude-opus-5", "claude-opus-4-8", "claude-opus-4-8-20260101"]) {
+			expect(applyServiceTier({}, claude(id), "priority", { provider: "plexus" })).toEqual({
+				speed: "fast",
+				betas: ["fast-mode-2026-02-01"],
+			});
+		}
+	});
+
+	test("preserves existing beta flags instead of clobbering them", () => {
+		expect(
+			applyServiceTier({ betas: ["interleaved-thinking-2025-05-14"] }, claude("claude-opus-5"), "priority", {
+				provider: "plexus",
+			}),
+		).toEqual({
+			betas: ["interleaved-thinking-2025-05-14", "fast-mode-2026-02-01"],
+			speed: "fast",
+		});
+	});
+
+	test("does not duplicate the fast-mode beta", () => {
+		expect(
+			applyServiceTier({ betas: ["fast-mode-2026-02-01"] }, claude("claude-opus-5"), "priority", {
+				provider: "plexus",
+			}),
+		).toEqual({ betas: ["fast-mode-2026-02-01"], speed: "fast" });
+	});
+
+	test("ignores unsupported Claude models and tiers", () => {
+		const payload = { model: "x" };
+		expect(applyServiceTier(payload, claude("claude-sonnet-4"), "priority", { provider: "plexus" })).toBe(payload);
+		expect(applyServiceTier(payload, claude("claude-opus-5"), "flex", { provider: "plexus" })).toBe(payload);
+		expect(applyServiceTier(payload, claude("claude-opus-5"), "ultrafast", { provider: "plexus" })).toBe(payload);
+	});
+
+	test("reports support for Fast-mode models only", () => {
+		expect(isTierSupportedByModel(claude("claude-opus-5"), "priority")).toBe(true);
+		expect(isTierSupportedByModel(claude("claude-opus-4-8-20260101"), "priority")).toBe(true);
+		expect(isTierSupportedByModel(claude("claude-sonnet-4"), "priority")).toBe(false);
+		expect(isTierSupportedByModel(claude("claude-opus-5"), "flex")).toBe(false);
 	});
 });
 

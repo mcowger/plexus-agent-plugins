@@ -677,7 +677,6 @@ var ULTRAFAST_FAMILIES = [/^gpt-6(?:\.\d+)?-astra(?=$|-)/i, /^gpt-5\.6-sol(?=$|-
 var OPENAI_RESPONSES_DIALECT = {
   id: "openai-responses",
   apis: OPENAI_RESPONSES_APIS,
-  parameter: "service_tier",
   tiers: ["priority", "flex", "ultrafast"],
   supportsModel: isPriorityEligible,
   supportsTier(modelId, tier) {
@@ -689,9 +688,34 @@ var OPENAI_RESPONSES_DIALECT = {
       case "ultrafast":
         return ULTRAFAST_FAMILIES.some((pattern) => pattern.test(modelId));
     }
+  },
+  inject(payload, _modelId, tier) {
+    return { ...payload, service_tier: tier };
   }
 };
-var SERVICE_TIER_DIALECTS = [OPENAI_RESPONSES_DIALECT];
+var ANTHROPIC_MESSAGES_APIS = ["anthropic-messages"];
+var ANTHROPIC_FAST_MODE_BETA = "fast-mode-2026-02-01";
+var CLAUDE_FAST_FAMILIES = [/^claude-opus-5(?=$|-)/i, /^claude-opus-4-8(?=$|-)/i];
+var ANTHROPIC_MESSAGES_DIALECT = {
+  id: "anthropic-messages",
+  apis: ANTHROPIC_MESSAGES_APIS,
+  tiers: ["priority"],
+  supportsModel(modelId) {
+    return /^claude-/i.test(modelId.trim());
+  },
+  supportsTier(modelId, tier) {
+    return tier === "priority" && CLAUDE_FAST_FAMILIES.some((pattern) => pattern.test(modelId.trim()));
+  },
+  inject(payload, _modelId, _tier) {
+    const existing = Array.isArray(payload.betas) ? payload.betas.filter((beta) => typeof beta === "string") : [];
+    const betas = existing.includes(ANTHROPIC_FAST_MODE_BETA) ? existing : [...existing, ANTHROPIC_FAST_MODE_BETA];
+    return { ...payload, speed: "fast", betas };
+  }
+};
+var SERVICE_TIER_DIALECTS = [
+  OPENAI_RESPONSES_DIALECT,
+  ANTHROPIC_MESSAGES_DIALECT
+];
 function dialectForApi(api, dialects = SERVICE_TIER_DIALECTS) {
   if (!api)
     return;
@@ -716,7 +740,7 @@ function applyServiceTier(payload, model, tier, options) {
   }
   if (!payload || typeof payload !== "object" || Array.isArray(payload))
     return payload;
-  return { ...payload, [dialect.parameter]: tier };
+  return dialect.inject(payload, model.id, tier);
 }
 var SERVICE_TIER_NOTIFICATION_TYPE = "plexus.serviceTier";
 var SERVICE_TIER_COMMAND = "service-tier";
