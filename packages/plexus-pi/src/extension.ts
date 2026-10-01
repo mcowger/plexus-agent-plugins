@@ -12,15 +12,18 @@
  *       context.publish() transaction into pi's models-store.json.
  *
  * Commands:
- *   /login plexus   — set base URL and API key using pi's native login UI
- *   /plexus refresh — re-fetch models from the Plexus endpoint
- *   /plexus status  — show effective configuration and catalog state
+ *   /login plexus       — set base URL and API key using pi's native login UI
+ *   /plexus refresh     — re-fetch models from the Plexus endpoint
+ *   /plexus status      — show effective configuration and catalog state
+ *   /service-tier <arg> — set the per-session service tier (default, fast,
+ *                         flex, ultrafast, status); alias: /plexus-service-tier
  */
 
 // Type-only — erased at runtime, never resolved by the module loader
 import type {
 	ExtensionAPI,
 	ExtensionCommandContext,
+	ExtensionContext,
 	ProviderConfig,
 	ProviderModelConfig,
 } from "@earendil-works/pi-coding-agent";
@@ -50,6 +53,13 @@ import { readStoredModelsSync } from "./cache.ts";
 import { log } from "./log.ts";
 import { descriptorToPiModel, MINIMUM_OUTPUT_TOKENS } from "./mapper.ts";
 import { normalizeMalformedFunctionCall } from "./gemini-malformed-retry.ts";
+import {
+	applyServiceTier,
+	buildServiceTierNotification,
+	isTierSupportedByModel,
+	parseServiceTierArg,
+	type ServiceTier,
+} from "./service-tier.ts";
 
 const PROVIDER_NAME = "plexus";
 const PROVIDER_API_KEY_TEMPLATE = "${PLEXUS_API_KEY}";
@@ -102,9 +112,18 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	currentModels = startupModels;
 	catalogSource = startupModels.length > 0 ? "host store" : "none";
 
-	pi.on("before_provider_request", (event, ctx) => (
-		ctx.model?.provider === PROVIDER_NAME ? enforceMinimumOutputTokens(event.payload) : undefined
-	));
+	// Service tier is a per-session preference; every start/reload/resume resets it.
+	let activeServiceTier: ServiceTier = "default";
+	pi.on("session_start", () => {
+		activeServiceTier = "default";
+	});
+
+	pi.on("before_provider_request", (event, ctx) => {
+		if (ctx.model?.provider !== PROVIDER_NAME) return undefined;
+		const withTier = applyServiceTier(event.payload, ctx.model, activeServiceTier, { provider: PROVIDER_NAME });
+		const next = enforceMinimumOutputTokens(withTier);
+		return next === event.payload ? undefined : next;
+	});
 
 	log("startup", {
 		baseUrl: startupBaseUrl,
@@ -149,6 +168,63 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 			ctx.ui.notify(`Unknown sub-command: "${args}". Use /login plexus, /plexus refresh, or /plexus status.`, "warning");
 		},
 	});
+
+	// -------------------------------------------------------------------------
+	// /service-tier command (alias: /plexus-service-tier)
+	// -------------------------------------------------------------------------
+	const handleServiceTier = async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
+		const sub = args.trim().toLowerCase();
+		if (sub === "" || sub === "status") {
+			notifyServiceTier(ctx, activeServiceTier, true);
+			return;
+		}
+
+		const tier = parseServiceTierArg(sub);
+		if (!tier) {
+			// Report the outcome as JSON so clients can surface the failure, keeping
+			// the unchanged tier as the reported state.
+			notifyServiceTier(ctx, activeServiceTier, false);
+			return;
+		}
+
+		activeServiceTier = tier;
+		notifyServiceTier(ctx, tier, true);
+	};
+
+	const serviceTierCommand = {
+		description: "Set the per-session Plexus service tier: default, fast, flex, ultrafast, or status",
+		getArgumentCompletions: (prefix: string) => {
+			const tiers = [
+				{ value: "default", label: "default", description: "Use the provider's default tier" },
+				{ value: "fast", label: "fast", description: "Priority tier (alias: priority)" },
+				{ value: "flex", label: "flex", description: "Flex tier" },
+				{ value: "ultrafast", label: "ultrafast", description: "Ultrafast tier" },
+				{ value: "status", label: "status", description: "Show the current service tier" },
+			];
+			return tiers.filter((tier) => tier.value.startsWith(prefix.trim().toLowerCase()));
+		},
+		handler: handleServiceTier,
+	};
+	pi.registerCommand("service-tier", serviceTierCommand);
+	pi.registerCommand("plexus-service-tier", serviceTierCommand);
+}
+
+// ---------------------------------------------------------------------------
+// Service-tier command handler
+// ---------------------------------------------------------------------------
+function notifyServiceTier(ctx: ExtensionContext, tier: ServiceTier, success: boolean): void {
+	const model = ctx.model;
+	const supported = isTierSupportedByModel(model, tier);
+	ctx.ui.notify(
+		buildServiceTierNotification({
+			tier,
+			success,
+			supported,
+			provider: model?.provider ?? PROVIDER_NAME,
+			model: model?.id ?? "",
+		}),
+		!success || !supported ? "warning" : "info",
+	);
 }
 
 // ---------------------------------------------------------------------------

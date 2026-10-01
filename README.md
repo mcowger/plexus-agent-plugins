@@ -139,6 +139,14 @@ Inspect the effective URL, authentication availability, and catalog source witho
 /plexus status
 ```
 
+Choose the per-session OpenAI service tier:
+
+```
+/service-tier fast
+```
+
+Tiers are `default` (aliases `off`, `none`), `fast` (alias `priority`), `flex`, and `ultrafast`; `/service-tier status` reports the active tier and whether the current model supports it. Eligibility follows OpenAI's per-tier model support: `priority` covers the Fast-mode set (GPT-5 and newer, GPT-4.1+, GPT-4o, and o3/o4-mini), while `flex` and `ultrafast` are limited to their documented models. The tier is injected as `service_tier` only for eligible Plexus models and resets to `default` on every session start. `/plexus-service-tier` is an alias for the same command.
+
 Select a Plexus model in `/model`. Save its startup default with the host's normal model-picker action; Plexus does not maintain a separate default-model setting.
 
 Use `/login plexus` for setup and `/logout plexus` to remove stored credentials.
