@@ -79,6 +79,14 @@ describe("applyServiceTier", () => {
 		});
 	});
 
+	test("injects flex for any GPT-5.5+ model, not just hardcoded variants", () => {
+		for (const id of ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-5.5", "gpt-5.6-cyber"]) {
+			expect(applyServiceTier({}, model({ id }), "flex", { provider: "plexus" })).toEqual({
+				service_tier: "flex",
+			});
+		}
+	});
+
 	test("does not mutate the original payload", () => {
 		const payload = { model: "gpt-6-astra" };
 		applyServiceTier(payload, model({ id: "gpt-6-astra" }), "ultrafast", { provider: "plexus" });
@@ -115,7 +123,7 @@ describe("applyServiceTier", () => {
 
 	test("enforces per-tier model eligibility", () => {
 		const missed = { model: "x" };
-		expect(applyServiceTier(missed, model({ id: "gpt-5.5" }), "flex", { provider: "plexus" })).toBe(missed);
+		expect(applyServiceTier(missed, model({ id: "gpt-5.4" }), "flex", { provider: "plexus" })).toBe(missed);
 		expect(applyServiceTier(missed, model({ id: "gpt-5.6-luna" }), "ultrafast", { provider: "plexus" })).toBe(missed);
 		expect(applyServiceTier(missed, model({ id: "gpt-5.6-terra" }), "flex", { provider: "plexus" })).toEqual({
 			model: "x",
@@ -172,6 +180,7 @@ describe("isTierSupportedByModel", () => {
 	test("reports support for a matching model", () => {
 		expect(isTierSupportedByModel(model({ id: "gpt-6-astra" }), "ultrafast")).toBe(true);
 		expect(isTierSupportedByModel(model({ id: "gpt-5.6-terra" }), "flex")).toBe(true);
+		expect(isTierSupportedByModel(model({ id: "gpt-6-luna" }), "flex")).toBe(true);
 	});
 
 	test("reports unsupported for mismatched model or API", () => {

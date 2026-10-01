@@ -665,8 +665,15 @@ function isPriorityEligible(modelId) {
   }
   return PRIORITY_EXTRA_FAMILIES.some((pattern) => pattern.test(id));
 }
-var FLEX_FAMILIES = [/^gpt-6-astra(?=$|-)/i, /^gpt-5\.6-(?:sol|terra|luna)(?=$|-)/i];
-var ULTRAFAST_FAMILIES = [/^gpt-6-astra(?=$|-)/i, /^gpt-5\.6-sol(?=$|-)/i];
+function isFlexEligible(modelId) {
+  const match = GPT_VERSION.exec(modelId.trim());
+  if (!match)
+    return false;
+  const major = Number(match[1]);
+  const minor = match[2] === undefined ? 0 : Number(match[2]);
+  return major > 5 || major === 5 && minor >= 5;
+}
+var ULTRAFAST_FAMILIES = [/^gpt-6(?:\.\d+)?-astra(?=$|-)/i, /^gpt-5\.6-sol(?=$|-)/i];
 var OPENAI_RESPONSES_DIALECT = {
   id: "openai-responses",
   apis: OPENAI_RESPONSES_APIS,
@@ -678,7 +685,7 @@ var OPENAI_RESPONSES_DIALECT = {
       case "priority":
         return isPriorityEligible(modelId);
       case "flex":
-        return FLEX_FAMILIES.some((pattern) => pattern.test(modelId));
+        return isFlexEligible(modelId);
       case "ultrafast":
         return ULTRAFAST_FAMILIES.some((pattern) => pattern.test(modelId));
     }

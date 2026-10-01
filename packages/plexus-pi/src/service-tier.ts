@@ -91,10 +91,18 @@ export function isPriorityEligible(modelId: string): boolean {
 	return PRIORITY_EXTRA_FAMILIES.some((pattern) => pattern.test(id));
 }
 
-// Variant families that accept a lower-latency tier, allowing snapshots and
-// suffixes after the variant name (gpt-5.6-sol-high, gpt-6-astra-2025-08-01).
-const FLEX_FAMILIES = [/^gpt-6-astra(?=$|-)/i, /^gpt-5\.6-(?:sol|terra|luna)(?=$|-)/i];
-const ULTRAFAST_FAMILIES = [/^gpt-6-astra(?=$|-)/i, /^gpt-5\.6-sol(?=$|-)/i];
+// Flex: any GPT-5.5+ model (GPT-6 flagship pages price Flex; 5.5/5.6 verified).
+function isFlexEligible(modelId: string): boolean {
+	const match = GPT_VERSION.exec(modelId.trim());
+	if (!match) return false;
+	const major = Number(match[1]);
+	const minor = match[2] === undefined ? 0 : Number(match[2]);
+	return major > 5 || (major === 5 && minor >= 5);
+}
+
+// Ultrafast: GPT-6 Astra (incl. dotted minors) and GPT-5.6 Sol. Snapshots and
+// suffixes are allowed after the variant name (gpt-6-astra-2025-08-01).
+const ULTRAFAST_FAMILIES = [/^gpt-6(?:\.\d+)?-astra(?=$|-)/i, /^gpt-5\.6-sol(?=$|-)/i];
 
 const OPENAI_RESPONSES_DIALECT: ServiceTierDialect = {
 	id: "openai-responses",
@@ -107,7 +115,7 @@ const OPENAI_RESPONSES_DIALECT: ServiceTierDialect = {
 			case "priority":
 				return isPriorityEligible(modelId);
 			case "flex":
-				return FLEX_FAMILIES.some((pattern) => pattern.test(modelId));
+				return isFlexEligible(modelId);
 			case "ultrafast":
 				return ULTRAFAST_FAMILIES.some((pattern) => pattern.test(modelId));
 		}
