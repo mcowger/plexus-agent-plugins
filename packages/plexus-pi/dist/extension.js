@@ -462,6 +462,47 @@ function getBaseUrlResolution() {
   const saved = resolveStringOption(config.baseUrl);
   return { baseUrl: saved ?? null, source: saved ? "saved" : "none" };
 }
+function resolveApiKeyEnvSetting() {
+  const raw = getConfigSync().apiKeyEnv;
+  if (raw === undefined || raw === null)
+    return { name: ENV_API_KEY, explicit: false };
+  const name = typeof raw === "string" ? raw.trim() : "";
+  if (!ENV_VAR_NAME_RE.test(name)) {
+    throw new Error("Invalid apiKeyEnv: expected an environment variable name");
+  }
+  return { name, explicit: true };
+}
+function getApiKeyEnvName() {
+  return resolveApiKeyEnvSetting().name;
+}
+function isApiKeyEnvExplicit() {
+  return resolveApiKeyEnvSetting().explicit;
+}
+function requireApiKeyEnvValue(name, raw) {
+  const value = raw?.trim();
+  if (!value) {
+    throw new Error(`apiKeyEnv environment variable "${name}" is missing or empty`);
+  }
+  return value;
+}
+async function resolveExplicitApiKeyFromEnv(readEnv) {
+  const { name, explicit } = resolveApiKeyEnvSetting();
+  if (!explicit)
+    return;
+  return requireApiKeyEnvValue(name, await readEnv(name));
+}
+function resolveExplicitApiKey() {
+  const { name, explicit } = resolveApiKeyEnvSetting();
+  if (!explicit)
+    return;
+  return requireApiKeyEnvValue(name, process.env[name]);
+}
+function resolveApiKey(storedKey) {
+  const explicit = resolveExplicitApiKey();
+  if (explicit)
+    return explicit;
+  return storedKey || getEnvApiKey() || undefined;
+}
 function getEnvApiKey() {
   return resolveStringOption(process.env[ENV_API_KEY]) ?? null;
 }
@@ -758,7 +799,6 @@ function buildServiceTierNotification(input) {
 
 // src/extension.ts
 var PROVIDER_NAME = "plexus";
-var PROVIDER_API_KEY_TEMPLATE = "${PLEXUS_API_KEY}";
 var PLEXUS_CREDENTIAL_EXPIRES_AT = 253402300799000;
 var PLACEHOLDER_BASE_URL = "http://localhost/v1";
 var currentModels = [];
@@ -788,8 +828,54 @@ function enforceMinimumOutputTokens(payload) {
   }
   return changed ? next : payload;
 }
+function withAuthoritativeApiKeyEnv(provider, envName, getHeaderModels = () => currentModels) {
+  const apiKey = provider.auth.apiKey;
+  if (!apiKey)
+    return provider;
+  const withModelHeaders = (models) => {
+    const headersById = new Map;
+    for (const model of getHeaderModels()) {
+      if (model.headers)
+        headersById.set(model.id, model.headers);
+    }
+    if (headersById.size === 0)
+      return [...models];
+    return models.map((model) => {
+      const headers = headersById.get(model.id);
+      return headers ? { ...model, headers: { ...model.headers, ...headers } } : model;
+    });
+  };
+  return {
+    ...provider,
+    auth: {
+      ...provider.auth,
+      apiKey: {
+        ...apiKey,
+        resolve: async (input) => {
+          const explicit = await resolveExplicitApiKeyFromEnv((name) => input.ctx.env(name));
+          if (explicit === undefined)
+            return apiKey.resolve(input);
+          const result = await apiKey.resolve({
+            ...input,
+            credential: {
+              type: "api_key",
+              key: explicit,
+              ...input.credential?.env ? { env: input.credential.env } : {}
+            }
+          });
+          return result ? { ...result, source: `${envName} (apiKeyEnv)` } : result;
+        }
+      }
+    },
+    getModels: () => withModelHeaders(provider.getModels()),
+    getAllModels: () => withModelHeaders(provider.getAllModels?.() ?? provider.getModels())
+  };
+}
 function plexusExtension(pi) {
-  const envApiKey = getEnvApiKey();
+  const apiKeyEnvExplicit = isApiKeyEnvExplicit();
+  const explicitApiKey = apiKeyEnvExplicit ? resolveExplicitApiKey() : undefined;
+  const apiKeyEnvName = getApiKeyEnvName();
+  const envApiKey = explicitApiKey ?? getEnvApiKey();
   const startupBaseUrl = getBaseUrl();
   const suppressPatterns = getSuppressedModels();
   const storedCatalog = readStoredModelsSync();
@@ -815,13 +901,27 @@ function plexusExtension(pi) {
   pi.on("message_end", (event) => normalizeMalformedFunctionCall(event.message, PROVIDER_NAME));
   pi.registerProvider(PROVIDER_NAME, {
     api: "openai-completions",
-    ...envApiKey ? { apiKey: PROVIDER_API_KEY_TEMPLATE } : {},
+    ...envApiKey ? { apiKey: `\${${apiKeyEnvName}}` } : {},
     authHeader: true,
     baseUrl: startupBaseUrl ?? PLACEHOLDER_BASE_URL,
     models: startupModels,
     refreshModels: refreshPlexusModels,
     oauth: createPlexusLoginProvider()
   });
+  if (apiKeyEnvExplicit) {
+    let authOverrideApplied = false;
+    pi.on("session_start", (_event, ctx) => {
+      if (authOverrideApplied)
+        return;
+      const composed = ctx.modelRegistry.getProvider(PROVIDER_NAME);
+      if (!composed?.auth.apiKey) {
+        throw new Error("Plexus apiKeyEnv override failed: provider API-key auth is unavailable");
+      }
+      pi.registerProvider(withAuthoritativeApiKeyEnv(composed, apiKeyEnvName));
+      authOverrideApplied = true;
+      log("auth: applied authoritative apiKeyEnv override", { apiKeyEnv: apiKeyEnvName });
+    });
+  }
   pi.registerCommand("plexus", {
     description: "Plexus provider commands: refresh, status (setup: /login plexus)",
     getArgumentCompletions: (prefix) => {
@@ -885,7 +985,7 @@ function notifyServiceTier(ctx, tier, success) {
 async function refreshPlexusModels(context) {
   const baseUrl = getBaseUrl();
   const modelsUrl = getModelsUrl();
-  const apiKey = credentialApiKey(context.credential) ?? getEnvApiKey() ?? undefined;
+  const apiKey = resolveApiKey(credentialApiKey(context.credential));
   const suppress = getSuppressedModels();
   if (!context.allowNetwork || !apiKey || !modelsUrl || !baseUrl) {
     if (currentModels.length > 0) {
@@ -972,7 +1072,8 @@ function createPlexusLoginProvider() {
       return { ...credentials, expires: PLEXUS_CREDENTIAL_EXPIRES_AT };
     },
     getApiKey(credentials) {
-      return String(credentials.access || credentials.refresh || "");
+      const stored = String(credentials.access || credentials.refresh || "");
+      return resolveExplicitApiKey() ?? stored;
     },
     modifyModels(models, credentials) {
       const baseUrl = credentials.plexusBaseUrl;
@@ -984,7 +1085,13 @@ function createPlexusLoginProvider() {
   };
 }
 async function handleRefresh(ctx) {
-  const apiKey = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER_NAME);
+  let apiKey;
+  try {
+    apiKey = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER_NAME);
+  } catch (error) {
+    ctx.ui.notify(`Plexus API key resolution failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+    return;
+  }
   if (!apiKey) {
     ctx.ui.notify("No Plexus API key configured. Run /login plexus first.", "error");
     return;
@@ -1004,10 +1111,14 @@ async function handleRefresh(ctx) {
 }
 async function handleStatus(ctx) {
   const baseUrl = getBaseUrlResolution();
-  const apiKey = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER_NAME);
+  const apiKeyEnvName = getApiKeyEnvName();
+  const apiKey = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER_NAME).catch(() => {
+    return;
+  });
+  const explicitApiKey = apiKey ? resolveExplicitApiKey() : undefined;
   ctx.ui.notify([
     `Plexus base URL: ${baseUrl.baseUrl ?? "not configured"} (${baseUrl.source})`,
-    `API key: ${apiKey ? getEnvApiKey() ? "host credential or PLEXUS_API_KEY fallback" : "host credential" : "not configured"}`,
+    `API key: ${apiKey ? explicitApiKey !== undefined ? `${apiKeyEnvName} (apiKeyEnv)` : getEnvApiKey() ? `host credential or ${apiKeyEnvName} fallback` : "host credential" : "not configured"}`,
     `Catalog: ${currentModels.length} models (${catalogSource})`,
     "Default model: managed by Pi. Use /model and save the selection there."
   ].join(`
@@ -1015,5 +1126,6 @@ async function handleStatus(ctx) {
 }
 export {
   plexusExtension as default,
-  enforceMinimumOutputTokens
+  enforceMinimumOutputTokens,
+  withAuthoritativeApiKeyEnv
 };

@@ -25,6 +25,15 @@ import { apiBase, modelsUrl } from "./url.ts";
 
 type Context = Plugin.Context;
 
+/**
+ * Extract a human-readable message from a thrown value. The apiKeyEnv errors
+ * thrown by resolveConfig name the offending variable but never its value, so
+ * callers can safely surface this text in status messages.
+ */
+function errorMessage(e: unknown): string {
+	return e instanceof Error ? e.message : String(e);
+}
+
 // ---------------------------------------------------------------------------
 // Refresh state (module-scoped, mirrors the V1 adapter)
 // ---------------------------------------------------------------------------
@@ -160,7 +169,7 @@ async function loadSource(
 	}
 }
 
-function providerInfo(source: Source): Provider.Info {
+export function providerInfo(source: Source): Provider.Info {
 	const providerID = Provider.ID.make(PLEXUS_PROVIDER_ID);
 	const info = {
 		...Provider.Info.empty(providerID),
@@ -195,7 +204,12 @@ export default Plugin.define({
 			source.connection = next.connection;
 		};
 
-		await reloadSource(false);
+		try {
+			await reloadSource(false);
+		} catch (e) {
+			log.error(`Plexus setup failed: ${errorMessage(e)}`);
+			throw e;
+		}
 
 		// Single plexus provider. Transform callbacks stay synchronous — the
 		// live fetch above runs before registering, and models are captured in
@@ -271,7 +285,22 @@ export default Plugin.define({
 					// A stale in-memory entry would mask a key rotation, so a
 					// manual refresh always forces a live fetch.
 					lastRefresh = null;
-					await reloadSource(true);
+					try {
+						await reloadSource(true);
+					} catch (e) {
+						// Do not silently continue with stale state: report the
+						// failure (the message names the variable, never its value).
+						const text = `Plexus refresh failed: ${errorMessage(e)}. Existing state left untouched.`;
+						log.error(text);
+						await ctx.session.synthetic({
+							sessionID,
+							text,
+							description: text,
+							delivery,
+							resume: false,
+						});
+						return;
+					}
 					await ctx.provider.reload();
 					const count = source.models.length;
 					const placeholderOnly =

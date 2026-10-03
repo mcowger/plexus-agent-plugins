@@ -176,21 +176,21 @@ To force a model refresh:
 /plexus-refresh
 ```
 
-`PLEXUS_API_URL` / `PLEXUS_BASE_URL` / `PLEXUS_API_KEY` env vars and plugin options (`plexusBaseURL`, `suppressModels`) are also honored. Until a URL is configured, the provider shows a single `plexus-unconfigured` placeholder. Plugin logs are written to `~/.local/share/opencode/plugins/plexus/plugin.log` (the OpenCode service discards plugin stdout).
+`PLEXUS_API_URL` / `PLEXUS_BASE_URL` / `PLEXUS_API_KEY` env vars and plugin options (`plexusBaseURL`, `apiKey`, `apiKeyEnv`, `suppressModels`) are also honored. Until a URL is configured, the provider shows a single `plexus-unconfigured` placeholder. Plugin logs are written to `~/.local/share/opencode/plugins/plexus/plugin.log` (the OpenCode service discards plugin stdout).
 
 ## Configuration files
 
 ### Connection state
 
-Each adapter stores only non-secret Plexus settings in its own `config.json`:
+Pi and OMP store only non-secret Plexus settings in their own `config.json`:
 
 ```text
-<agent-dir>/extensions/plexus/config.json  # base URL and optional model suppression
+<agent-dir>/extensions/plexus/config.json  # base URL, apiKeyEnv, model suppression
 ```
 
 Credentials stay in the host credential store (`auth.json` for Pi, `agent.db` for OMP). Model catalogs stay in the host model registry/store. The extension no longer writes a second model cache, ETag file, raw API response, or default-model preference.
 
-At runtime, configuration resolves as follows:
+With `apiKeyEnv` omitted, Pi resolves configuration as follows:
 
 ```text
 base URL: PLEXUS_API_URL → PLEXUS_BASE_URL → saved Plexus base URL
@@ -199,9 +199,72 @@ catalog: host model store → live Plexus refresh
 startup model: host model-picker preference
 ```
 
-`PLEXUS_API_URL` and `PLEXUS_BASE_URL` are process-only URL overrides; `PLEXUS_API_KEY` is a process-only credential fallback. None are persisted. `/plexus status` reports the effective URL source, whether auth is available, and catalog state without exposing credentials.
+OMP uses the same URL precedence, but its registered `PLEXUS_API_KEY` environment reference is a native config-key override, ahead of saved credentials. If that variable isn't set, OMP uses its host credential resolver. OpenCode uses `PLEXUS_API_KEY` before the saved `/connect` credential and plugin `apiKey` option.
+
+`PLEXUS_API_URL` and `PLEXUS_BASE_URL` are process-only URL overrides; environment API keys aren't persisted. `/plexus status` reports the effective URL source, whether auth is available, and catalog state without exposing credentials.
 
 Plexus accepts a root URL or a `/v1` API URL. The adapter normalizes that only for the Plexus discovery request. Each model then receives its own API-specific base URL: OpenAI stays on `/v1`, Anthropic uses the root, and Google uses `/v1beta`.
+
+### Separate API-key environment variables
+
+Set `apiKeyEnv` to the **name** of an environment variable, not its value or a `$VAR` template. The default is `PLEXUS_API_KEY`; no client-specific name is built in.
+
+For Pi, edit `~/.pi/agent/extensions/plexus/config.json` (or `<agent-dir>/extensions/plexus/config.json` when using a custom agent directory):
+
+```json
+{
+  "baseUrl": "https://plexus.example.com",
+  "apiKeyEnv": "AIHOME_PI_API_KEY"
+}
+```
+
+For OMP, edit `~/.omp/agent/extensions/plexus/config.json` (under the active profile's agent directory when using profiles):
+
+```json
+{
+  "baseUrl": "https://plexus.example.com",
+  "apiKeyEnv": "AIHOME_OMP_API_KEY"
+}
+```
+
+For OpenCode V2, put `apiKeyEnv` in the plugin's `options` in `~/.config/opencode/opencode.jsonc` (or your project `opencode.jsonc`):
+
+```jsonc
+{
+  "plugins": [
+    {
+      "package": "@mcowger/opencode-plexus",
+      "options": {
+        "plexusBaseURL": "https://plexus.example.com",
+        "apiKeyEnv": "AIHOME_OPENCODE_API_KEY"
+      }
+    }
+  ]
+}
+```
+
+Set the named variable in the process environment that launches the client. Restart Pi/OMP after editing their config; restart the OpenCode service after editing plugin options or changing its environment.
+
+Credential precedence:
+
+| Client | `apiKeyEnv` omitted | `apiKeyEnv` explicitly set |
+|---|---|---|
+| Pi | Saved host credential, then `PLEXUS_API_KEY` fallback | Only the named environment variable, ahead of saved credentials |
+| OMP | Registered `PLEXUS_API_KEY` env override, then host credentials | Only the named environment variable, ahead of saved credentials |
+| OpenCode V2 | `PLEXUS_API_KEY`, then saved `/connect` credential, then plugin `apiKey` option | Only the named environment variable, ahead of both saved credentials and `apiKey` |
+
+An explicit setting is authoritative even when it names `PLEXUS_API_KEY`. If the selected variable is missing, empty, or whitespace-only, the plugin reports an error naming the variable without showing its value. It does not fall back to a saved key, OpenCode's `apiKey` option, or the shared `PLEXUS_API_KEY`. Saved credentials remain stored; remove `apiKeyEnv` to restore the default precedence.
+
+### Native login with `apiKeyEnv`
+
+`apiKeyEnv` changes which key authenticates requests, not the native login UI:
+
+- Pi and OMP: `/login plexus` still prompts for the base URL and API key, and saves both through the normal configuration and credential stores.
+- OpenCode V2: `/connect` still stores the Plexus base URL and API key normally.
+
+With an explicit `apiKeyEnv`, discovery and model requests use the named environment variable rather than the key entered during login. OMP's immediate post-login refresh also uses the environment key. Login remains useful for configuring the base URL, but entering a different key won't override the environment setting.
+
+If the named variable is missing or empty at startup, the plugin fails to load. Native login cannot repair that setting: set the variable in the launching process environment or remove `apiKeyEnv`, then restart. Removing the setting restores the default precedence above without deleting saved credentials.
 
 ---
 

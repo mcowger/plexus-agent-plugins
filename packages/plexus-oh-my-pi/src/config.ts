@@ -21,6 +21,8 @@ const ENV_VAR_NAME_PREFIX_RE = /^[A-Za-z_][A-Za-z0-9_]*/;
 
 interface PlexusConfig {
 	baseUrl?: string;
+	/** Name of the environment variable holding the Plexus API key. */
+	apiKeyEnv?: string;
 	suppressModels?: string | string[];
 	suppress?: string | string[];
 }
@@ -101,10 +103,58 @@ export const toPlexusApiBase = (raw: string): string => {
 	return root ? `${root}/v1` : "";
 };
 
+/**
+ * Resolve the API-key environment variable name from config.
+ *
+ * `apiKeyEnv` omitted preserves the default `PLEXUS_API_KEY` behavior. An
+ * explicit value must be a valid environment variable name; anything else
+ * throws a generic error that never echoes the configured value.
+ */
+function resolveApiKeyEnvSetting(): { name: string; explicit: boolean } {
+	const raw = getConfigSync().apiKeyEnv;
+	if (raw === undefined || raw === null) return { name: ENV_API_KEY, explicit: false };
+
+	const name = typeof raw === "string" ? raw.trim() : "";
+	if (!ENV_VAR_NAME_RE.test(name)) {
+		throw new Error("Invalid apiKeyEnv: expected an environment variable name");
+	}
+	return { name, explicit: true };
+}
+
+/** Environment variable name OMP resolves for the provider API key. */
+export function getApiKeyEnvName(): string {
+	return resolveApiKeyEnvSetting().name;
+}
+
+/**
+ * Resolve the API key named by an explicit `apiKeyEnv`.
+ *
+ * Returns undefined when the setting is omitted (the default `PLEXUS_API_KEY`
+ * precedence still applies). When set it is authoritative: the named variable
+ * must exist and be non-empty, otherwise this throws instead of falling back
+ * to a stored credential or `PLEXUS_API_KEY`. Error messages name the variable
+ * but never include its value.
+ */
+export function resolveExplicitApiKey(): string | undefined {
+	const { name, explicit } = resolveApiKeyEnvSetting();
+	if (!explicit) return undefined;
+
+	const value = process.env[name]?.trim();
+	if (!value) {
+		throw new Error(`apiKeyEnv environment variable "${name}" is missing or empty`);
+	}
+	return value;
+}
+
 /** Cached parsed config, resolved once per process and invalidated on write.
  *  Avoids re-issuing a sync file read on every getBaseUrl/getModelsUrl/
  *  getBaseUrl call. */
 let cachedConfig: PlexusConfig | null = null;
+
+/** Clears the in-process config cache so the next read re-parses config.json. */
+export function resetConfigCache(): void {
+	cachedConfig = null;
+}
 
 export function getConfigSync(): PlexusConfig {
 	if (cachedConfig) return cachedConfig;
@@ -141,8 +191,22 @@ export function getBaseUrlResolution(): { baseUrl: string | null; source: BaseUr
 	return { baseUrl: saved ?? null, source: saved ? "saved" : "none" };
 }
 
+/** The default `PLEXUS_API_KEY` fallback; null when unset or empty. */
 export function getEnvApiKey(): string | null {
 	return resolveStringOption(process.env[ENV_API_KEY]) ?? null;
+}
+
+/**
+ * Resolve the effective API key for a Plexus request.
+ *
+ * Explicit `apiKeyEnv` is authoritative and ignores the stored credential. The
+ * default chain keeps the host-resolved key ahead of the process fallback;
+ * OMP's host resolver includes the registered environment override.
+ */
+export function resolveApiKey(storedKey: string | null | undefined): string | null {
+	const explicit = resolveExplicitApiKey();
+	if (explicit) return explicit;
+	return storedKey ?? getEnvApiKey();
 }
 
 /** Returns <baseUrl>/v1/models, or null. */

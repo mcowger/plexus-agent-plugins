@@ -2,7 +2,13 @@ import {
 	getEnvSuppressedModels,
 	parseSuppressionPatterns,
 } from "../../plexus-models/src/index.ts";
-import { ENV_API_KEY, ENV_API_URL, ENV_BASE_URL, PLEXUS_BASE_URL_OPTION } from "./constants.ts";
+import {
+	ENV_API_KEY,
+	ENV_API_URL,
+	ENV_BASE_URL,
+	PLEXUS_API_KEY_ENV_OPTION,
+	PLEXUS_BASE_URL_OPTION,
+} from "./constants.ts";
 import { rootURL } from "./url.ts";
 
 const ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -83,6 +89,35 @@ function resolveStringOption(value: unknown): string | undefined {
 	return resolved || undefined;
 }
 
+/**
+ * Resolve the API key named by an explicit `apiKeyEnv` plugin option.
+ *
+ * Returns undefined when the option is absent (the default `PLEXUS_API_KEY`
+ * precedence still applies). When the option is present it is authoritative:
+ * the named env var must exist and be non-empty, otherwise this throws instead
+ * of falling back to the saved credential or `options.apiKey`. Error messages
+ * name the variable but never include its value.
+ */
+export function resolveExplicitApiKey(options?: PluginOptions): string | undefined {
+	const raw = options?.[PLEXUS_API_KEY_ENV_OPTION];
+	if (raw === undefined || raw === null) return undefined;
+
+	const name = typeof raw === "string" ? raw.trim() : "";
+	if (!ENV_VAR_NAME_RE.test(name)) {
+		throw new Error(
+			`Invalid ${PLEXUS_API_KEY_ENV_OPTION}: expected an environment variable name`,
+		);
+	}
+
+	const value = process.env[name]?.trim();
+	if (!value) {
+		throw new Error(
+			`${PLEXUS_API_KEY_ENV_OPTION} environment variable "${name}" is missing or empty`,
+		);
+	}
+	return value;
+}
+
 function metadataBaseURL(credential: ConnectionCredential | undefined): string | undefined {
 	if (!credential) return undefined;
 	const fromMetadata = resolveStringOption(credential.metadata?.[PLEXUS_BASE_URL_OPTION]);
@@ -97,12 +132,18 @@ function metadataBaseURL(credential: ConnectionCredential | undefined): string |
  *   2. Integration connection credential from /connect (key + metadata.plexusBaseURL)
  *   3. Plugin options from opencode.jsonc (plexusBaseURL, apiKey)
  *
+ * An explicit `apiKeyEnv` option is authoritative and short-circuits the API
+ * key chain: the named env var must be set and non-empty, otherwise this
+ * throws (no fallback). When `apiKeyEnv` is omitted, the chain above applies
+ * unchanged, defaulting to `PLEXUS_API_KEY`.
+ *
  * baseURL candidates are normalized through rootURL(); apiKey is trimmed.
  */
 export function resolveConfig(
 	options?: PluginOptions,
 	credential?: ConnectionCredential | undefined,
 ): { baseURL?: string; apiKey?: string } {
+	const explicitApiKey = resolveExplicitApiKey(options);
 	const envBaseURL = process.env[ENV_API_URL] ?? process.env[ENV_BASE_URL];
 	const envApiKey = process.env[ENV_API_KEY];
 
@@ -116,7 +157,7 @@ export function resolveConfig(
 		(optBaseURL ? rootURL(optBaseURL) : undefined) ||
 		undefined;
 	const apiKey =
-		(envApiKey ? envApiKey.trim() : undefined) || credential?.key?.trim() || optApiKey || undefined;
+		explicitApiKey || (envApiKey ? envApiKey.trim() : undefined) || credential?.key?.trim() || optApiKey || undefined;
 
 	return {
 		baseURL: baseURL || undefined,

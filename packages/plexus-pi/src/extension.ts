@@ -33,6 +33,7 @@ import type {
 	Model,
 	OAuthCredentials,
 	OAuthLoginCallbacks,
+	Provider,
 	RefreshModelsContext,
 } from "@earendil-works/pi-ai";
 import {
@@ -42,11 +43,16 @@ import {
 	isModelSuppressed,
 } from "../../plexus-models/src/index.ts";
 import {
+	getApiKeyEnvName,
 	getBaseUrl,
 	getBaseUrlResolution,
 	getEnvApiKey,
 	getModelsUrl,
 	getSuppressedModels,
+	isApiKeyEnvExplicit,
+	resolveApiKey,
+	resolveExplicitApiKey,
+	resolveExplicitApiKeyFromEnv,
 	saveBaseUrl,
 } from "./config.ts";
 import { readStoredModelsSync } from "./cache.ts";
@@ -62,7 +68,6 @@ import {
 } from "./service-tier.ts";
 
 const PROVIDER_NAME = "plexus";
-const PROVIDER_API_KEY_TEMPLATE = "${PLEXUS_API_KEY}";
 const PLEXUS_CREDENTIAL_EXPIRES_AT = 253_402_300_799_000;
 const PLACEHOLDER_BASE_URL = "http://localhost/v1";
 
@@ -99,8 +104,74 @@ export function enforceMinimumOutputTokens(payload: unknown): unknown {
 	return changed ? next : payload;
 }
 
+/** A model carrying optional static request headers. */
+interface HeaderBearingModel {
+	id: string;
+	headers?: Record<string, string>;
+}
+
+/**
+ * Override stored API keys across all dialects, preserving native headers.
+ *
+ * Registering this as a native provider makes pi delete the extension provider
+ * config, so per-model headers copied from the built-in mapper would otherwise
+ * vanish from request auth. Pi only merges headers carried on model objects, so
+ * re-attach them here. The header source is read live, so models that arrive
+ * from a refresh after the swap keep their headers too.
+ */
+export function withAuthoritativeApiKeyEnv(
+	provider: Provider,
+	envName: string,
+	getHeaderModels: () => ReadonlyArray<HeaderBearingModel> = () => currentModels,
+): Provider {
+	const apiKey = provider.auth.apiKey;
+	if (!apiKey) return provider;
+
+	const withModelHeaders = <TModel extends HeaderBearingModel>(models: readonly TModel[]): TModel[] => {
+		const headersById = new Map<string, Record<string, string>>();
+		for (const model of getHeaderModels()) {
+			if (model.headers) headersById.set(model.id, model.headers);
+		}
+		if (headersById.size === 0) return [...models];
+		return models.map((model) => {
+			const headers = headersById.get(model.id);
+			return headers ? { ...model, headers: { ...model.headers, ...headers } } : model;
+		});
+	};
+
+	return {
+		...provider,
+		auth: {
+			...provider.auth,
+			apiKey: {
+				...apiKey,
+				resolve: async (input) => {
+					const explicit = await resolveExplicitApiKeyFromEnv((name) => input.ctx.env(name));
+					if (explicit === undefined) return apiKey.resolve(input);
+					const result = await apiKey.resolve({
+						...input,
+						credential: {
+							type: "api_key",
+							key: explicit,
+							...(input.credential?.env ? { env: input.credential.env } : {}),
+						},
+					});
+					return result ? { ...result, source: `${envName} (apiKeyEnv)` } : result;
+				},
+			},
+		},
+		getModels: () => withModelHeaders(provider.getModels()),
+		getAllModels: () => withModelHeaders(provider.getAllModels?.() ?? provider.getModels()),
+	};
+}
+
 export default function plexusExtension(pi: ExtensionAPI): void {
-	const envApiKey = getEnvApiKey();
+	// An explicit apiKeyEnv is authoritative and throws when its variable is
+	// missing or empty; the default PLEXUS_API_KEY remains an optional fallback.
+	const apiKeyEnvExplicit = isApiKeyEnvExplicit();
+	const explicitApiKey = apiKeyEnvExplicit ? resolveExplicitApiKey() : undefined;
+	const apiKeyEnvName = getApiKeyEnvName();
+	const envApiKey = explicitApiKey ?? getEnvApiKey();
 	const startupBaseUrl = getBaseUrl();
 	const suppressPatterns = getSuppressedModels();
 
@@ -138,16 +209,33 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 
 	pi.registerProvider(PROVIDER_NAME, {
 		api: "openai-completions" as Api,
-		// Register the env-var template only when the variable is set: pi's
-		// credential resolution throws on unresolvable templates during catalog
-		// refresh, whereas providers without an apiKey auth are skipped silently.
-		...(envApiKey ? { apiKey: PROVIDER_API_KEY_TEMPLATE } : {}),
+		// Register the env-var template with the configured variable name. It is
+		// only registered when the variable is present: pi's credential
+		// resolution throws on unresolvable templates during catalog refresh,
+		// whereas providers without an apiKey auth are skipped silently.
+		...(envApiKey ? { apiKey: `\${${apiKeyEnvName}}` } : {}),
 		authHeader: true,
 		baseUrl: startupBaseUrl ?? PLACEHOLDER_BASE_URL,
 		models: startupModels,
 		refreshModels: refreshPlexusModels,
 		oauth: createPlexusLoginProvider(),
 	});
+
+	// Templates are fallbacks behind stored plain keys. Wrap the composed
+	// provider's native auth once it exists so explicit apiKeyEnv wins instead.
+	if (apiKeyEnvExplicit) {
+		let authOverrideApplied = false;
+		pi.on("session_start", (_event, ctx) => {
+			if (authOverrideApplied) return;
+			const composed = ctx.modelRegistry.getProvider(PROVIDER_NAME);
+			if (!composed?.auth.apiKey) {
+				throw new Error("Plexus apiKeyEnv override failed: provider API-key auth is unavailable");
+			}
+			pi.registerProvider(withAuthoritativeApiKeyEnv(composed, apiKeyEnvName));
+			authOverrideApplied = true;
+			log("auth: applied authoritative apiKeyEnv override", { apiKeyEnv: apiKeyEnvName });
+		});
+	}
 
 	// -------------------------------------------------------------------------
 	// /plexus command
@@ -233,7 +321,7 @@ function notifyServiceTier(ctx: ExtensionContext, tier: ServiceTier, success: bo
 async function refreshPlexusModels(context: RefreshModelsContext): Promise<ProviderModelConfig[]> {
 	const baseUrl = getBaseUrl();
 	const modelsUrl = getModelsUrl();
-	const apiKey = credentialApiKey(context.credential) ?? getEnvApiKey() ?? undefined;
+	const apiKey = resolveApiKey(credentialApiKey(context.credential));
 	const suppress = getSuppressedModels();
 
 	if (!context.allowNetwork || !apiKey || !modelsUrl || !baseUrl) {
@@ -343,7 +431,10 @@ function createPlexusLoginProvider(): NonNullable<ProviderConfig["oauth"]> {
 			return { ...credentials, expires: PLEXUS_CREDENTIAL_EXPIRES_AT };
 		},
 		getApiKey(credentials: OAuthCredentials): string {
-			return String(credentials.access || credentials.refresh || "");
+			// Explicit apiKeyEnv outranks the stored OAuth credential; missing or
+			// empty values throw instead of silently falling back.
+			const stored = String(credentials.access || credentials.refresh || "");
+			return resolveExplicitApiKey() ?? stored;
 		},
 		modifyModels(models, credentials) {
 			const baseUrl = (credentials as PlexusCredentials).plexusBaseUrl;
@@ -364,7 +455,13 @@ function createPlexusLoginProvider(): NonNullable<ProviderConfig["oauth"]> {
 // Refresh command handler
 // ---------------------------------------------------------------------------
 async function handleRefresh(ctx: ExtensionCommandContext): Promise<void> {
-	const apiKey = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER_NAME);
+	let apiKey: string | undefined;
+	try {
+		apiKey = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER_NAME);
+	} catch (error) {
+		ctx.ui.notify(`Plexus API key resolution failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+		return;
+	}
 	if (!apiKey) {
 		ctx.ui.notify("No Plexus API key configured. Run /login plexus first.", "error");
 		return;
@@ -392,10 +489,20 @@ async function handleRefresh(ctx: ExtensionCommandContext): Promise<void> {
 
 async function handleStatus(ctx: ExtensionCommandContext): Promise<void> {
 	const baseUrl = getBaseUrlResolution();
-	const apiKey = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER_NAME);
+	const apiKeyEnvName = getApiKeyEnvName();
+	const apiKey = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER_NAME).catch(() => undefined);
+	const explicitApiKey = apiKey ? resolveExplicitApiKey() : undefined;
 	ctx.ui.notify([
 		`Plexus base URL: ${baseUrl.baseUrl ?? "not configured"} (${baseUrl.source})`,
-		`API key: ${apiKey ? (getEnvApiKey() ? "host credential or PLEXUS_API_KEY fallback" : "host credential") : "not configured"}`,
+		`API key: ${
+			apiKey
+				? explicitApiKey !== undefined
+					? `${apiKeyEnvName} (apiKeyEnv)`
+					: getEnvApiKey()
+						? `host credential or ${apiKeyEnvName} fallback`
+						: "host credential"
+				: "not configured"
+		}`,
 		`Catalog: ${currentModels.length} models (${catalogSource})`,
 		"Default model: managed by Pi. Use /model and save the selection there.",
 	].join("\n"), "info");

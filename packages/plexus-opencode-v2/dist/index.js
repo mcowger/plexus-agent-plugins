@@ -162,6 +162,7 @@ var ANTHROPIC_PKG = "aisdk:@ai-sdk/anthropic";
 var GOOGLE_PKG = "aisdk:@ai-sdk/google";
 var OPENAI_RESPONSES_PKG = "aisdk:@ai-sdk/openai";
 var PLEXUS_BASE_URL_OPTION = "plexusBaseURL";
+var PLEXUS_API_KEY_ENV_OPTION = "apiKeyEnv";
 var ENV_BASE_URL = "PLEXUS_BASE_URL";
 var ENV_API_URL = "PLEXUS_API_URL";
 var ENV_API_KEY = "PLEXUS_API_KEY";
@@ -304,6 +305,20 @@ function resolveStringOption(value) {
   const resolved = resolveConfigTemplate(value)?.trim();
   return resolved || undefined;
 }
+function resolveExplicitApiKey(options) {
+  const raw = options?.[PLEXUS_API_KEY_ENV_OPTION];
+  if (raw === undefined || raw === null)
+    return;
+  const name = typeof raw === "string" ? raw.trim() : "";
+  if (!ENV_VAR_NAME_RE.test(name)) {
+    throw new Error(`Invalid ${PLEXUS_API_KEY_ENV_OPTION}: expected an environment variable name`);
+  }
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`${PLEXUS_API_KEY_ENV_OPTION} environment variable "${name}" is missing or empty`);
+  }
+  return value;
+}
 function metadataBaseURL(credential) {
   if (!credential)
     return;
@@ -314,13 +329,14 @@ function metadataBaseURL(credential) {
   return typeof rawConfig === "string" ? resolveStringOption(rawConfig) : undefined;
 }
 function resolveConfig(options, credential) {
+  const explicitApiKey = resolveExplicitApiKey(options);
   const envBaseURL = process.env[ENV_API_URL] ?? process.env[ENV_BASE_URL];
   const envApiKey = process.env[ENV_API_KEY];
   const metaBaseURL = credential ? metadataBaseURL(credential) : undefined;
   const optBaseURL = resolveStringOption(options?.[PLEXUS_BASE_URL_OPTION]);
   const optApiKey = resolveStringOption(options?.["apiKey"]);
   const baseURL = (envBaseURL ? rootURL(envBaseURL) : undefined) || (metaBaseURL ? rootURL(metaBaseURL) : undefined) || (optBaseURL ? rootURL(optBaseURL) : undefined) || undefined;
-  const apiKey = (envApiKey ? envApiKey.trim() : undefined) || credential?.key?.trim() || optApiKey || undefined;
+  const apiKey = explicitApiKey || (envApiKey ? envApiKey.trim() : undefined) || credential?.key?.trim() || optApiKey || undefined;
   return {
     baseURL: baseURL || undefined,
     apiKey: apiKey || undefined
@@ -574,6 +590,9 @@ function placeholderModel() {
 }
 
 // src/plugin.ts
+function errorMessage(e) {
+  return e instanceof Error ? e.message : String(e);
+}
 var lastRefresh = null;
 var inFlightRefresh = null;
 function toModelInfo(models) {
@@ -692,7 +711,12 @@ var plugin_default = Plugin.define({
       source.apiKey = next.apiKey;
       source.connection = next.connection;
     };
-    await reloadSource(false);
+    try {
+      await reloadSource(false);
+    } catch (e) {
+      log.error(`Plexus setup failed: ${errorMessage(e)}`);
+      throw e;
+    }
     const providerID = Provider.ID.make(PLEXUS_PROVIDER_ID);
     await ctx.provider.transform((editor) => {
       const existing = editor.get(providerID);
@@ -751,7 +775,20 @@ var plugin_default = Plugin.define({
         description: "Refresh Plexus models from the live server",
         execute: async ({ sessionID, delivery }) => {
           lastRefresh = null;
-          await reloadSource(true);
+          try {
+            await reloadSource(true);
+          } catch (e) {
+            const text = `Plexus refresh failed: ${errorMessage(e)}. Existing state left untouched.`;
+            log.error(text);
+            await ctx.session.synthetic({
+              sessionID,
+              text,
+              description: text,
+              delivery,
+              resume: false
+            });
+            return;
+          }
           await ctx.provider.reload();
           const count = source.models.length;
           const placeholderOnly = count === 1 && source.models[0]?.id === PLACEHOLDER_MODEL_ID;
@@ -806,6 +843,7 @@ export {
   OPENAI_COMPATIBLE_PKG,
   OPENAI_RESPONSES_PKG,
   PLACEHOLDER_MODEL_ID,
+  PLEXUS_API_KEY_ENV_OPTION,
   PLEXUS_BASE_URL_OPTION,
   PLEXUS_INTEGRATION_ID,
   PLEXUS_PLUGIN_ID,
@@ -823,9 +861,11 @@ export {
   modelsUrl,
   orderModelsByApiBase,
   placeholderModel,
+  providerInfo,
   readCachedModels,
   resolveConfig,
   resolveConfigTemplate,
+  resolveExplicitApiKey,
   rootURL,
   trimURL,
   writeCache

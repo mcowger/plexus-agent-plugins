@@ -20,6 +20,10 @@ export const OPENAI_RESPONSES_PKG = "aisdk:@ai-sdk/openai";
 /** Plugin-options / credential-metadata key carrying the Plexus root URL. */
 export const PLEXUS_BASE_URL_OPTION = "plexusBaseURL";
 
+/** Plugin-option key naming the env var that holds the Plexus API key. When
+ *  omitted, the default `PLEXUS_API_KEY` behavior is preserved. */
+export const PLEXUS_API_KEY_ENV_OPTION = "apiKeyEnv";
+
 export const ENV_BASE_URL = "PLEXUS_BASE_URL";
 export const ENV_API_URL = "PLEXUS_API_URL";
 export const ENV_API_KEY = "PLEXUS_API_KEY";

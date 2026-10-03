@@ -17,7 +17,8 @@
  * track its own host's API without one host's fork drifting the other.
  *
  * Auth: API key is stored by Oh My Pi's authStorage (persisted in agent.db).
- *       It may also be pre-seeded via the PLEXUS_API_KEY env var.
+ *       It may also be pre-seeded via the PLEXUS_API_KEY env var, or an
+ *       explicitly configured `apiKeyEnv` name (see config.ts).
  *
  * Commands:
  *   /login plexus   — set base URL and API key using Oh My Pi's native login UI
@@ -30,12 +31,14 @@ import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ProviderC
 import type { Api, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai";
 import { convertDescriptors, fetchPlexusModels } from "../../plexus-models/src/index.ts";
 import {
-	ENV_API_KEY,
+	getApiKeyEnvName,
 	getBaseUrl,
 	getBaseUrlResolution,
 	getEnvApiKey,
 	getModelsUrl,
 	getSuppressedModels,
+	resolveApiKey,
+	resolveExplicitApiKey,
 	saveBaseUrl,
 } from "./config.ts";
 import { log } from "./log.ts";
@@ -44,9 +47,14 @@ import { normalizeProviderConnectionClosed } from "./provider-connection-retry.t
 
 const PROVIDER_NAME = "plexus";
 export function getProviderApiKeyConfig(): Pick<ProviderConfig, "apiKey" | "authHeader"> {
-	// OMP resolves provider env references through Bun.env and treats an
-	// unknown name as a literal key. Check the same source before registering it.
-	return Bun.env[ENV_API_KEY]?.trim() ? { apiKey: ENV_API_KEY, authHeader: true } : {};
+	// An explicit apiKeyEnv is authoritative and throws when its variable is
+	// missing or empty; the default PLEXUS_API_KEY remains an optional fallback.
+	// OMP resolves provider env references through Bun.env and treats an unknown
+	// name as a literal key, so only register a name that actually resolves.
+	const explicitApiKey = resolveExplicitApiKey();
+	const envName = getApiKeyEnvName();
+	const envValue = explicitApiKey ?? getEnvApiKey();
+	return envValue ? { apiKey: envName, authHeader: true } : {};
 }
 let currentModels: ReturnType<typeof descriptorToOhMyPiModel>[] = [];
 let catalogSource: "live refresh" | "none" = "none";
@@ -78,7 +86,15 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	// session_start: live-refresh models using the stored API key.
 	// -------------------------------------------------------------------------
 	pi.on("session_start", async (_event, ctx) => {
-		const apiKey = (await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME)) ?? getEnvApiKey();
+		let apiKey: string | null;
+		try {
+			apiKey = resolveApiKey(await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME));
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			log("session_start: api key resolution failed", { error: message });
+			ctx.ui.notify(message, "error");
+			return;
+		}
 		const baseUrl = getBaseUrl();
 
 		log("session_start", { hasApiKey: !!apiKey, baseUrl });
@@ -138,7 +154,13 @@ function createPlexusLoginProvider(pi: ExtensionAPI): NonNullable<ProviderConfig
 // Refresh command handler
 // ---------------------------------------------------------------------------
 async function handleRefresh(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {
-	const apiKey = (await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME)) ?? getEnvApiKey();
+	let apiKey: string | null;
+	try {
+		apiKey = resolveApiKey(await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME));
+	} catch (error) {
+		ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+		return;
+	}
 	if (!apiKey) {
 		ctx.ui.notify("No Plexus API key configured. Run /login plexus first.", "error");
 		return;
@@ -152,10 +174,21 @@ async function handleStatus(ctx: ExtensionCommandContext): Promise<void> {
 	const apiKey = await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME);
 	ctx.ui.notify([
 		`Plexus base URL: ${baseUrl.baseUrl ?? "not configured"} (${baseUrl.source})`,
-		`API key: ${apiKey ? (getEnvApiKey() ? "host credential or PLEXUS_API_KEY fallback" : "host credential") : "not configured"}`,
+		`API key: ${describeApiKey(apiKey)}`,
 		`Catalog: ${currentModels.length} models (${catalogSource})`,
 		"Default model: managed by OMP. Use /model or /models to save the selection there.",
 	].join("\n"), "info");
+}
+
+function describeApiKey(savedApiKey: string | undefined): string {
+	try {
+		const envName = getApiKeyEnvName();
+		if (resolveExplicitApiKey() !== undefined) return `${envName} (apiKeyEnv)`;
+		if (getEnvApiKey()) return `${envName} (overrides host credential)`;
+		return savedApiKey ? "host credential" : "not configured";
+	} catch (error) {
+		return `invalid apiKeyEnv configuration (${error instanceof Error ? error.message : String(error)})`;
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +197,7 @@ async function handleStatus(ctx: ExtensionCommandContext): Promise<void> {
 async function fetchPlexusModelConfigs(
 	apiKey: string | undefined,
 ): Promise<readonly ProviderModelConfig[]> {
-	const key = apiKey ?? getEnvApiKey();
+	const key = resolveApiKey(apiKey);
 	const modelsUrl = getModelsUrl();
 	const baseUrl = getBaseUrl();
 	if (!key || !modelsUrl || !baseUrl) return [];
@@ -191,7 +224,13 @@ async function doRefresh(
 	}
 
 	try {
-		const { models: apiModels } = await fetchPlexusModels(apiKey, modelsUrl);
+		const resolvedApiKey = resolveApiKey(apiKey);
+		if (!resolvedApiKey) {
+			if (ctx) ctx.ui.notify("No Plexus API key configured. Run /login plexus first.", "warning");
+			log("doRefresh: no API key configured");
+			return;
+		}
+		const { models: apiModels } = await fetchPlexusModels(resolvedApiKey, modelsUrl);
 
 		const suppressPatterns = getSuppressedModels();
 		const descriptors = convertDescriptors(apiModels, baseUrl, suppressPatterns);
