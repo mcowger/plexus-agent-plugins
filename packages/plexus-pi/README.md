@@ -17,7 +17,7 @@ Restart pi after installing or changing extension configuration.
 2. Run `/plexus refresh` to fetch the model list, or let pi refresh it automatically.
 3. Pick a model with `/model`.
 
-`/plexus status` reports the effective base URL, whether auth is available, and the catalog state without exposing credentials. `/plexus-service-tier` (alias `/service-tier`) sets the per-session service tier.
+`/plexus status` reports the effective base URL, whether auth is available, and the catalog state without exposing credentials.
 
 ## Configuration
 

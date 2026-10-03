@@ -680,123 +680,6 @@ function normalizeMalformedFunctionCall(message, providerName) {
   return { message: { ...message, errorMessage: NORMALIZED_MESSAGE } };
 }
 
-// src/service-tier.ts
-var TIER_ALIASES = {
-  default: "default",
-  off: "default",
-  none: "default",
-  priority: "priority",
-  fast: "priority",
-  flex: "flex",
-  ultrafast: "ultrafast"
-};
-function parseServiceTierArg(input) {
-  return TIER_ALIASES[input.trim().toLowerCase()];
-}
-var OPENAI_RESPONSES_APIS = ["openai-responses", "openai-codex-responses"];
-var GPT_VERSION = /^gpt-(\d+)(?:\.(\d+))?(?:-|$)/i;
-var PRIORITY_EXTRA_FAMILIES = [/^gpt-4o(?=$|-)/i, /^o3(?=$|-)/i, /^o4-mini(?=$|-)/i];
-function isPriorityEligible(modelId) {
-  const id = modelId.trim();
-  const match = GPT_VERSION.exec(id);
-  if (match) {
-    const major = Number(match[1]);
-    const minor = match[2] === undefined ? 0 : Number(match[2]);
-    return major >= 5 || major === 4 && minor >= 1;
-  }
-  return PRIORITY_EXTRA_FAMILIES.some((pattern) => pattern.test(id));
-}
-function isFlexEligible(modelId) {
-  const match = GPT_VERSION.exec(modelId.trim());
-  if (!match)
-    return false;
-  const major = Number(match[1]);
-  const minor = match[2] === undefined ? 0 : Number(match[2]);
-  return major > 5 || major === 5 && minor >= 5;
-}
-var ULTRAFAST_FAMILIES = [/^gpt-6(?:\.\d+)?-astra(?=$|-)/i, /^gpt-5\.6-sol(?=$|-)/i];
-var OPENAI_RESPONSES_DIALECT = {
-  id: "openai-responses",
-  apis: OPENAI_RESPONSES_APIS,
-  tiers: ["priority", "flex", "ultrafast"],
-  supportsModel: isPriorityEligible,
-  supportsTier(modelId, tier) {
-    switch (tier) {
-      case "priority":
-        return isPriorityEligible(modelId);
-      case "flex":
-        return isFlexEligible(modelId);
-      case "ultrafast":
-        return ULTRAFAST_FAMILIES.some((pattern) => pattern.test(modelId));
-    }
-  },
-  inject(payload, _modelId, tier) {
-    return { ...payload, service_tier: tier };
-  }
-};
-var ANTHROPIC_MESSAGES_APIS = ["anthropic-messages"];
-var ANTHROPIC_FAST_MODE_BETA = "fast-mode-2026-02-01";
-var CLAUDE_FAST_FAMILIES = [/^claude-opus-5(?=$|-)/i, /^claude-opus-4-8(?=$|-)/i];
-var ANTHROPIC_MESSAGES_DIALECT = {
-  id: "anthropic-messages",
-  apis: ANTHROPIC_MESSAGES_APIS,
-  tiers: ["priority"],
-  supportsModel(modelId) {
-    return /^claude-/i.test(modelId.trim());
-  },
-  supportsTier(modelId, tier) {
-    return tier === "priority" && CLAUDE_FAST_FAMILIES.some((pattern) => pattern.test(modelId.trim()));
-  },
-  inject(payload, _modelId, _tier) {
-    const existing = Array.isArray(payload.betas) ? payload.betas.filter((beta) => typeof beta === "string") : [];
-    const betas = existing.includes(ANTHROPIC_FAST_MODE_BETA) ? existing : [...existing, ANTHROPIC_FAST_MODE_BETA];
-    return { ...payload, speed: "fast", betas };
-  }
-};
-var SERVICE_TIER_DIALECTS = [
-  OPENAI_RESPONSES_DIALECT,
-  ANTHROPIC_MESSAGES_DIALECT
-];
-function dialectForApi(api, dialects = SERVICE_TIER_DIALECTS) {
-  if (!api)
-    return;
-  return dialects.find((dialect) => dialect.apis.includes(api));
-}
-function isTierSupportedByModel(model, tier, dialects = SERVICE_TIER_DIALECTS) {
-  if (tier === "default")
-    return true;
-  if (!model)
-    return false;
-  const dialect = dialectForApi(model.api, dialects);
-  if (!dialect || !dialect.supportsModel(model.id))
-    return false;
-  return dialect.supportsTier(model.id, tier);
-}
-function applyServiceTier(payload, model, tier, options) {
-  if (tier === "default" || !model || model.provider !== options.provider)
-    return payload;
-  const dialect = dialectForApi(model.api, options.dialects);
-  if (!dialect || !dialect.supportsModel(model.id) || !dialect.supportsTier(model.id, tier)) {
-    return payload;
-  }
-  if (!payload || typeof payload !== "object" || Array.isArray(payload))
-    return payload;
-  return dialect.inject(payload, model.id, tier);
-}
-var SERVICE_TIER_NOTIFICATION_TYPE = "plexus.serviceTier";
-var SERVICE_TIER_COMMAND = "service-tier";
-function buildServiceTierNotification(input) {
-  return JSON.stringify({
-    type: SERVICE_TIER_NOTIFICATION_TYPE,
-    command: SERVICE_TIER_COMMAND,
-    success: input.success,
-    tier: input.tier,
-    supported: input.supported,
-    provider: input.provider,
-    model: input.model
-  });
-}
-
 // src/extension.ts
 var PROVIDER_NAME = "plexus";
 var PLEXUS_CREDENTIAL_EXPIRES_AT = 253402300799000;
@@ -882,15 +765,10 @@ function plexusExtension(pi) {
   const startupModels = (storedCatalog?.models ?? []).filter((model) => !isModelSuppressed({ id: model.id, name: model.name }, suppressPatterns));
   currentModels = startupModels;
   catalogSource = startupModels.length > 0 ? "host store" : "none";
-  let activeServiceTier = "default";
-  pi.on("session_start", () => {
-    activeServiceTier = "default";
-  });
   pi.on("before_provider_request", (event, ctx) => {
     if (ctx.model?.provider !== PROVIDER_NAME)
       return;
-    const withTier = applyServiceTier(event.payload, ctx.model, activeServiceTier, { provider: PROVIDER_NAME });
-    const next = enforceMinimumOutputTokens(withTier);
+    const next = enforceMinimumOutputTokens(event.payload);
     return next === event.payload ? undefined : next;
   });
   log("startup", {
@@ -940,47 +818,6 @@ function plexusExtension(pi) {
       ctx.ui.notify(`Unknown sub-command: "${args}". Use /login plexus, /plexus refresh, or /plexus status.`, "warning");
     }
   });
-  const handleServiceTier = async (args, ctx) => {
-    const sub = args.trim().toLowerCase();
-    if (sub === "" || sub === "status") {
-      notifyServiceTier(ctx, activeServiceTier, true);
-      return;
-    }
-    const tier = parseServiceTierArg(sub);
-    if (!tier) {
-      notifyServiceTier(ctx, activeServiceTier, false);
-      return;
-    }
-    activeServiceTier = tier;
-    notifyServiceTier(ctx, tier, true);
-  };
-  const serviceTierCommand = {
-    description: "Set the per-session Plexus service tier: default, fast, flex, ultrafast, or status",
-    getArgumentCompletions: (prefix) => {
-      const tiers = [
-        { value: "default", label: "default", description: "Use the provider's default tier" },
-        { value: "fast", label: "fast", description: "Priority tier (alias: priority)" },
-        { value: "flex", label: "flex", description: "Flex tier" },
-        { value: "ultrafast", label: "ultrafast", description: "Ultrafast tier" },
-        { value: "status", label: "status", description: "Show the current service tier" }
-      ];
-      return tiers.filter((tier) => tier.value.startsWith(prefix.trim().toLowerCase()));
-    },
-    handler: handleServiceTier
-  };
-  pi.registerCommand("service-tier", serviceTierCommand);
-  pi.registerCommand("plexus-service-tier", serviceTierCommand);
-}
-function notifyServiceTier(ctx, tier, success) {
-  const model = ctx.model;
-  const supported = isTierSupportedByModel(model, tier);
-  ctx.ui.notify(buildServiceTierNotification({
-    tier,
-    success,
-    supported,
-    provider: model?.provider ?? PROVIDER_NAME,
-    model: model?.id ?? ""
-  }), !success || !supported ? "warning" : "info");
 }
 async function refreshPlexusModels(context) {
   const baseUrl = getBaseUrl();
