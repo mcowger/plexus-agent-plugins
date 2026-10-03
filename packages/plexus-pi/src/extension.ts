@@ -38,6 +38,7 @@ import {
 	convertDescriptors,
 	fetchPlexusModels,
 	isModelSuppressed,
+	type PlexusApiModel,
 } from "../../plexus-models/src/index.ts";
 import {
 	getApiKeyEnvName,
@@ -56,6 +57,7 @@ import { readStoredModelsSync } from "./cache.ts";
 import { log } from "./log.ts";
 import { descriptorToPiModel, MINIMUM_OUTPUT_TOKENS } from "./mapper.ts";
 import { normalizeMalformedFunctionCall } from "./gemini-malformed-retry.ts";
+import { ContextPolicyPublisher, CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON, type ContextPolicy } from "./context-policy.ts";
 
 const PROVIDER_NAME = "plexus";
 const PLEXUS_CREDENTIAL_EXPIRES_AT = 253_402_300_799_000;
@@ -64,6 +66,10 @@ const PLACEHOLDER_BASE_URL = "http://localhost/v1";
 type PlexusCredentials = OAuthCredentials & { plexusBaseUrl?: string };
 
 let currentModels: ProviderModelConfig[] = [];
+let activeContextPolicies: ContextPolicyPublisher | undefined;
+let refreshSequence = 0;
+type StoredContextPolicyMetadata = { policy: ContextPolicy; fetchedAt: number };
+type ContextPolicyBearingModel = ProviderModelConfig & { plexusContextPolicy?: StoredContextPolicyMetadata };
 let catalogSource: "host store" | "live refresh" | "none" = "none";
 
 export function enforceMinimumOutputTokens(payload: unknown): unknown {
@@ -156,6 +162,13 @@ export function withAuthoritativeApiKeyEnv(
 }
 
 export default function plexusExtension(pi: ExtensionAPI): void {
+	const contextPolicies = new ContextPolicyPublisher(pi.events);
+	activeContextPolicies = contextPolicies;
+	pi.on("session_shutdown", () => {
+		contextPolicies.dispose();
+		if (activeContextPolicies === contextPolicies) activeContextPolicies = undefined;
+	});
+
 	// An explicit apiKeyEnv is authoritative and throws when its variable is
 	// missing or empty; the default PLEXUS_API_KEY remains an optional fallback.
 	const apiKeyEnvExplicit = isApiKeyEnvExplicit();
@@ -172,6 +185,14 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 
 	currentModels = startupModels;
 	catalogSource = startupModels.length > 0 ? "host store" : "none";
+	const startupPolicies = collectStoredContextPolicies(startupModels);
+	contextPolicies.setCatalog(
+		startupPolicies.length > 0 ? "ready" : "unavailable",
+		startupPolicies.map((entry) => entry.policy),
+		startupPolicies.length > 0
+			? { cached: true, fetchedAt: startupPolicies[0]!.fetchedAt }
+			: { cached: true, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON },
+	);
 
 	pi.on("before_provider_request", (event, ctx) => {
 		if (ctx.model?.provider !== PROVIDER_NAME) return undefined;
@@ -246,6 +267,7 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 // Catalog refresh (driven by pi's ModelRuntime)
 // ---------------------------------------------------------------------------
 async function refreshPlexusModels(context: RefreshModelsContext): Promise<ProviderModelConfig[]> {
+	const refreshId = ++refreshSequence;
 	const baseUrl = getBaseUrl();
 	const modelsUrl = getModelsUrl();
 	const apiKey = resolveApiKey(credentialApiKey(context.credential));
@@ -262,6 +284,14 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 				persist: { models: filteredCurrent as unknown as Model<Api>[], checkedAt: Date.now() },
 				update: () => {
 					currentModels = filteredCurrent;
+					const cachedPolicies = collectStoredContextPolicies(filteredCurrent);
+					activeContextPolicies?.setCatalog(
+						cachedPolicies.length > 0 ? "ready" : "unavailable",
+						cachedPolicies.map((entry) => entry.policy),
+						cachedPolicies.length > 0
+							? { cached: true, fetchedAt: cachedPolicies[0]!.fetchedAt }
+							: { cached: true, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON },
+					);
 				},
 			});
 			return filteredCurrent;
@@ -277,9 +307,21 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 
 	try {
 		const { models: apiModels } = await fetchPlexusModels(apiKey, modelsUrl, undefined, undefined, context.signal);
+		const fetchedAt = Date.now();
 
 		const descriptors = convertDescriptors(apiModels, baseUrl, suppress);
-		const piModels = descriptors.map(descriptorToPiModel);
+		const piModels = descriptors.map(descriptorToPiModel) as Array<ContextPolicyBearingModel>;
+		const eligibleIds = new Set(piModels.map((model) => model.id));
+		for (const model of apiModels) {
+			if (!eligibleIds.has(model.id)) continue;
+			const policy = contextPolicyFromApiModel(model);
+			if (policy) {
+				const storedMetadata = { policy, fetchedAt };
+				const piModel = piModels.find((candidate) => candidate.id === model.id);
+				if (piModel) piModel.plexusContextPolicy = storedMetadata;
+			}
+		}
+		const committedPolicies = collectStoredContextPolicies(piModels);
 
 		// pi publishes the returned list in memory but does not persist it —
 		// persistence is provider-owned via generation-checked publish().
@@ -288,6 +330,13 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 			update: () => {
 				currentModels = piModels;
 				catalogSource = "live refresh";
+				activeContextPolicies?.setCatalog(
+					committedPolicies.length > 0 ? "ready" : "unavailable",
+					committedPolicies.map((entry) => entry.policy),
+					committedPolicies.length > 0
+						? { fetchedAt }
+						: { fetchedAt, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON },
+				);
 			},
 		});
 		if (!published) {
@@ -297,6 +346,9 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 		log("refreshModels: fetched", { count: piModels.length });
 		return piModels;
 	} catch (error) {
+		if (refreshId === refreshSequence && activeContextPolicies?.getSnapshot().status === "loading") {
+			activeContextPolicies.setCatalog("unavailable", [], { reason: "Plexus model metadata could not be loaded." });
+		}
 		log("refreshModels: fetch failed", { error: String(error) });
 		throw error;
 	}
@@ -317,10 +369,42 @@ async function restoreStoredModels(
 		update: () => {
 			currentModels = models;
 			catalogSource = "host store";
+			const cachedPolicies = collectStoredContextPolicies(models);
+			activeContextPolicies?.setCatalog(
+				cachedPolicies.length > 0 ? "ready" : "unavailable",
+				cachedPolicies.map((entry) => entry.policy),
+				cachedPolicies.length > 0
+					? { cached: true, fetchedAt: cachedPolicies[0]!.fetchedAt }
+					: { cached: true, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON },
+			);
 		},
 	});
 	log("refreshModels: restored from store", { count: models.length });
 	return models;
+}
+
+export function contextPolicyFromApiModel(model: PlexusApiModel): ContextPolicy | undefined {
+	const maxContextTokens = model.context_length;
+	const pricingThresholdInputTokens = model.pricing?.tiers?.[0]?.input_tokens_above;
+	if (
+		!Number.isSafeInteger(maxContextTokens) || maxContextTokens! <= 0 ||
+		!Number.isSafeInteger(pricingThresholdInputTokens) || pricingThresholdInputTokens! <= 0 ||
+		pricingThresholdInputTokens! > maxContextTokens!
+	) return undefined;
+	return {
+		provider: PROVIDER_NAME,
+		modelId: model.id,
+		maxContextTokens: maxContextTokens!,
+		shortContextBudgetTokens: pricingThresholdInputTokens!,
+		pricingThresholdInputTokens: pricingThresholdInputTokens!,
+	};
+}
+
+function collectStoredContextPolicies(models: readonly ProviderModelConfig[]): StoredContextPolicyMetadata[] {
+	return models.flatMap((model) => {
+		const metadata = (model as ContextPolicyBearingModel).plexusContextPolicy;
+		return metadata ? [metadata] : [];
+	});
 }
 
 function credentialApiKey(credential: Credential | undefined): string | undefined {

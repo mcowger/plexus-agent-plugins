@@ -68,8 +68,17 @@ function fakePi(): {
 } {
 	const providers: CapturedProvider[] = [];
 	const sessionStart: Array<(event: unknown, ctx: ExtensionContext) => unknown> = [];
+	const eventHandlers = new Map<string, Set<(data: unknown) => void>>();
+	const events = {
+		on: (channel: string, handler: (data: unknown) => void) => {
+			const handlers = eventHandlers.get(channel) ?? new Set(); handlers.add(handler); eventHandlers.set(channel, handlers);
+			return () => handlers.delete(handler);
+		},
+		emit: (channel: string, data: unknown) => { for (const handler of eventHandlers.get(channel) ?? []) handler(data); },
+	};
 	const noop = () => {};
 	const pi = {
+		events,
 		on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) => {
 			if (event === "session_start") sessionStart.push(handler);
 		},
@@ -449,7 +458,15 @@ function runtimeExtension(runtime: ModelRuntime): {
 	startSession: () => void;
 } {
 	const sessionStart: Array<(event: unknown, ctx: ExtensionContext) => unknown> = [];
+	const listeners = new Map<string, Set<(data: unknown) => void>>();
 	const pi = {
+		events: {
+			on: (channel: string, handler: (data: unknown) => void) => {
+				const handlers = listeners.get(channel) ?? new Set(); handlers.add(handler); listeners.set(channel, handlers);
+				return () => handlers.delete(handler);
+			},
+			emit: (channel: string, data: unknown) => { for (const handler of listeners.get(channel) ?? []) handler(data); },
+		},
 		on: (event: string, handler: (event: unknown, ctx: ExtensionContext) => unknown) => {
 			if (event === "session_start") sessionStart.push(handler);
 		},

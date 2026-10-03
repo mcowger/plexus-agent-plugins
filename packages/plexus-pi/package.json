@@ -6,7 +6,8 @@
 	"files": [
 		"dist/extension.js",
 		"package.json",
-		"README.md"
+		"README.md",
+		"context-policy.md"
 	],
 	"keywords": [
 		"plexus",
@@ -38,5 +39,8 @@
 		"url": "https://github.com/mcowger/plexus-agent-plugins.git",
 		"directory": "packages/plexus-pi"
 	},
-	"license": "MIT"
+	"license": "MIT",
+	"dependencies": {
+		"zod": "^4.6.4"
+	}
 }

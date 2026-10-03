@@ -71,6 +71,21 @@ When `apiKeyEnv` is set:
 
 Environment variables and config are read when pi starts. Editing `config.json` or the named variable requires a restart; `/reload` reloads the extension but the process environment is unchanged.
 
+## Cross-extension context-policy API
+
+Full channel, payload, mapping, and lifecycle details are in [context-policy.md](./context-policy.md).
+
+The extension publishes complete context-policy snapshots on Pi's public cross-extension event bus:
+
+- Request: `plexus:context-policy:request:v1` — `{ version: 1, requestId: string }`
+- Reply/broadcast: `plexus:context-policy:snapshot:v1` — `{ version: 1, publisherId, revision, requestId?, status, policies, fetchedAt?, cached?, reason? }`
+
+A request listener is installed at extension initialization. Valid requests receive the current in-memory snapshot synchronously during the event emission; requests never initiate or wait for a network fetch. Replies echo `requestId` and do not advance `revision`. Initial state is `loading`; catalog state changes advance the revision (publisher UUID is stable for the extension load). Listeners are removed on `session_shutdown`.
+
+`status` is `ready`, `loading`, or `unavailable`. Non-ready snapshots have no policies; a successfully loaded catalog with no eligible models can use `ready` and an empty list. Each policy has exact registered `provider` and `modelId` identifiers, total route-usable `maxContextTokens`, smaller-or-equal `shortContextBudgetTokens`, and optional input-pricing boundary `pricingThresholdInputTokens`. All token counts are positive safe integers. For models with a valid pricing tier, the extension uses `context_length` as total context capacity and the first `pricing.tiers[].input_tokens_above` boundary as both the intended short-context budget and `pricingThresholdInputTokens`, per the configured Plexus tiering semantics. Models without both known limits, or whose tier boundary exceeds context capacity, are omitted. Snapshots replace the complete prior set, are validated, and are limited to 1 MiB; oversized/invalid data is replaced with an `unavailable` response rather than truncated. `fetchedAt` is the successful backend-fetch time; cached metadata is marked `cached: true`.
+
+Policy metadata is derived from the raw `/v1/models` response only for models in the committed Pi catalog, then stored alongside those model entries so cached catalogs retain the same policy and original fetch timestamp. Suppressed or removed models disappear on the next committed publication.
+
 ## Notes
 
 - Model discovery uses pi's `refreshModels` hook. `/plexus refresh` forces a live fetch without changing the model selected for the session.
