@@ -6268,12 +6268,141 @@ class ContextPolicyPublisher {
 }
 var CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON = SAFE_REASON;
 
+// src/service-tiers.ts
+import { randomUUID as randomUUID2 } from "crypto";
+var SERVICE_TIERS_REQUEST_CHANNEL = "plexus:service-tiers:request:v1";
+var SERVICE_TIERS_SNAPSHOT_CHANNEL = "plexus:service-tiers:snapshot:v1";
+var ServiceTierPolicySchema = object({
+  provider: string2().min(1),
+  modelId: string2().min(1),
+  serviceTiers: array(string2().min(1).max(100)).min(1).max(64)
+}).strict().refine((policy) => new Set(policy.serviceTiers).size === policy.serviceTiers.length);
+var ServiceTiersRequestSchema = object({
+  version: literal(1),
+  requestId: string2().min(1).max(1024)
+}).strict();
+var ServiceTiersSnapshotSchema = object({
+  version: literal(1),
+  publisherId: string2().uuid(),
+  revision: number2().int().positive().safe(),
+  requestId: string2().min(1).max(1024).optional(),
+  status: _enum(["ready", "loading", "unavailable"]),
+  policies: array(ServiceTierPolicySchema),
+  fetchedAt: number2().int().nonnegative().safe().optional(),
+  cached: boolean2().optional(),
+  reason: string2().max(500).optional()
+}).strict().superRefine((snapshot, ctx) => {
+  const pairs = new Set;
+  for (const policy of snapshot.policies) {
+    const pair = `${policy.provider}\x00${policy.modelId}`;
+    if (pairs.has(pair))
+      ctx.addIssue({ code: "custom", message: "Duplicate provider/modelId service-tier policy" });
+    pairs.add(pair);
+  }
+  if (snapshot.status !== "ready" && snapshot.policies.length !== 0) {
+    ctx.addIssue({ code: "custom", message: "Non-ready snapshots must have no policies" });
+  }
+});
+var MAX_SNAPSHOT_BYTES2 = 1024 * 1024;
+var SERVICE_TIERS_METADATA_UNAVAILABLE_REASON = "Service-tier metadata is not available from the committed Plexus catalog.";
+
+class ServiceTiersPublisher {
+  publisherId = randomUUID2();
+  revision = 1;
+  state = Object.freeze({
+    version: 1,
+    publisherId: this.publisherId,
+    revision: 1,
+    status: "loading",
+    policies: Object.freeze([])
+  });
+  emit;
+  unsubscribe;
+  constructor(events) {
+    this.emit = events.emit.bind(events);
+    this.unsubscribe = events.on(SERVICE_TIERS_REQUEST_CHANNEL, (data) => {
+      const request = ServiceTiersRequestSchema.safeParse(data);
+      if (request.success)
+        this.send(request.data.requestId);
+    });
+  }
+  getSnapshot() {
+    return this.state;
+  }
+  setCatalog(status, policies, metadata) {
+    const candidate = ServiceTiersSnapshotSchema.safeParse({
+      version: 1,
+      publisherId: this.publisherId,
+      revision: this.revision,
+      status,
+      policies: [...policies],
+      ...metadata
+    });
+    const oversized = candidate.success && new TextEncoder().encode(JSON.stringify(candidate.data)).byteLength > MAX_SNAPSHOT_BYTES2;
+    let next = candidate.success && !oversized ? candidate.data : {
+      version: 1,
+      publisherId: this.publisherId,
+      revision: this.revision,
+      status: "unavailable",
+      policies: [],
+      reason: oversized ? "Service-tier snapshot exceeds the 1 MiB publication limit." : "Service-tier snapshot could not be validated."
+    };
+    if (status !== "ready" && policies.length > 0) {
+      next = { ...next, status: "unavailable", policies: [], reason: "Service-tier metadata is unavailable." };
+    }
+    const { revision: _revision, ...stateWithoutRevision } = this.state;
+    const { revision: _candidateRevision, ...nextWithoutRevision } = next;
+    if (JSON.stringify(stateWithoutRevision) === JSON.stringify(nextWithoutRevision))
+      return false;
+    this.revision++;
+    this.state = Object.freeze({
+      ...next,
+      revision: this.revision,
+      policies: Object.freeze(next.policies.map((policy) => Object.freeze({
+        ...policy,
+        serviceTiers: Object.freeze([...policy.serviceTiers])
+      })))
+    });
+    this.send();
+    return true;
+  }
+  send(requestId) {
+    const snapshot = { ...this.state, ...requestId === undefined ? {} : { requestId } };
+    let valid = ServiceTiersSnapshotSchema.safeParse(snapshot);
+    if (!valid.success || new TextEncoder().encode(JSON.stringify(snapshot)).byteLength > MAX_SNAPSHOT_BYTES2) {
+      valid = ServiceTiersSnapshotSchema.safeParse({
+        version: 1,
+        publisherId: this.publisherId,
+        revision: this.revision,
+        status: "unavailable",
+        policies: [],
+        reason: "Service-tier snapshot exceeds publication limits or is invalid.",
+        ...requestId === undefined ? {} : { requestId }
+      });
+    }
+    if (valid.success) {
+      const immutable = Object.freeze({
+        ...valid.data,
+        policies: Object.freeze(valid.data.policies.map((policy) => Object.freeze({
+          ...policy,
+          serviceTiers: Object.freeze([...policy.serviceTiers])
+        })))
+      });
+      this.emit(SERVICE_TIERS_SNAPSHOT_CHANNEL, immutable);
+    }
+  }
+  dispose() {
+    this.unsubscribe();
+  }
+}
+
 // src/extension.ts
 var PROVIDER_NAME = "plexus";
 var PLEXUS_CREDENTIAL_EXPIRES_AT = 253402300799000;
 var PLACEHOLDER_BASE_URL = "http://localhost/v1";
 var currentModels = [];
 var activeContextPolicies;
+var activeServiceTiers;
 var refreshSequence = 0;
 var catalogSource = "none";
 function enforceMinimumOutputTokens(payload) {
@@ -6347,10 +6476,15 @@ function withAuthoritativeApiKeyEnv(provider, envName, getHeaderModels = () => c
 function plexusExtension(pi) {
   const contextPolicies = new ContextPolicyPublisher(pi.events);
   activeContextPolicies = contextPolicies;
+  const serviceTiers = new ServiceTiersPublisher(pi.events);
+  activeServiceTiers = serviceTiers;
   pi.on("session_shutdown", () => {
     contextPolicies.dispose();
+    serviceTiers.dispose();
     if (activeContextPolicies === contextPolicies)
       activeContextPolicies = undefined;
+    if (activeServiceTiers === serviceTiers)
+      activeServiceTiers = undefined;
   });
   const apiKeyEnvExplicit = isApiKeyEnvExplicit();
   const explicitApiKey = apiKeyEnvExplicit ? resolveExplicitApiKey() : undefined;
@@ -6364,6 +6498,10 @@ function plexusExtension(pi) {
   catalogSource = startupModels.length > 0 ? "host store" : "none";
   const startupPolicies = collectStoredContextPolicies(startupModels);
   contextPolicies.setCatalog(startupPolicies.length > 0 ? "ready" : "unavailable", startupPolicies.map((entry) => entry.policy), startupPolicies.length > 0 ? { cached: true, fetchedAt: startupPolicies[0].fetchedAt } : { cached: true, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON });
+  if (storedCatalog) {
+    const cachedTiers = collectStoredServiceTiers(startupModels);
+    serviceTiers.setCatalog(cachedTiers.complete ? "ready" : "unavailable", cachedTiers.policies, cachedTiers.complete ? { cached: true, ...cachedTiers.fetchedAt === undefined ? {} : { fetchedAt: cachedTiers.fetchedAt } } : { cached: true, reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON });
+  }
   pi.on("before_provider_request", (event, ctx) => {
     if (ctx.model?.provider !== PROVIDER_NAME)
       return;
@@ -6431,6 +6569,8 @@ async function refreshPlexusModels(context) {
         persist: { models: filteredCurrent, checkedAt: Date.now() },
         update: () => {
           currentModels = filteredCurrent;
+          const cachedTiers = collectStoredServiceTiers(filteredCurrent);
+          activeServiceTiers?.setCatalog(cachedTiers.complete ? "ready" : "unavailable", cachedTiers.policies, cachedTiers.complete ? { cached: true, ...cachedTiers.fetchedAt === undefined ? {} : { fetchedAt: cachedTiers.fetchedAt } } : { cached: true, reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON });
           const cachedPolicies = collectStoredContextPolicies(filteredCurrent);
           activeContextPolicies?.setCatalog(cachedPolicies.length > 0 ? "ready" : "unavailable", cachedPolicies.map((entry) => entry.policy), cachedPolicies.length > 0 ? { cached: true, fetchedAt: cachedPolicies[0].fetchedAt } : { cached: true, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON });
         }
@@ -6440,6 +6580,9 @@ async function refreshPlexusModels(context) {
     const restored = await restoreStoredModels(context);
     if (restored)
       return restored;
+    if (refreshId === refreshSequence && activeServiceTiers?.getSnapshot().status === "loading") {
+      activeServiceTiers.setCatalog("unavailable", [], { reason: "Plexus model metadata is not configured." });
+    }
     throw new Error(!modelsUrl || !baseUrl ? "Plexus base URL not configured. Run /login plexus first." : "No Plexus API key configured. Run /login plexus first.");
   }
   try {
@@ -6451,20 +6594,22 @@ async function refreshPlexusModels(context) {
     for (const model of apiModels) {
       if (!eligibleIds.has(model.id))
         continue;
+      const piModel = piModels.find((candidate) => candidate.id === model.id);
+      if (!piModel)
+        continue;
       const policy = contextPolicyFromApiModel(model);
-      if (policy) {
-        const storedMetadata = { policy, fetchedAt };
-        const piModel = piModels.find((candidate) => candidate.id === model.id);
-        if (piModel)
-          piModel.plexusContextPolicy = storedMetadata;
-      }
+      if (policy)
+        piModel.plexusContextPolicy = { policy, fetchedAt };
+      piModel.plexusServiceTiers = { policy: serviceTierPolicyFromApiModel(model), fetchedAt };
     }
     const committedPolicies = collectStoredContextPolicies(piModels);
+    const committedServiceTiers = collectStoredServiceTiers(piModels).policies;
     const published = await context.publish({
       persist: { models: piModels, checkedAt: Date.now() },
       update: () => {
         currentModels = piModels;
         catalogSource = "live refresh";
+        activeServiceTiers?.setCatalog("ready", committedServiceTiers, { fetchedAt });
         activeContextPolicies?.setCatalog(committedPolicies.length > 0 ? "ready" : "unavailable", committedPolicies.map((entry) => entry.policy), committedPolicies.length > 0 ? { fetchedAt } : { fetchedAt, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON });
       }
     });
@@ -6476,6 +6621,9 @@ async function refreshPlexusModels(context) {
   } catch (error) {
     if (refreshId === refreshSequence && activeContextPolicies?.getSnapshot().status === "loading") {
       activeContextPolicies.setCatalog("unavailable", [], { reason: "Plexus model metadata could not be loaded." });
+    }
+    if (refreshId === refreshSequence && activeServiceTiers?.getSnapshot().status === "loading") {
+      activeServiceTiers.setCatalog("unavailable", [], { reason: "Plexus model metadata could not be loaded." });
     }
     log("refreshModels: fetch failed", { error: String(error) });
     throw error;
@@ -6491,6 +6639,8 @@ async function restoreStoredModels(context) {
     update: () => {
       currentModels = models;
       catalogSource = "host store";
+      const cachedTiers = collectStoredServiceTiers(models);
+      activeServiceTiers?.setCatalog(cachedTiers.complete ? "ready" : "unavailable", cachedTiers.policies, cachedTiers.complete ? { cached: true, ...cachedTiers.fetchedAt === undefined ? {} : { fetchedAt: cachedTiers.fetchedAt } } : { cached: true, reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON });
       const cachedPolicies = collectStoredContextPolicies(models);
       activeContextPolicies?.setCatalog(cachedPolicies.length > 0 ? "ready" : "unavailable", cachedPolicies.map((entry) => entry.policy), cachedPolicies.length > 0 ? { cached: true, fetchedAt: cachedPolicies[0].fetchedAt } : { cached: true, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON });
     }
@@ -6516,6 +6666,24 @@ function collectStoredContextPolicies(models) {
     const metadata = model.plexusContextPolicy;
     return metadata ? [metadata] : [];
   });
+}
+function serviceTierPolicyFromApiModel(model) {
+  const serviceTiers = model.service_tiers;
+  if (!Array.isArray(serviceTiers) || serviceTiers.length === 0)
+    return;
+  const candidate = { provider: PROVIDER_NAME, modelId: model.id, serviceTiers };
+  const parsed = ServiceTierPolicySchema.safeParse(candidate);
+  return parsed.success ? parsed.data : undefined;
+}
+function collectStoredServiceTiers(models) {
+  const metadata = models.map((model) => model.plexusServiceTiers);
+  const complete = models.length === 0 || metadata.every((entry) => entry !== undefined);
+  const stored = metadata.filter((entry) => entry !== undefined);
+  return {
+    policies: stored.flatMap((entry) => entry.policy ? [entry.policy] : []),
+    complete,
+    ...stored[0] ? { fetchedAt: stored[0].fetchedAt } : {}
+  };
 }
 function credentialApiKey(credential) {
   if (!credential)
@@ -6606,5 +6774,6 @@ export {
   contextPolicyFromApiModel,
   plexusExtension as default,
   enforceMinimumOutputTokens,
+  serviceTierPolicyFromApiModel,
   withAuthoritativeApiKeyEnv
 };

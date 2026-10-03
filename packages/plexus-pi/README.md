@@ -73,7 +73,7 @@ Environment variables and config are read when pi starts. Editing `config.json` 
 
 ## Cross-extension context-policy API
 
-Full channel, payload, mapping, and lifecycle details are in [context-policy.md](./context-policy.md).
+Full channel, payload, mapping, and lifecycle details are in [context-policy.md](./context-policy.md) and [service-tiers.md](./service-tiers.md).
 
 The extension publishes complete context-policy snapshots on Pi's public cross-extension event bus:
 
@@ -85,6 +85,8 @@ A request listener is installed at extension initialization. Valid requests rece
 `status` is `ready`, `loading`, or `unavailable`. Non-ready snapshots have no policies; a successfully loaded catalog with no eligible models can use `ready` and an empty list. Each policy has exact registered `provider` and `modelId` identifiers, total route-usable `maxContextTokens`, smaller-or-equal `shortContextBudgetTokens`, and optional input-pricing boundary `pricingThresholdInputTokens`. All token counts are positive safe integers. For models with a valid pricing tier, the extension uses `context_length` as total context capacity and the first `pricing.tiers[].input_tokens_above` boundary as both the intended short-context budget and `pricingThresholdInputTokens`, per the configured Plexus tiering semantics. Models without both known limits, or whose tier boundary exceeds context capacity, are omitted. Snapshots replace the complete prior set, are validated, and are limited to 1 MiB; oversized/invalid data is replaced with an `unavailable` response rather than truncated. `fetchedAt` is the successful backend-fetch time; cached metadata is marked `cached: true`.
 
 Policy metadata is derived from the raw `/v1/models` response only for models in the committed Pi catalog, then stored alongside those model entries so cached catalogs retain the same policy and original fetch timestamp. Suppressed or removed models disappear on the next committed publication.
+
+The parallel service-tier API publishes the model's `service_tiers` array on `plexus:service-tiers:snapshot:v1`. Models without that field have no tier policy. See [service-tiers.md](./service-tiers.md) for the contract.
 
 ## Notes
 
