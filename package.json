@@ -21,6 +21,7 @@
 		"code:review:commit": "cora review --commit HEAD --severity major"
 	},
 	"devDependencies": {
+		"@biomejs/biome": "^2.5.15",
 		"@types/bun": "latest",
 		"lefthook": "latest"
 	},
