@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { log } from "./log.ts";
 
 /**
  * Catalog-refresh control for `plexus-pi`.
@@ -137,7 +138,8 @@ export class ModelsControl {
 		try {
 			const result = await this.host.refresh();
 			this.commit({ status: "ready", modelCount: result.modelCount });
-		} catch {
+		} catch (error) {
+			log("models:refresh failed", { error: String(error) });
 			this.commit({ status: "error", reason: MODELS_REFRESH_FAILED_REASON });
 		}
 	}

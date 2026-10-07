@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	ModelsControl,
 	MODELS_REFRESH_CHANNEL,
@@ -8,6 +11,29 @@ import {
 	ModelsStateSchema,
 	type ModelsControlHost,
 } from "./models-control.ts";
+
+const logDir = mkdtempSync(join(tmpdir(), "plexus-models-control-"));
+process.env.PI_CODING_AGENT_DIR = logDir;
+mkdirSync(join(logDir, "extensions", "plexus"), { recursive: true });
+const logPath = join(logDir, "extensions", "plexus", "plexus.log");
+
+/** log() is fire-and-forget, so poll the file until the expected text appears. */
+function readLog(): string {
+	try {
+		return readFileSync(logPath, "utf8");
+	} catch {
+		return "";
+	}
+}
+
+async function waitForLog(text: string): Promise<string> {
+	for (let attempt = 0; attempt < 100; attempt++) {
+		const contents = readLog();
+		if (contents.includes(text)) return contents;
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+	return readLog();
+}
 
 function bus() {
 	const listeners = new Map<string, Set<(data: unknown) => unknown>>();
@@ -104,6 +130,48 @@ describe("models refresh control", () => {
 			status: "error",
 			reason: MODELS_REFRESH_FAILED_REASON,
 		});
+		control.dispose();
+	});
+
+	test("a refresh with no registry bound publishes a correlated error and logs the cause", async () => {
+		const events = bus();
+		const host: ModelsControlHost = {
+			async refresh() {
+				throw new Error("Plexus model registry is unavailable before the session starts.");
+			},
+		};
+		const control = new ModelsControl(events, host);
+		await events.dispatch(MODELS_REFRESH_CHANNEL, { version: 1, requestId: "no-session" });
+		expect(events.emitted.at(-1)!.data).toMatchObject({
+			requestId: "no-session",
+			status: "error",
+			reason: MODELS_REFRESH_FAILED_REASON,
+		});
+		const contents = await waitForLog("models:refresh failed");
+		expect(contents).toContain("models:refresh failed");
+		expect(contents).toContain("registry is unavailable before the session starts");
+		control.dispose();
+	});
+
+	test("a host refresh that throws publishes only the safe reason and logs the detail", async () => {
+		const events = bus();
+		const rawError = "fetch failed: https://plexus.example/v1/models?key=sk-secret-123";
+		const host: ModelsControlHost = {
+			async refresh() {
+				throw new Error(rawError);
+			},
+		};
+		const control = new ModelsControl(events, host);
+		await events.dispatch(MODELS_REFRESH_CHANNEL, { version: 1, requestId: "thrown" });
+
+		expect(control.getState()).toMatchObject({ status: "error", reason: MODELS_REFRESH_FAILED_REASON });
+		const published = JSON.stringify(events.emitted);
+		expect(published).not.toContain("sk-secret-123");
+		expect(published).not.toContain("plexus.example");
+
+		const contents = await waitForLog("models:refresh failed");
+		expect(contents).toContain("models:refresh failed");
+		expect(contents).toContain("sk-secret-123");
 		control.dispose();
 	});
 

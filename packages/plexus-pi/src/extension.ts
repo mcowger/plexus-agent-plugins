@@ -256,9 +256,16 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	const modelsControl = new ModelsControl(pi.events, {
 		refresh: async () => {
 			const registry = policyModelRegistry;
-			if (!registry) throw new Error("Plexus model registry is unavailable before the session starts.");
+			if (!registry) {
+				const message = "Plexus model registry is unavailable before the session starts.";
+				log("models:refresh unavailable", { reason: message });
+				throw new Error(message);
+			}
 			const result = await registry.refresh({ providers: [PROVIDER_NAME], force: true });
-			if (result.aborted) throw new Error("Plexus model refresh was cancelled.");
+			if (result.aborted) {
+				log("models:refresh aborted", {});
+				throw new Error("Plexus model refresh was cancelled.");
+			}
 			const refreshError = result.errors.get(PROVIDER_NAME);
 			if (refreshError) throw refreshError;
 			return { modelCount: currentModels.length };
