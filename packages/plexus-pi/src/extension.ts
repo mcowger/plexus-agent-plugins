@@ -21,6 +21,7 @@
 import type {
 	ExtensionAPI,
 	ExtensionCommandContext,
+	ModelRegistry,
 	ProviderConfig,
 	ProviderModelConfig,
 } from "@earendil-works/pi-coding-agent";
@@ -64,6 +65,13 @@ import {
 	ServiceTierPolicySchema,
 	type ServiceTierPolicy,
 } from "./service-tiers.ts";
+import {
+	injectServiceTier,
+	PolicyController,
+	type PolicyAdvertisement,
+	type PolicyHost,
+} from "./policy.ts";
+import { ModelsControl } from "./models-control.ts";
 
 const PROVIDER_NAME = "plexus";
 const PLEXUS_CREDENTIAL_EXPIRES_AT = 253_402_300_799_000;
@@ -74,6 +82,9 @@ type PlexusCredentials = OAuthCredentials & { plexusBaseUrl?: string };
 let currentModels: ProviderModelConfig[] = [];
 let activeContextPolicies: ContextPolicyPublisher | undefined;
 let activeServiceTiers: ServiceTiersPublisher | undefined;
+let activePolicy: PolicyController | undefined;
+let activePolicyModel: Model<any> | undefined;
+let policyModelRegistry: ModelRegistry | undefined;
 let refreshSequence = 0;
 type StoredContextPolicyMetadata = { policy: ContextPolicy; fetchedAt: number };
 type ContextPolicyBearingModel = ProviderModelConfig & { plexusContextPolicy?: StoredContextPolicyMetadata };
@@ -170,16 +181,97 @@ export function withAuthoritativeApiKeyEnv(
 	};
 }
 
+/**
+ * Host adapter for the session-scoped policy controller. The controller is
+ * driven from the event bus, so the active model is cached from event handlers
+ * and the catalog advertisement is read from the committed model metadata.
+ */
+export function createPolicyHost(deps: {
+	getActiveModel: () => Model<any> | undefined;
+	getModels: () => readonly ProviderModelConfig[];
+	getRegistry: () => ModelRegistry | undefined;
+	setModel: (model: Model<any>) => Promise<boolean>;
+	setActiveModel: (model: Model<any>) => void;
+}): PolicyHost {
+	return {
+		getActiveModel() {
+			const model = deps.getActiveModel();
+			if (!model || model.provider !== PROVIDER_NAME) return undefined;
+			return { provider: model.provider, id: model.id };
+		},
+		getAdvertisement(model) {
+			const entry = deps.getModels().find((candidate) => candidate.id === model.id);
+			if (!entry) return undefined;
+			const context = (entry as ContextPolicyBearingModel).plexusContextPolicy?.policy;
+			const serviceTier = (entry as ServiceTierBearingModel).plexusServiceTiers?.policy;
+			if (!context && !serviceTier) return undefined;
+			return {
+				...(context ? { context } : {}),
+				...(serviceTier ? { serviceTier } : {}),
+			} satisfies PolicyAdvertisement;
+		},
+		getEffectiveContextWindow() {
+			return deps.getActiveModel()?.contextWindow;
+		},
+		async applyContextWindow(model, contextWindow) {
+			const registry = deps.getRegistry();
+			if (!registry) return undefined;
+			const canonical = registry.find(model.provider, model.id);
+			if (!canonical) return undefined;
+			const target = (contextWindow === undefined ? canonical : { ...canonical, contextWindow }) as Model<any>;
+			const active = deps.getActiveModel();
+			if (
+				active?.provider === target.provider &&
+				active.id === target.id &&
+				active.contextWindow === target.contextWindow
+			) {
+				return target.contextWindow;
+			}
+			const applied = await deps.setModel(target);
+			if (!applied) return undefined;
+			deps.setActiveModel(target);
+			return target.contextWindow;
+		},
+	};
+}
+
 export default function plexusExtension(pi: ExtensionAPI): void {
 	const contextPolicies = new ContextPolicyPublisher(pi.events);
 	activeContextPolicies = contextPolicies;
 	const serviceTiers = new ServiceTiersPublisher(pi.events);
 	activeServiceTiers = serviceTiers;
+	const policy = new PolicyController(
+		pi.events,
+		createPolicyHost({
+			getActiveModel: () => activePolicyModel,
+			getModels: () => currentModels,
+			getRegistry: () => policyModelRegistry,
+			setModel: (model) => pi.setModel(model),
+			setActiveModel: (model) => {
+				activePolicyModel = model;
+			},
+		}),
+	);
+	activePolicy = policy;
+	const modelsControl = new ModelsControl(pi.events, {
+		refresh: async () => {
+			const registry = policyModelRegistry;
+			if (!registry) throw new Error("Plexus model registry is unavailable before the session starts.");
+			const result = await registry.refresh({ providers: [PROVIDER_NAME], force: true });
+			if (result.aborted) throw new Error("Plexus model refresh was cancelled.");
+			const refreshError = result.errors.get(PROVIDER_NAME);
+			if (refreshError) throw refreshError;
+			return { modelCount: currentModels.length };
+		},
+	});
 	pi.on("session_shutdown", () => {
 		contextPolicies.dispose();
 		serviceTiers.dispose();
+		policy.dispose();
+		modelsControl.dispose();
 		if (activeContextPolicies === contextPolicies) activeContextPolicies = undefined;
 		if (activeServiceTiers === serviceTiers) activeServiceTiers = undefined;
+		if (activePolicy === policy) activePolicy = undefined;
 	});
 
 	// An explicit apiKeyEnv is authoritative and throws when its variable is
@@ -216,10 +308,27 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 				: { cached: true, reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON },
 		);
 	}
+	void policy.reconcile();
+
+	// Track the active model so the event-bus policy controller can resolve the
+	// advertisement and apply a session-scoped context window without an
+	// ExtensionContext.
+	pi.on("session_start", (_event, ctx) => {
+		policyModelRegistry = ctx.modelRegistry;
+		activePolicyModel = ctx.model;
+		void activePolicy?.reconcile();
+	});
+	pi.on("model_select", (event, ctx) => {
+		policyModelRegistry = ctx.modelRegistry;
+		activePolicyModel = event.model;
+		void activePolicy?.reconcile();
+	});
 
 	pi.on("before_provider_request", (event, ctx) => {
 		if (ctx.model?.provider !== PROVIDER_NAME) return undefined;
-		const next = enforceMinimumOutputTokens(event.payload);
+		activePolicyModel = ctx.model;
+		const withTier = injectServiceTier(event.payload, activePolicy?.serviceTierFor(ctx.model));
+		const next = enforceMinimumOutputTokens(withTier);
 		return next === event.payload ? undefined : next;
 	});
 
@@ -323,6 +432,7 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 							? { cached: true, fetchedAt: cachedPolicies[0]!.fetchedAt }
 							: { cached: true, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON },
 					);
+					void activePolicy?.reconcile();
 				},
 			});
 			return filteredCurrent;
@@ -372,6 +482,7 @@ async function refreshPlexusModels(context: RefreshModelsContext): Promise<Provi
 						? { fetchedAt }
 						: { fetchedAt, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON },
 				);
+				void activePolicy?.reconcile();
 			},
 		});
 		if (!published) {
@@ -423,6 +534,7 @@ async function restoreStoredModels(
 					? { cached: true, fetchedAt: cachedPolicies[0]!.fetchedAt }
 					: { cached: true, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON },
 			);
+			void activePolicy?.reconcile();
 		},
 	});
 	log("refreshModels: restored from store", { count: models.length });

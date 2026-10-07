@@ -73,7 +73,7 @@ Environment variables and config are read when pi starts. Editing `config.json` 
 
 ## Cross-extension context-policy API
 
-Full channel, payload, mapping, and lifecycle details are in [context-policy.md](./context-policy.md) and [service-tiers.md](./service-tiers.md).
+Full channel, payload, mapping, and lifecycle details are in [context-policy.md](./context-policy.md), [service-tiers.md](./service-tiers.md), and [policy-control.md](./policy-control.md).
 
 The extension publishes complete context-policy snapshots on Pi's public cross-extension event bus:
 
@@ -87,6 +87,20 @@ A request listener is installed at extension initialization. Valid requests rece
 Policy metadata is derived from the raw `/v1/models` response only for models in the committed Pi catalog, then stored alongside those model entries so cached catalogs retain the same policy and original fetch timestamp. Suppressed or removed models disappear on the next committed publication.
 
 The parallel service-tier API publishes the model's `service_tiers` array on `plexus:service-tiers:snapshot:v1`. Models without that field have no tier policy. See [service-tiers.md](./service-tiers.md) for the contract.
+
+The policy-control API accepts a command that selects, for the active session and model, the short or maximum context budget and the active advertised service tier:
+
+- Command: `plexus:policy:set:v1` — `{ version: 1, requestId, longContext?, serviceTier? }` (at least one selection field)
+- Reply/broadcast: `plexus:policy:state:v1` — `{ version: 1, publisherId, revision, requestId?, applied, available, reason? }`
+
+The command is validated against the active model's committed advertisement and rejected atomically when the tier is unadvertised or no distinct short/max budget exists. The selection is applied as `service_tier` on requests to the `plexus` provider and as a session-scoped effective context window; it never alters the catalog model or persisted defaults. See [policy-control.md](./policy-control.md).
+
+The models-refresh API accepts a command that forces a live catalog refresh:
+
+- Command: `plexus:models:refresh:v1` — `{ version: 1, requestId }`
+- Reply/broadcast: `plexus:models:state:v1` — `{ version: 1, publisherId, revision, requestId?, status, modelCount?, reason? }`
+
+Concurrent commands are coalesced into one refresh, each receiving a correlated reply. The refresh re-evaluates the active model's policy and publishes `refreshing` → `ready`/`error`. A failed or absent publisher is reported as a safe `error` state, or as silence when no publisher is loaded. See [models-control.md](./models-control.md).
 
 ## Notes
 

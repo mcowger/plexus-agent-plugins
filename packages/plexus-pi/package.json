@@ -8,7 +8,9 @@
 		"package.json",
 		"README.md",
 		"context-policy.md",
-		"service-tiers.md"
+		"service-tiers.md",
+		"policy-control.md",
+		"models-control.md"
 	],
 	"keywords": [
 		"plexus",

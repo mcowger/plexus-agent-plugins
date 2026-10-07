@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { contextPolicyFromApiModel, enforceMinimumOutputTokens } from "./extension.ts";
+import type { Model } from "@earendil-works/pi-ai";
+import type { ModelRegistry, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
+import { contextPolicyFromApiModel, createPolicyHost, enforceMinimumOutputTokens } from "./extension.ts";
 import { MINIMUM_OUTPUT_TOKENS } from "./mapper.ts";
 
 describe("contextPolicyFromApiModel", () => {
@@ -37,5 +39,95 @@ describe("enforceMinimumOutputTokens", () => {
 		expect(enforceMinimumOutputTokens({ generationConfig: { maxOutputTokens: 1 } })).toEqual({
 			generationConfig: { maxOutputTokens: MINIMUM_OUTPUT_TOKENS },
 		});
+	});
+});
+
+function policyModel(id: string, contextWindow: number): Model<any> {
+	return { provider: "plexus", id, contextWindow } as unknown as Model<any>;
+}
+
+function policyEntry(id: string): ProviderModelConfig {
+	return {
+		id,
+		name: id,
+		provider: "plexus",
+		plexusContextPolicy: {
+			policy: { provider: "plexus", modelId: id, maxContextTokens: 1_000, shortContextBudgetTokens: 200 },
+			fetchedAt: 1,
+		},
+		plexusServiceTiers: {
+			policy: { provider: "plexus", modelId: id, serviceTiers: ["standard", "priority"] },
+			fetchedAt: 1,
+		},
+	} as unknown as ProviderModelConfig;
+}
+
+describe("createPolicyHost", () => {
+	test("resolves the committed advertisement and ignores non-plexus models", () => {
+		const host = createPolicyHost({
+			getActiveModel: () => policyModel("m1", 1_000),
+			getModels: () => [policyEntry("m1")],
+			getRegistry: () => undefined,
+			setModel: async () => false,
+			setActiveModel: () => {},
+		});
+		expect(host.getActiveModel()).toEqual({ provider: "plexus", id: "m1" });
+		expect(host.getAdvertisement({ provider: "plexus", id: "m1" })).toMatchObject({
+			context: { maxContextTokens: 1_000, shortContextBudgetTokens: 200 },
+			serviceTier: { serviceTiers: ["standard", "priority"] },
+		});
+		expect(host.getAdvertisement({ provider: "plexus", id: "missing" })).toBeUndefined();
+
+		const nonPlexus = createPolicyHost({
+			getActiveModel: () => ({ provider: "openai", id: "gpt", contextWindow: 1 } as unknown as Model<any>),
+			getModels: () => [policyEntry("m1")],
+			getRegistry: () => undefined,
+			setModel: async () => false,
+			setActiveModel: () => {},
+		});
+		expect(nonPlexus.getActiveModel()).toBeUndefined();
+	});
+
+	test("applies a session-scoped context window and restores the catalog model", async () => {
+		const applied: Array<Record<string, unknown>> = [];
+		let active: Model<any> | undefined = policyModel("m1", 1_000);
+		let canonical = policyModel("m1", 1_000);
+		const registry = {
+			find: () => canonical,
+		} as unknown as ModelRegistry;
+		const host = createPolicyHost({
+			getActiveModel: () => active,
+			getModels: () => [policyEntry("m1")],
+			getRegistry: () => registry,
+			setModel: async (model) => {
+				applied.push(model as unknown as Record<string, unknown>);
+				return true;
+			},
+			setActiveModel: (model) => {
+				active = model;
+			},
+		});
+		expect(await host.applyContextWindow({ provider: "plexus", id: "m1" }, 200)).toBe(200);
+		expect(applied).toHaveLength(1);
+		expect(applied[0]!.contextWindow).toBe(200);
+		expect(active?.contextWindow).toBe(200);
+		expect(await host.applyContextWindow({ provider: "plexus", id: "m1" }, undefined)).toBe(1_000);
+		expect(applied).toHaveLength(2);
+
+		canonical = policyModel("m1", 1_000);
+		active = policyModel("m1", 1_000);
+		expect(await host.applyContextWindow({ provider: "plexus", id: "m1" }, 1_000)).toBe(1_000);
+		expect(applied).toHaveLength(2);
+	});
+
+	test("returns undefined when no registry or catalog model exists", async () => {
+		const host = createPolicyHost({
+			getActiveModel: () => policyModel("m1", 1_000),
+			getModels: () => [policyEntry("m1")],
+			getRegistry: () => undefined,
+			setModel: async () => true,
+			setActiveModel: () => {},
+		});
+		expect(await host.applyContextWindow({ provider: "plexus", id: "m1" }, 200)).toBeUndefined();
 	});
 });

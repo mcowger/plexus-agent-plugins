@@ -53,3 +53,5 @@ Incoming requests and outgoing snapshots are validated with Zod. Invalid request
 - The request listener is installed during extension initialization and removed on `session_shutdown` with the unsubscribe function from `pi.events.on()`.
 
 Snapshots contain tier metadata only. They never include credentials, URLs, request headers, or raw backend errors.
+
+A control command can select which advertised tier is active for the active session and model; see [policy-control.md](./policy-control.md).

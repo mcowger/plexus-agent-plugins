@@ -60,3 +60,5 @@ Only raw API models represented in the committed Pi catalog are eligible. Suppre
 - The request listener is registered during extension initialization and removed on `session_shutdown` using the unsubscribe function returned by `pi.events.on()`.
 
 Snapshots contain policy metadata only. They do not include credentials, URLs, request headers, or raw backend errors.
+
+A control command can select which advertised budget applies for the active session and model; see [policy-control.md](./policy-control.md).

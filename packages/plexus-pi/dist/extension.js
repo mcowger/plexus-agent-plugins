@@ -6396,6 +6396,416 @@ class ServiceTiersPublisher {
   }
 }
 
+// src/policy.ts
+import { randomUUID as randomUUID3 } from "crypto";
+var POLICY_SET_CHANNEL = "plexus:policy:set:v1";
+var POLICY_STATE_CHANNEL = "plexus:policy:state:v1";
+var MAX_STATE_BYTES = 1024 * 1024;
+var PolicySetSchema = object({
+  version: literal(1),
+  requestId: string2().min(1).max(1024),
+  longContext: boolean2().optional(),
+  serviceTier: string2().min(1).max(100).nullable().optional()
+}).strict().refine((command) => command.longContext !== undefined || command.serviceTier !== undefined, { message: "At least one of longContext or serviceTier is required." });
+var PolicyAppliedSchema = object({
+  longContext: boolean2(),
+  serviceTier: string2().min(1).max(100).nullable(),
+  contextWindow: number2().int().positive().safe().optional()
+}).strict();
+var PolicyAvailabilitySchema = object({
+  longContext: boolean2(),
+  serviceTier: boolean2()
+}).strict();
+var PolicyStateSchema = object({
+  version: literal(1),
+  publisherId: string2().uuid(),
+  revision: number2().int().positive().safe(),
+  requestId: string2().min(1).max(1024).optional(),
+  applied: PolicyAppliedSchema,
+  available: PolicyAvailabilitySchema,
+  reason: string2().max(500).optional()
+}).strict();
+var POLICY_UNAVAILABLE_REASON = "No Plexus context or service-tier policy is advertised for the active model.";
+var DEFAULT_SELECTION = Object.freeze({ longContext: true, serviceTier: null });
+function policyAvailability(advertisement) {
+  const context = advertisement?.context;
+  return {
+    longContext: context !== undefined && context.shortContextBudgetTokens < context.maxContextTokens,
+    serviceTier: (advertisement?.serviceTier?.serviceTiers.length ?? 0) > 0
+  };
+}
+function effectiveContextWindow(advertisement, selection) {
+  const context = advertisement?.context;
+  if (!context)
+    return;
+  if (!selection.longContext && context.shortContextBudgetTokens < context.maxContextTokens) {
+    return context.shortContextBudgetTokens;
+  }
+  return context.maxContextTokens;
+}
+function injectServiceTier(payload, tier) {
+  if (tier === null || tier === undefined)
+    return payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload))
+    return payload;
+  return { ...payload, service_tier: tier };
+}
+var encoder = new TextEncoder;
+function byteLength(value) {
+  return encoder.encode(JSON.stringify(value)).byteLength;
+}
+function freezeParsed(state) {
+  return Object.freeze({
+    ...state,
+    applied: Object.freeze({ ...state.applied }),
+    available: Object.freeze({ ...state.available })
+  });
+}
+function freezePublished(state) {
+  return Object.freeze({
+    ...state,
+    applied: Object.freeze({ ...state.applied }),
+    available: Object.freeze({ ...state.available })
+  });
+}
+function selectionStatesEqual(current, next) {
+  const shape = (state) => JSON.stringify({ applied: state.applied, available: state.available, reason: state.reason ?? null });
+  return shape(current) === shape(next);
+}
+function validateSelection(model, advertisement, command) {
+  if (model === undefined || advertisement === undefined || advertisement.context === undefined && advertisement.serviceTier === undefined) {
+    return POLICY_UNAVAILABLE_REASON;
+  }
+  if (command.longContext !== undefined) {
+    const context = advertisement.context;
+    if (context === undefined)
+      return "No context budget is advertised for the active model.";
+    if (context.shortContextBudgetTokens >= context.maxContextTokens) {
+      return "The active model has no distinct short and maximum context budget.";
+    }
+  }
+  if (command.serviceTier !== undefined && command.serviceTier !== null) {
+    const tiers = advertisement.serviceTier?.serviceTiers;
+    if (!tiers || !tiers.includes(command.serviceTier)) {
+      return "The requested service tier is not advertised for the active model.";
+    }
+  }
+  return;
+}
+
+class PolicyController {
+  host;
+  publisherId = randomUUID3();
+  revision = 1;
+  selection = { ...DEFAULT_SELECTION };
+  boundModel;
+  available = { longContext: false, serviceTier: false };
+  contextWindow;
+  reason;
+  state;
+  emit;
+  unsubscribe;
+  chain = Promise.resolve();
+  constructor(events, host) {
+    this.host = host;
+    this.emit = events.emit.bind(events);
+    this.state = freezePublished({
+      version: 1,
+      publisherId: this.publisherId,
+      revision: 1,
+      applied: { longContext: true, serviceTier: null },
+      available: { longContext: false, serviceTier: false }
+    });
+    this.unsubscribe = events.on(POLICY_SET_CHANNEL, (data) => this.enqueue(() => this.handleSet(data)));
+  }
+  getState() {
+    return this.state;
+  }
+  serviceTierFor(model) {
+    if (!model || !this.boundModel)
+      return null;
+    if (this.boundModel.provider !== model.provider || this.boundModel.id !== model.id)
+      return null;
+    if (!this.available.serviceTier)
+      return null;
+    return this.selection.serviceTier;
+  }
+  reconcile() {
+    return this.enqueue(() => this.recompute());
+  }
+  dispose() {
+    this.unsubscribe();
+  }
+  enqueue(task) {
+    const run = this.chain.then(task, task).catch(() => {
+      return;
+    });
+    this.chain = run;
+    return run;
+  }
+  async recompute() {
+    const model = this.host.getActiveModel();
+    if (model === undefined) {
+      this.commit({
+        selection: { ...DEFAULT_SELECTION },
+        boundModel: undefined,
+        available: { longContext: false, serviceTier: false },
+        contextWindow: undefined,
+        reason: POLICY_UNAVAILABLE_REASON
+      });
+      return;
+    }
+    const advertisement = this.host.getAdvertisement(model);
+    const sameModel = this.boundModel?.provider === model.provider && this.boundModel.id === model.id;
+    let selection = sameModel ? { ...this.selection } : { ...DEFAULT_SELECTION };
+    let reason;
+    const available = policyAvailability(advertisement);
+    if (advertisement?.context === undefined) {
+      if (!selection.longContext) {
+        selection = { ...selection, longContext: true };
+        reason = "The active model no longer advertises a short context budget.";
+      }
+    } else if (!available.longContext && !selection.longContext) {
+      selection = { ...selection, longContext: true };
+      reason = "The active model no longer advertises a distinct short context budget.";
+    }
+    if (selection.serviceTier !== null) {
+      const tiers = advertisement?.serviceTier?.serviceTiers;
+      if (!tiers || !tiers.includes(selection.serviceTier)) {
+        selection = { ...selection, serviceTier: null };
+        reason = "The selected service tier is no longer advertised for the active model.";
+      }
+    }
+    if (advertisement?.context === undefined && advertisement?.serviceTier === undefined) {
+      reason = POLICY_UNAVAILABLE_REASON;
+    }
+    const desired = effectiveContextWindow(advertisement, selection);
+    const appliedWindow = await this.applyContext(model, desired);
+    if (advertisement?.context !== undefined && appliedWindow === undefined) {
+      reason = "The session context window could not be updated.";
+    }
+    this.commit({
+      selection,
+      boundModel: model,
+      available,
+      contextWindow: advertisement?.context !== undefined ? appliedWindow : undefined,
+      reason
+    });
+  }
+  async handleSet(data) {
+    const parsed = PolicySetSchema.safeParse(data);
+    if (!parsed.success)
+      return;
+    const command = parsed.data;
+    const model = this.host.getActiveModel();
+    const advertisement = model === undefined ? undefined : this.host.getAdvertisement(model);
+    const sameModel = model !== undefined && this.boundModel?.provider === model.provider && this.boundModel.id === model.id;
+    const current = sameModel ? { ...this.selection } : { ...DEFAULT_SELECTION };
+    const nextSelection = {
+      longContext: command.longContext ?? current.longContext,
+      serviceTier: command.serviceTier === undefined ? current.serviceTier : command.serviceTier
+    };
+    const rejection = validateSelection(model, advertisement, command);
+    if (rejection !== undefined) {
+      this.emitReply(command.requestId, rejection);
+      return;
+    }
+    const desired = effectiveContextWindow(advertisement, nextSelection);
+    const appliedWindow = model === undefined ? undefined : await this.applyContext(model, desired);
+    if (advertisement?.context !== undefined && appliedWindow === undefined) {
+      this.emitReply(command.requestId, "The session context window could not be updated.");
+      return;
+    }
+    this.commit({
+      selection: nextSelection,
+      boundModel: model,
+      available: policyAvailability(advertisement),
+      contextWindow: advertisement?.context !== undefined ? appliedWindow : undefined,
+      reason: undefined
+    }, command.requestId);
+  }
+  async applyContext(model, contextWindow) {
+    try {
+      return await this.host.applyContextWindow(model, contextWindow);
+    } catch {
+      return;
+    }
+  }
+  commit(next, requestId) {
+    this.selection = next.selection;
+    this.boundModel = next.boundModel;
+    this.available = next.available;
+    this.contextWindow = next.contextWindow;
+    this.reason = next.reason;
+    const candidate = {
+      applied: {
+        longContext: next.selection.longContext,
+        serviceTier: next.selection.serviceTier,
+        ...next.contextWindow === undefined ? {} : { contextWindow: next.contextWindow }
+      },
+      available: { ...next.available },
+      ...next.reason === undefined ? {} : { reason: next.reason }
+    };
+    const changed = !selectionStatesEqual(this.state, candidate);
+    if (changed) {
+      this.revision++;
+      this.state = freezePublished({
+        version: 1,
+        publisherId: this.publisherId,
+        revision: this.revision,
+        ...candidate
+      });
+      this.emitState(this.state);
+    }
+    if (requestId !== undefined) {
+      this.emitState(this.state, requestId);
+    }
+  }
+  emitReply(requestId, reason) {
+    const parsed = PolicyStateSchema.safeParse({
+      ...this.state,
+      ...reason === undefined ? {} : { reason },
+      requestId
+    });
+    if (parsed.success && byteLength(parsed.data) <= MAX_STATE_BYTES) {
+      this.emit(POLICY_STATE_CHANNEL, freezeParsed(parsed.data));
+    }
+  }
+  emitState(state, requestId) {
+    const candidate = requestId === undefined ? state : { ...state, requestId };
+    const parsed = PolicyStateSchema.safeParse(candidate);
+    if (parsed.success && byteLength(parsed.data) <= MAX_STATE_BYTES) {
+      this.emit(POLICY_STATE_CHANNEL, freezeParsed(parsed.data));
+      return;
+    }
+    const fallback = PolicyStateSchema.safeParse({
+      version: 1,
+      publisherId: this.publisherId,
+      revision: this.revision,
+      ...requestId === undefined ? {} : { requestId },
+      applied: { longContext: true, serviceTier: null },
+      available: { longContext: false, serviceTier: false },
+      reason: "Plexus policy state is unavailable."
+    });
+    if (fallback.success)
+      this.emit(POLICY_STATE_CHANNEL, freezeParsed(fallback.data));
+  }
+}
+
+// src/models-control.ts
+import { randomUUID as randomUUID4 } from "crypto";
+var MODELS_REFRESH_CHANNEL = "plexus:models:refresh:v1";
+var MODELS_STATE_CHANNEL = "plexus:models:state:v1";
+var MAX_STATE_BYTES2 = 1024 * 1024;
+var ModelsRefreshSchema = object({
+  version: literal(1),
+  requestId: string2().min(1).max(1024)
+}).strict();
+var ModelsStateSchema = object({
+  version: literal(1),
+  publisherId: string2().uuid(),
+  revision: number2().int().positive().safe(),
+  requestId: string2().min(1).max(1024).optional(),
+  status: _enum(["idle", "refreshing", "ready", "error"]),
+  modelCount: number2().int().nonnegative().safe().optional(),
+  reason: string2().max(500).optional()
+}).strict();
+var MODELS_REFRESH_FAILED_REASON = "The Plexus catalog refresh failed.";
+var encoder2 = new TextEncoder;
+function byteLength2(value) {
+  return encoder2.encode(JSON.stringify(value)).byteLength;
+}
+function freezeState(state) {
+  return Object.freeze({ ...state });
+}
+function freezeParsed2(state) {
+  return Object.freeze({ ...state });
+}
+function statesEqual(current, next) {
+  return current.status === next.status && current.modelCount === next.modelCount && current.reason === next.reason;
+}
+
+class ModelsControl {
+  host;
+  publisherId = randomUUID4();
+  revision = 1;
+  state;
+  inFlight;
+  emit;
+  unsubscribe;
+  constructor(events, host) {
+    this.host = host;
+    this.emit = events.emit.bind(events);
+    this.state = freezeState({
+      version: 1,
+      publisherId: this.publisherId,
+      revision: 1,
+      status: "idle"
+    });
+    this.unsubscribe = events.on(MODELS_REFRESH_CHANNEL, (data) => this.handleCommand(data));
+  }
+  getState() {
+    return this.state;
+  }
+  dispose() {
+    this.unsubscribe();
+  }
+  async handleCommand(data) {
+    const parsed = ModelsRefreshSchema.safeParse(data);
+    if (!parsed.success)
+      return;
+    if (!this.inFlight) {
+      const run = this.runRefresh();
+      this.inFlight = run.finally(() => {
+        this.inFlight = undefined;
+      });
+    }
+    await this.inFlight;
+    this.emitState(this.state, parsed.data.requestId);
+  }
+  async runRefresh() {
+    this.commit({ status: "refreshing" });
+    try {
+      const result = await this.host.refresh();
+      this.commit({ status: "ready", modelCount: result.modelCount });
+    } catch {
+      this.commit({ status: "error", reason: MODELS_REFRESH_FAILED_REASON });
+    }
+  }
+  commit(next) {
+    if (statesEqual(this.state, next))
+      return;
+    this.revision++;
+    this.state = freezeState({
+      version: 1,
+      publisherId: this.publisherId,
+      revision: this.revision,
+      status: next.status,
+      ...next.modelCount === undefined ? {} : { modelCount: next.modelCount },
+      ...next.reason === undefined ? {} : { reason: next.reason }
+    });
+    this.emitState(this.state);
+  }
+  emitState(state, requestId) {
+    const candidate = requestId === undefined ? state : { ...state, requestId };
+    const parsed = ModelsStateSchema.safeParse(candidate);
+    if (parsed.success && byteLength2(parsed.data) <= MAX_STATE_BYTES2) {
+      this.emit(MODELS_STATE_CHANNEL, freezeParsed2(parsed.data));
+      return;
+    }
+    const fallback = ModelsStateSchema.safeParse({
+      version: 1,
+      publisherId: this.publisherId,
+      revision: this.revision,
+      ...requestId === undefined ? {} : { requestId },
+      status: "error",
+      reason: "Plexus catalog state is unavailable."
+    });
+    if (fallback.success)
+      this.emit(MODELS_STATE_CHANNEL, freezeParsed2(fallback.data));
+  }
+}
+
 // src/extension.ts
 var PROVIDER_NAME = "plexus";
 var PLEXUS_CREDENTIAL_EXPIRES_AT = 253402300799000;
@@ -6403,6 +6813,9 @@ var PLACEHOLDER_BASE_URL = "http://localhost/v1";
 var currentModels = [];
 var activeContextPolicies;
 var activeServiceTiers;
+var activePolicy;
+var activePolicyModel;
+var policyModelRegistry;
 var refreshSequence = 0;
 var catalogSource = "none";
 function enforceMinimumOutputTokens(payload) {
@@ -6473,18 +6886,90 @@ function withAuthoritativeApiKeyEnv(provider, envName, getHeaderModels = () => c
     getAllModels: () => withModelHeaders(provider.getAllModels?.() ?? provider.getModels())
   };
 }
+function createPolicyHost(deps) {
+  return {
+    getActiveModel() {
+      const model = deps.getActiveModel();
+      if (!model || model.provider !== PROVIDER_NAME)
+        return;
+      return { provider: model.provider, id: model.id };
+    },
+    getAdvertisement(model) {
+      const entry = deps.getModels().find((candidate) => candidate.id === model.id);
+      if (!entry)
+        return;
+      const context = entry.plexusContextPolicy?.policy;
+      const serviceTier = entry.plexusServiceTiers?.policy;
+      if (!context && !serviceTier)
+        return;
+      return {
+        ...context ? { context } : {},
+        ...serviceTier ? { serviceTier } : {}
+      };
+    },
+    getEffectiveContextWindow() {
+      return deps.getActiveModel()?.contextWindow;
+    },
+    async applyContextWindow(model, contextWindow) {
+      const registry = deps.getRegistry();
+      if (!registry)
+        return;
+      const canonical = registry.find(model.provider, model.id);
+      if (!canonical)
+        return;
+      const target = contextWindow === undefined ? canonical : { ...canonical, contextWindow };
+      const active = deps.getActiveModel();
+      if (active?.provider === target.provider && active.id === target.id && active.contextWindow === target.contextWindow) {
+        return target.contextWindow;
+      }
+      const applied = await deps.setModel(target);
+      if (!applied)
+        return;
+      deps.setActiveModel(target);
+      return target.contextWindow;
+    }
+  };
+}
 function plexusExtension(pi) {
   const contextPolicies = new ContextPolicyPublisher(pi.events);
   activeContextPolicies = contextPolicies;
   const serviceTiers = new ServiceTiersPublisher(pi.events);
   activeServiceTiers = serviceTiers;
+  const policy = new PolicyController(pi.events, createPolicyHost({
+    getActiveModel: () => activePolicyModel,
+    getModels: () => currentModels,
+    getRegistry: () => policyModelRegistry,
+    setModel: (model) => pi.setModel(model),
+    setActiveModel: (model) => {
+      activePolicyModel = model;
+    }
+  }));
+  activePolicy = policy;
+  const modelsControl = new ModelsControl(pi.events, {
+    refresh: async () => {
+      const registry = policyModelRegistry;
+      if (!registry)
+        throw new Error("Plexus model registry is unavailable before the session starts.");
+      const result = await registry.refresh({ providers: [PROVIDER_NAME], force: true });
+      if (result.aborted)
+        throw new Error("Plexus model refresh was cancelled.");
+      const refreshError = result.errors.get(PROVIDER_NAME);
+      if (refreshError)
+        throw refreshError;
+      return { modelCount: currentModels.length };
+    }
+  });
   pi.on("session_shutdown", () => {
     contextPolicies.dispose();
     serviceTiers.dispose();
+    policy.dispose();
+    modelsControl.dispose();
     if (activeContextPolicies === contextPolicies)
       activeContextPolicies = undefined;
     if (activeServiceTiers === serviceTiers)
       activeServiceTiers = undefined;
+    if (activePolicy === policy)
+      activePolicy = undefined;
   });
   const apiKeyEnvExplicit = isApiKeyEnvExplicit();
   const explicitApiKey = apiKeyEnvExplicit ? resolveExplicitApiKey() : undefined;
@@ -6502,10 +6987,23 @@ function plexusExtension(pi) {
     const cachedTiers = collectStoredServiceTiers(startupModels);
     serviceTiers.setCatalog(cachedTiers.complete ? "ready" : "unavailable", cachedTiers.policies, cachedTiers.complete ? { cached: true, ...cachedTiers.fetchedAt === undefined ? {} : { fetchedAt: cachedTiers.fetchedAt } } : { cached: true, reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON });
   }
+  policy.reconcile();
+  pi.on("session_start", (_event, ctx) => {
+    policyModelRegistry = ctx.modelRegistry;
+    activePolicyModel = ctx.model;
+    activePolicy?.reconcile();
+  });
+  pi.on("model_select", (event, ctx) => {
+    policyModelRegistry = ctx.modelRegistry;
+    activePolicyModel = event.model;
+    activePolicy?.reconcile();
+  });
   pi.on("before_provider_request", (event, ctx) => {
     if (ctx.model?.provider !== PROVIDER_NAME)
       return;
-    const next = enforceMinimumOutputTokens(event.payload);
+    activePolicyModel = ctx.model;
+    const withTier = injectServiceTier(event.payload, activePolicy?.serviceTierFor(ctx.model));
+    const next = enforceMinimumOutputTokens(withTier);
     return next === event.payload ? undefined : next;
   });
   log("startup", {
@@ -6573,6 +7071,7 @@ async function refreshPlexusModels(context) {
           activeServiceTiers?.setCatalog(cachedTiers.complete ? "ready" : "unavailable", cachedTiers.policies, cachedTiers.complete ? { cached: true, ...cachedTiers.fetchedAt === undefined ? {} : { fetchedAt: cachedTiers.fetchedAt } } : { cached: true, reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON });
           const cachedPolicies = collectStoredContextPolicies(filteredCurrent);
           activeContextPolicies?.setCatalog(cachedPolicies.length > 0 ? "ready" : "unavailable", cachedPolicies.map((entry) => entry.policy), cachedPolicies.length > 0 ? { cached: true, fetchedAt: cachedPolicies[0].fetchedAt } : { cached: true, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON });
+          activePolicy?.reconcile();
         }
       });
       return filteredCurrent;
@@ -6611,6 +7110,7 @@ async function refreshPlexusModels(context) {
         catalogSource = "live refresh";
         activeServiceTiers?.setCatalog("ready", committedServiceTiers, { fetchedAt });
         activeContextPolicies?.setCatalog(committedPolicies.length > 0 ? "ready" : "unavailable", committedPolicies.map((entry) => entry.policy), committedPolicies.length > 0 ? { fetchedAt } : { fetchedAt, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON });
+        activePolicy?.reconcile();
       }
     });
     if (!published) {
@@ -6643,6 +7143,7 @@ async function restoreStoredModels(context) {
       activeServiceTiers?.setCatalog(cachedTiers.complete ? "ready" : "unavailable", cachedTiers.policies, cachedTiers.complete ? { cached: true, ...cachedTiers.fetchedAt === undefined ? {} : { fetchedAt: cachedTiers.fetchedAt } } : { cached: true, reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON });
       const cachedPolicies = collectStoredContextPolicies(models);
       activeContextPolicies?.setCatalog(cachedPolicies.length > 0 ? "ready" : "unavailable", cachedPolicies.map((entry) => entry.policy), cachedPolicies.length > 0 ? { cached: true, fetchedAt: cachedPolicies[0].fetchedAt } : { cached: true, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON });
+      activePolicy?.reconcile();
     }
   });
   log("refreshModels: restored from store", { count: models.length });
@@ -6772,6 +7273,7 @@ async function handleStatus(ctx) {
 }
 export {
   contextPolicyFromApiModel,
+  createPolicyHost,
   plexusExtension as default,
   enforceMinimumOutputTokens,
   serviceTierPolicyFromApiModel,
