@@ -1,10 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import type { PlexusApiModel } from "../../plexus-models/src/index.ts";
-import { buildModels, orderModelsByApiBase, placeholderModel } from "./mapper.ts";
+import {
+	buildModels,
+	orderModelsByApiBase,
+	placeholderModel,
+} from "./mapper.ts";
 
 const API_BASE = "https://plexus.example.com/v1";
 
-function apiModel(overrides: Partial<PlexusApiModel> & { id: string }): PlexusApiModel {
+function apiModel(
+	overrides: Partial<PlexusApiModel> & { id: string },
+): PlexusApiModel {
 	return { ...overrides };
 }
 
@@ -14,7 +20,10 @@ const LIVE_SHAPES: PlexusApiModel[] = [
 		name: "GPT 6.1 Sol",
 		preferred_api: ["responses"],
 		context_length: 1050000,
-		architecture: { input_modalities: ["text", "image", "pdf"], output_modalities: ["text"] },
+		architecture: {
+			input_modalities: ["text", "image", "pdf"],
+			output_modalities: ["text"],
+		},
 		pricing: { prompt: "0.000002", completion: "0.00001" },
 		supported_parameters: ["tools", "tool_choice", "reasoning", "image"],
 		top_provider: { context_length: 1050000, max_completion_tokens: 128000 },
@@ -24,10 +33,21 @@ const LIVE_SHAPES: PlexusApiModel[] = [
 		id: "claude-haiku-4-5",
 		preferred_api: ["messages"],
 		context_length: 200000,
-		architecture: { input_modalities: ["text", "image", "pdf"], output_modalities: ["text"] },
+		architecture: {
+			input_modalities: ["text", "image", "pdf"],
+			output_modalities: ["text"],
+		},
 		pricing: { prompt: "0.000001", completion: "0.000005" },
-		supported_parameters: ["tools", "tool_choice", "temperature", "reasoning", "image"],
-		reasoning_options: [{ type: "effort", values: ["off", "minimal", "low", "medium", "high"] }],
+		supported_parameters: [
+			"tools",
+			"tool_choice",
+			"temperature",
+			"reasoning",
+			"image",
+		],
+		reasoning_options: [
+			{ type: "effort", values: ["off", "minimal", "low", "medium", "high"] },
+		],
 		top_provider: { context_length: 200000, max_completion_tokens: 64000 },
 		created: 1790711221,
 	}),
@@ -40,24 +60,44 @@ const LIVE_SHAPES: PlexusApiModel[] = [
 			output_modalities: ["text"],
 		},
 		pricing: { prompt: "3e-7", completion: "0.0000025" },
-		supported_parameters: ["tools", "tool_choice", "temperature", "reasoning", "image"],
-		reasoning_options: [{ type: "effort", values: ["minimal", "low", "medium", "high"] }],
+		supported_parameters: [
+			"tools",
+			"tool_choice",
+			"temperature",
+			"reasoning",
+			"image",
+		],
+		reasoning_options: [
+			{ type: "effort", values: ["minimal", "low", "medium", "high"] },
+		],
 		top_provider: { context_length: 1048576, max_completion_tokens: 65536 },
 	}),
 	apiModel({
 		id: "deepseek-v4.1-flash",
 		preferred_api: ["chat_completions"],
 		context_length: 1048576,
-		architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
+		architecture: {
+			input_modalities: ["text", "image"],
+			output_modalities: ["text"],
+		},
 		pricing: { prompt: "3e-7", completion: "0.0000012" },
-		supported_parameters: ["tools", "tool_choice", "temperature", "reasoning", "image"],
+		supported_parameters: [
+			"tools",
+			"tool_choice",
+			"temperature",
+			"reasoning",
+			"image",
+		],
 		top_provider: { context_length: 1048576, max_completion_tokens: 943718 },
 	}),
 	// Non-chat models must be filtered
 	apiModel({
 		id: "text-embedding-3-small",
 		context_length: 8191,
-		architecture: { input_modalities: ["text"], output_modalities: ["embeddings"] },
+		architecture: {
+			input_modalities: ["text"],
+			output_modalities: ["embeddings"],
+		},
 	}),
 	apiModel({
 		id: "gpt-4o-mini-transcribe",
@@ -88,7 +128,12 @@ describe("buildModels (V2 Model.Info)", () => {
 		expect(ids).not.toContain("gpt-6.1-sol-fast");
 		expect(ids).not.toContain("gpt-6.1-sol-pro");
 		expect(new Set(ids).size).toBe(ids.length);
-		expect(ids).toEqual(["gpt-6.1-sol", "claude-haiku-4-5", "deepseek-v4.1-flash", "gemini-3.5-flash-lite"]);
+		expect(ids).toEqual([
+			"gpt-6.1-sol",
+			"claude-haiku-4-5",
+			"deepseek-v4.1-flash",
+			"gemini-3.5-flash-lite",
+		]);
 	});
 
 	test("wire names are bare slugs with no slash", () => {
@@ -103,9 +148,15 @@ describe("buildModels (V2 Model.Info)", () => {
 		const m = byId.get("gpt-6.1-sol");
 		expect(m?.package).toBe("aisdk:@ai-sdk/openai");
 		expect(m?.settings?.baseURL).toBe("https://plexus.example.com/v1");
-		expect(m?.capabilities).toEqual({ tools: true, input: ["text", "image", "pdf"], output: ["text"] });
+		expect(m?.capabilities).toEqual({
+			tools: true,
+			input: ["text", "image", "pdf"],
+			output: ["text"],
+		});
 		expect(m?.limit).toEqual({ context: 1050000, output: 128000 });
-		expect(m?.cost).toEqual([{ input: 2, output: 10, cache: { read: 0, write: 0 } }]);
+		expect(m?.cost).toEqual([
+			{ input: 2, output: 10, cache: { read: 0, write: 0 } },
+		]);
 		expect(m?.time.released).toBe(1790711221000);
 		expect(m?.status).toBe("active");
 		expect(m?.enabled).toBe(true);
@@ -134,7 +185,15 @@ describe("buildModels (V2 Model.Info)", () => {
 
 	test("context/output fallbacks apply when top_provider is absent", () => {
 		const [only] = buildModels(
-			[apiModel({ id: "bare", architecture: { input_modalities: ["text"], output_modalities: ["text"] } })],
+			[
+				apiModel({
+					id: "bare",
+					architecture: {
+						input_modalities: ["text"],
+						output_modalities: ["text"],
+					},
+				}),
+			],
 			API_BASE,
 		);
 		expect(only?.limit).toEqual({ context: 250000, output: 50000 });
@@ -143,7 +202,10 @@ describe("buildModels (V2 Model.Info)", () => {
 
 	test("suppression patterns drop matching models", () => {
 		const models = buildModels(LIVE_SHAPES, API_BASE, "gemini-*, deepseek-*");
-		expect(models.map((m) => m.id)).toEqual(["gpt-6.1-sol", "claude-haiku-4-5"]);
+		expect(models.map((m) => m.id)).toEqual([
+			"gpt-6.1-sol",
+			"claude-haiku-4-5",
+		]);
 	});
 
 	test("/v1 models order before /v1beta models", () => {
@@ -153,7 +215,9 @@ describe("buildModels (V2 Model.Info)", () => {
 				.map((m, i) => ((m.settings?.baseURL ?? "").endsWith("/v1") ? i : -1))
 				.filter((i) => i >= 0),
 		);
-		const firstBeta = ordered.findIndex((m) => (m.settings?.baseURL ?? "").endsWith("/v1beta"));
+		const firstBeta = ordered.findIndex((m) =>
+			(m.settings?.baseURL ?? "").endsWith("/v1beta"),
+		);
 		expect(lastV1).toBeLessThan(firstBeta);
 	});
 });

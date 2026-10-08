@@ -75,6 +75,8 @@ export interface PlexusApiModel {
 	pi_provider?: string;
 	/** Optional hint to look up the canonical entry in the host agent's built-in registry. */
 	pi_model?: string;
+	/** Service tiers the model advertises, e.g. `standard`, `flex`, `priority`. */
+	service_tiers?: string[];
 	/**
 	 * Optional host-specific compat overrides supplied directly by the Plexus server.
 	 * When present, these values should be merged into (and take precedence over) any

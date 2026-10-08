@@ -26,7 +26,10 @@ export function createLogger(prefix = "plexus"): Logger {
 		try {
 			const dir = getDir();
 			mkdirSync(dir, { recursive: true });
-			appendFileSync(join(dir, "plugin.log"), `${new Date().toISOString()} ${level.toUpperCase()} ${message}\n`);
+			appendFileSync(
+				join(dir, "plugin.log"),
+				`${new Date().toISOString()} ${level.toUpperCase()} ${message}\n`,
+			);
 		} catch {
 			// ignore
 		}

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { convertToPiModels, descriptorToPiModel, MINIMUM_OUTPUT_TOKENS } from "./mapper.ts";
+import {
+	convertToPiModels,
+	descriptorToPiModel,
+	MINIMUM_OUTPUT_TOKENS,
+} from "./mapper.ts";
 
 describe("descriptorToPiModel", () => {
 	test("retains provider so Pi can select Plexus defaults", () => {
@@ -52,7 +56,9 @@ describe("descriptorToPiModel", () => {
 			"https://plexus.example.com/v1",
 		);
 
-		expect(Object.fromEntries(models.map((model) => [model.id, model.baseUrl]))).toEqual({
+		expect(
+			Object.fromEntries(models.map((model) => [model.id, model.baseUrl])),
+		).toEqual({
 			chat: "https://plexus.example.com/v1",
 			responses: "https://plexus.example.com/v1",
 			messages: "https://plexus.example.com",

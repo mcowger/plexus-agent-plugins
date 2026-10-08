@@ -1,4 +1,13 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	mock,
+	test,
+} from "bun:test";
 import type { Plugin } from "@opencode/plugin";
 
 // ---------------------------------------------------------------------------
@@ -7,7 +16,8 @@ import type { Plugin } from "@opencode/plugin";
 // is dynamically imported below.
 // ---------------------------------------------------------------------------
 
-const logCalls: Array<{ level: "info" | "warn" | "error"; message: string }> = [];
+const logCalls: Array<{ level: "info" | "warn" | "error"; message: string }> =
+	[];
 
 mock.module("./log.ts", () => ({
 	createLogger: () => ({
@@ -30,9 +40,10 @@ mock.module("./cache.ts", () => ({
 
 const originalFetch = globalThis.fetch;
 const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
-let fetchImpl: (input: string, init?: RequestInit) => Promise<Response> = async () => {
-	throw new Error("unexpected fetch");
-};
+let fetchImpl: (input: string, init?: RequestInit) => Promise<Response> =
+	async () => {
+		throw new Error("unexpected fetch");
+	};
 
 function jsonResponse(body: unknown, init?: ResponseInit): Response {
 	return new Response(JSON.stringify(body), {
@@ -61,7 +72,12 @@ const syntheticCalls: Array<Record<string, unknown>> = [];
 let providerReloadCount = 0;
 
 interface ProviderRecordLike {
-	provider: { id: string; name: string; package: string; settings?: Record<string, unknown> };
+	provider: {
+		id: string;
+		name: string;
+		package: string;
+		settings?: Record<string, unknown>;
+	};
 	models: Map<string, unknown>;
 }
 
@@ -73,13 +89,19 @@ function createProviderDomain(): {
 	const editor = {
 		list: () => [...records.values()],
 		get: (id: string) => records.get(id),
-		add: (input: { info: ProviderRecordLike["provider"]; models: readonly { id: string }[] }) => {
+		add: (input: {
+			info: ProviderRecordLike["provider"];
+			models: readonly { id: string }[];
+		}) => {
 			records.set(input.info.id, {
 				provider: input.info,
 				models: new Map(input.models.map((m) => [m.id, m])),
 			});
 		},
-		update: (id: string, fn: (provider: ProviderRecordLike["provider"]) => void) => {
+		update: (
+			id: string,
+			fn: (provider: ProviderRecordLike["provider"]) => void,
+		) => {
 			const record = records.get(id);
 			if (record) fn(record.provider);
 		},
@@ -148,7 +170,9 @@ function createHarness(options: Record<string, unknown>): {
 			provider: provider.domain,
 			integration: createIntegrationDomain(),
 			command: {
-				transform: async (cb: (editor: { add: (def: CommandDefinitionLike) => void }) => void) => {
+				transform: async (
+					cb: (editor: { add: (def: CommandDefinitionLike) => void }) => void,
+				) => {
 					cb({ add: (def) => commands.push(def) });
 					return { dispose: async () => {} };
 				},
@@ -163,7 +187,9 @@ function createHarness(options: Record<string, unknown>): {
 			event: {
 				subscribe: () => ({
 					[Symbol.asyncIterator]() {
-						return { next: async () => ({ done: true as const, value: undefined }) };
+						return {
+							next: async () => ({ done: true as const, value: undefined }),
+						};
 					},
 				}),
 			},
@@ -177,9 +203,15 @@ function createHarness(options: Record<string, unknown>): {
 // Setup / teardown
 // ---------------------------------------------------------------------------
 
-let plugin: (typeof import("./plugin.ts"))["default"];
+let plugin: typeof import("./plugin.ts")["default"];
 
-const MANAGED_ENV = ["PLUGIN_V2_TEST_KEY", "PLUGIN_V2_TEST_MISSING", "PLEXUS_API_KEY", "PLEXUS_API_URL", "PLEXUS_BASE_URL"];
+const MANAGED_ENV = [
+	"PLUGIN_V2_TEST_KEY",
+	"PLUGIN_V2_TEST_MISSING",
+	"PLEXUS_API_KEY",
+	"PLEXUS_API_URL",
+	"PLEXUS_BASE_URL",
+];
 
 beforeAll(async () => {
 	globalThis.fetch = ((input: string, init?: RequestInit) => {
@@ -215,7 +247,8 @@ afterEach(() => {
 describe("plugin setup", () => {
 	test("registers the plexus provider with resolved settings and live models", async () => {
 		process.env.PLUGIN_V2_TEST_KEY = "secret-key-value";
-		fetchImpl = async () => jsonResponse({ object: "list", data: [chatModel("m1")] });
+		fetchImpl = async () =>
+			jsonResponse({ object: "list", data: [chatModel("m1")] });
 
 		const { ctx, records } = createHarness({
 			apiKeyEnv: "PLUGIN_V2_TEST_KEY",
@@ -228,14 +261,16 @@ describe("plugin setup", () => {
 		expect(record?.provider.name).toBe("Plexus");
 		expect(record?.provider.package).toBe("aisdk:@ai-sdk/openai-compatible");
 		expect(record?.provider.settings?.apiKey).toBe("secret-key-value");
-		expect(record?.provider.settings?.baseURL).toBe("https://plexus.example.com/v1");
+		expect(record?.provider.settings?.baseURL).toBe(
+			"https://plexus.example.com/v1",
+		);
 		expect(record?.models.has("m1")).toBe(true);
 
 		expect(fetchCalls).toHaveLength(1);
 		expect(fetchCalls[0]?.url).toBe("https://plexus.example.com/v1/models");
-		expect((fetchCalls[0]?.init?.headers as Record<string, string>)?.Authorization).toBe(
-			"Bearer secret-key-value",
-		);
+		expect(
+			(fetchCalls[0]?.init?.headers as Record<string, string>)?.Authorization,
+		).toBe("Bearer secret-key-value");
 	});
 
 	test("logs and rethrows when apiKeyEnv names a missing variable", async () => {
@@ -245,7 +280,8 @@ describe("plugin setup", () => {
 		expect(fetchCalls).toHaveLength(0);
 
 		const errorLog = logCalls.find(
-			(entry) => entry.level === "error" && entry.message.includes("setup failed"),
+			(entry) =>
+				entry.level === "error" && entry.message.includes("setup failed"),
 		);
 		expect(errorLog).toBeDefined();
 		expect(errorLog?.message).toContain("PLUGIN_V2_TEST_MISSING");
@@ -256,7 +292,8 @@ describe("plugin setup", () => {
 describe("/plexus-refresh command", () => {
 	test("reloads providers and posts a synthetic status when the refresh succeeds", async () => {
 		process.env.PLUGIN_V2_TEST_KEY = "secret-key-value";
-		fetchImpl = async () => jsonResponse({ object: "list", data: [chatModel("m1")] });
+		fetchImpl = async () =>
+			jsonResponse({ object: "list", data: [chatModel("m1")] });
 
 		const { ctx, commands } = createHarness({
 			apiKeyEnv: "PLUGIN_V2_TEST_KEY",
@@ -266,7 +303,7 @@ describe("/plexus-refresh command", () => {
 
 		const command = commands.find((c) => c.name === "plexus-refresh");
 		expect(command).toBeDefined();
-		await command!.execute({ sessionID: "s1", delivery: "async" });
+		await command?.execute({ sessionID: "s1", delivery: "async" });
 
 		expect(providerReloadCount).toBe(1);
 		const status = syntheticCalls.at(-1);
@@ -276,7 +313,8 @@ describe("/plexus-refresh command", () => {
 
 	test("logs and posts a synthetic error (not rejecting) when apiKeyEnv resolves unavailable later", async () => {
 		process.env.PLUGIN_V2_TEST_KEY = "secret-key-value";
-		fetchImpl = async () => jsonResponse({ object: "list", data: [chatModel("m1")] });
+		fetchImpl = async () =>
+			jsonResponse({ object: "list", data: [chatModel("m1")] });
 
 		const { ctx, commands } = createHarness({
 			apiKeyEnv: "PLUGIN_V2_TEST_KEY",
@@ -292,7 +330,7 @@ describe("/plexus-refresh command", () => {
 		providerReloadCount = 0;
 		delete process.env.PLUGIN_V2_TEST_KEY;
 
-		await command!.execute({ sessionID: "s2", delivery: "async" });
+		await command?.execute({ sessionID: "s2", delivery: "async" });
 
 		// No silent fallback: provider.reload must not run and no live fetch occurs.
 		expect(providerReloadCount).toBe(0);
@@ -305,7 +343,8 @@ describe("/plexus-refresh command", () => {
 		expect(String(status?.text)).not.toContain("secret-key-value");
 
 		const errorLog = logCalls.find(
-			(entry) => entry.level === "error" && entry.message.includes("refresh failed"),
+			(entry) =>
+				entry.level === "error" && entry.message.includes("refresh failed"),
 		);
 		expect(errorLog).toBeDefined();
 		expect(errorLog?.message).not.toContain("secret-key-value");

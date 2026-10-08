@@ -14,7 +14,12 @@ describe("provider registration", () => {
 			apiKeyEnv: "AIHOME_OPENCODE_API_KEY",
 			plexusBaseURL: "https://plexus.example.com",
 		});
-		const info = providerInfo({ models: [], baseURL, apiKey, connection: undefined });
+		const info = providerInfo({
+			models: [],
+			baseURL,
+			apiKey,
+			connection: undefined,
+		});
 		expect(info.settings?.apiKey).toBe("registered-env-key");
 		expect(info.settings?.baseURL).toBe("https://plexus.example.com/v1");
 	});

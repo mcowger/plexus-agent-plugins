@@ -2,8 +2,9 @@
 // @earendil-works/pi-ai/compat (upstream pi). The lookup function was also
 // renamed getModel -> getBundledModel, and the per-model metadata shape
 // dropped `thinkingLevelMap` in favor of a structured `thinking` config.
-import { getBundledModel, type GeneratedProvider } from "@oh-my-pi/pi-catalog";
+
 import type { Api } from "@oh-my-pi/pi-ai";
+import { type GeneratedProvider, getBundledModel } from "@oh-my-pi/pi-catalog";
 import {
 	convertDescriptors,
 	detectOpenAICompletionsCompat,
@@ -31,7 +32,10 @@ export function descriptorToOhMyPiModel(descriptor: PlexusModelDescriptor) {
 	let builtinModel: ReturnType<typeof getBundledModel> | undefined;
 	if (descriptor.piProvider && descriptor.piModel) {
 		try {
-			builtinModel = getBundledModel(descriptor.piProvider as GeneratedProvider, descriptor.piModel);
+			builtinModel = getBundledModel(
+				descriptor.piProvider as GeneratedProvider,
+				descriptor.piModel,
+			);
 		} catch {
 			builtinModel = undefined;
 		}
@@ -44,14 +48,14 @@ export function descriptorToOhMyPiModel(descriptor: PlexusModelDescriptor) {
 		cacheWrite: descriptor.cost.cacheWrite * 1_000_000,
 		...(descriptor.cost.tiers
 			? {
-				tiers: descriptor.cost.tiers.map((tier) => ({
-					inputTokensAbove: tier.inputTokensAbove,
-					input: tier.input * 1_000_000,
-					output: tier.output * 1_000_000,
-					cacheRead: tier.cacheRead * 1_000_000,
-					cacheWrite: tier.cacheWrite * 1_000_000,
-				})),
-			}
+					tiers: descriptor.cost.tiers.map((tier) => ({
+						inputTokensAbove: tier.inputTokensAbove,
+						input: tier.input * 1_000_000,
+						output: tier.output * 1_000_000,
+						cacheRead: tier.cacheRead * 1_000_000,
+						cacheWrite: tier.cacheWrite * 1_000_000,
+					})),
+				}
 			: {}),
 	};
 
@@ -63,8 +67,14 @@ export function descriptorToOhMyPiModel(descriptor: PlexusModelDescriptor) {
 			descriptor.baseUrl,
 		);
 		// pi_options override heuristics — the Plexus server knows best
-		const builtinCompat = builtinModel?.compat as Record<string, unknown> | undefined;
-		compat = { ...heuristic, ...(builtinCompat ?? {}), ...(descriptor.piOptions ?? {}) };
+		const builtinCompat = builtinModel?.compat as
+			| Record<string, unknown>
+			| undefined;
+		compat = {
+			...heuristic,
+			...(builtinCompat ?? {}),
+			...(descriptor.piOptions ?? {}),
+		};
 	} else if (descriptor.piOptions) {
 		// For non-openai-completions dialects that still carry pi_options, pass them through
 		compat = descriptor.piOptions;
@@ -83,8 +93,12 @@ export function descriptorToOhMyPiModel(descriptor: PlexusModelDescriptor) {
 		cost,
 		contextWindow: descriptor.contextWindow,
 		maxTokens: descriptor.maxTokens,
-		...(builtinModel?.thinking !== undefined ? { thinking: builtinModel.thinking } : {}),
-		...(builtinModel?.headers !== undefined ? { headers: builtinModel.headers } : {}),
+		...(builtinModel?.thinking !== undefined
+			? { thinking: builtinModel.thinking }
+			: {}),
+		...(builtinModel?.headers !== undefined
+			? { headers: builtinModel.headers }
+			: {}),
 		...(compat !== undefined ? { compat } : {}),
 	} as const;
 }

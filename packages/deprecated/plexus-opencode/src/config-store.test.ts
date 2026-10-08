@@ -1,86 +1,98 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { PLEXUS_BASE_URL_OPTION } from "./constants.ts"
-import { AUTH_METADATA_BASE_URL, getSuppressedModels, resolveConfig, resolveConfigTemplate } from "./config-store.ts"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+	AUTH_METADATA_BASE_URL,
+	getSuppressedModels,
+	resolveConfig,
+	resolveConfigTemplate,
+} from "./config-store.ts";
+import { PLEXUS_BASE_URL_OPTION } from "./constants.ts";
 
-const ORIGINAL_ENV = { ...process.env }
+const ORIGINAL_ENV = { ...process.env };
 
 beforeEach(() => {
-  delete process.env["PLEXUS_API_KEY"]
-  delete process.env["PLEXUS_API_URL"]
-  delete process.env["PLEXUS_BASE_URL"]
-  delete process.env["PLEXUS_SUPPRESS_MODELS"]
-  delete process.env["PLEXUS_EXCLUDE_MODELS"]
-})
+	delete process.env.PLEXUS_API_KEY;
+	delete process.env.PLEXUS_API_URL;
+	delete process.env.PLEXUS_BASE_URL;
+	delete process.env.PLEXUS_SUPPRESS_MODELS;
+	delete process.env.PLEXUS_EXCLUDE_MODELS;
+});
 
 afterEach(() => {
-  process.env = { ...ORIGINAL_ENV }
-})
+	process.env = { ...ORIGINAL_ENV };
+});
 
 describe("OpenCode config resolution", () => {
-  test("resolves pi-style environment templates", () => {
-    process.env["PLEXUS_TEST_HOST"] = "https://plexus.example.com"
-    process.env["PLEXUS_TEST_KEY"] = "secret"
+	test("resolves pi-style environment templates", () => {
+		process.env.PLEXUS_TEST_HOST = "https://plexus.example.com";
+		process.env.PLEXUS_TEST_KEY = "secret";
 
-    expect(resolveConfigTemplate("${PLEXUS_TEST_HOST}/v1")).toBe("https://plexus.example.com/v1")
-    expect(resolveConfigTemplate("$PLEXUS_TEST_KEY")).toBe("secret")
-    expect(resolveConfigTemplate("cost-$$5")).toBe("cost-$5")
-  })
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: intentional ${VAR} template literal under test
+		expect(resolveConfigTemplate("${PLEXUS_TEST_HOST}/v1")).toBe(
+			"https://plexus.example.com/v1",
+		);
+		expect(resolveConfigTemplate("$PLEXUS_TEST_KEY")).toBe("secret");
+		expect(resolveConfigTemplate("cost-$$5")).toBe("cost-$5");
+	});
 
-  test("respects PLEXUS_API_URL before PLEXUS_BASE_URL", () => {
-    process.env["PLEXUS_BASE_URL"] = "https://base.example.com/v1"
-    process.env["PLEXUS_API_URL"] = "https://api.example.com/v1"
+	test("respects PLEXUS_API_URL before PLEXUS_BASE_URL", () => {
+		process.env.PLEXUS_BASE_URL = "https://base.example.com/v1";
+		process.env.PLEXUS_API_URL = "https://api.example.com/v1";
 
-    expect(resolveConfig()).toMatchObject({ baseURL: "https://api.example.com" })
-  })
+		expect(resolveConfig()).toMatchObject({
+			baseURL: "https://api.example.com",
+		});
+	});
 
-  test("resolves configured URL and key templates", () => {
-    process.env["PLEXUS_CONFIG_URL"] = "https://configured.example.com/v1"
-    process.env["PLEXUS_CONFIG_KEY"] = "configured-secret"
+	test("resolves configured URL and key templates", () => {
+		process.env.PLEXUS_CONFIG_URL = "https://configured.example.com/v1";
+		process.env.PLEXUS_CONFIG_KEY = "configured-secret";
 
-    expect(
-      resolveConfig({
-        options: {
-          [PLEXUS_BASE_URL_OPTION]: "${PLEXUS_CONFIG_URL}",
-          apiKey: "${PLEXUS_CONFIG_KEY}",
-        },
-      } as never),
-    ).toEqual({
-      baseURL: "https://configured.example.com",
-      apiKey: "configured-secret",
-    })
-  })
+		expect(
+			resolveConfig({
+				options: {
+					// biome-ignore lint/suspicious/noTemplateCurlyInString: intentional ${VAR} template literal under test
+					[PLEXUS_BASE_URL_OPTION]: "${PLEXUS_CONFIG_URL}",
+					// biome-ignore lint/suspicious/noTemplateCurlyInString: intentional ${VAR} template literal under test
+					apiKey: "${PLEXUS_CONFIG_KEY}",
+				},
+			} as never),
+		).toEqual({
+			baseURL: "https://configured.example.com",
+			apiKey: "configured-secret",
+		});
+	});
 
-  test("accepts options.baseURL as OpenChamber compatibility input", () => {
-    expect(
-      resolveConfig({
-        options: {
-          baseURL: "https://compat.example.com/v1",
-        },
-      } as never),
-    ).toMatchObject({ baseURL: "https://compat.example.com" })
-  })
+	test("accepts options.baseURL as OpenChamber compatibility input", () => {
+		expect(
+			resolveConfig({
+				options: {
+					baseURL: "https://compat.example.com/v1",
+				},
+			} as never),
+		).toMatchObject({ baseURL: "https://compat.example.com" });
+	});
 
-  test("uses auth metadata before provider config", () => {
-    expect(
-      resolveConfig(
-        {
-          options: {
-            [PLEXUS_BASE_URL_OPTION]: "https://configured.example.com/v1",
-          },
-        } as never,
-        { [AUTH_METADATA_BASE_URL]: "https://metadata.example.com/v1" },
-      ),
-    ).toMatchObject({ baseURL: "https://metadata.example.com" })
-  })
+	test("uses auth metadata before provider config", () => {
+		expect(
+			resolveConfig(
+				{
+					options: {
+						[PLEXUS_BASE_URL_OPTION]: "https://configured.example.com/v1",
+					},
+				} as never,
+				{ [AUTH_METADATA_BASE_URL]: "https://metadata.example.com/v1" },
+			),
+		).toMatchObject({ baseURL: "https://metadata.example.com" });
+	});
 
-  test("resolves suppressed models from provider options and env vars", () => {
-    process.env["PLEXUS_SUPPRESS_MODELS"] = "gpt-3.5*"
-    expect(
-      getSuppressedModels({
-        options: {
-          suppressModels: ["claude-2*", "whisper"],
-        },
-      } as never),
-    ).toEqual(["gpt-3.5*", "claude-2*", "whisper"])
-  })
-})
+	test("resolves suppressed models from provider options and env vars", () => {
+		process.env.PLEXUS_SUPPRESS_MODELS = "gpt-3.5*";
+		expect(
+			getSuppressedModels({
+				options: {
+					suppressModels: ["claude-2*", "whisper"],
+				},
+			} as never),
+		).toEqual(["gpt-3.5*", "claude-2*", "whisper"]);
+	});
+});

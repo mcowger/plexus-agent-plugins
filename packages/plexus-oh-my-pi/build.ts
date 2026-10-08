@@ -26,7 +26,8 @@ const stubPiUtilsLogger: Bun.BunPlugin = {
 			namespace: STUB_NAMESPACE,
 		}));
 		build.onLoad({ filter: /.*/, namespace: STUB_NAMESPACE }, () => ({
-			contents: "export function warn(){}\nexport function debug(){}\nexport function info(){}\nexport function error(){}\n",
+			contents:
+				"export function warn(){}\nexport function debug(){}\nexport function info(){}\nexport function error(){}\n",
 			loader: "js",
 		}));
 	},
@@ -52,7 +53,13 @@ const result = await Bun.build({
 	// lightweight runtime dependency the host always provides, same as
 	// @oh-my-pi/swarm-extension. Its /logger subpath is stubbed above instead
 	// of left external — see stubPiUtilsLogger.
-	external: ["@oh-my-pi/pi-ai", "@oh-my-pi/pi-ai/*", "@oh-my-pi/pi-coding-agent", "@oh-my-pi/pi-utils", "node:*"],
+	external: [
+		"@oh-my-pi/pi-ai",
+		"@oh-my-pi/pi-ai/*",
+		"@oh-my-pi/pi-coding-agent",
+		"@oh-my-pi/pi-utils",
+		"node:*",
+	],
 	naming: "extension.js",
 	minify: false,
 });

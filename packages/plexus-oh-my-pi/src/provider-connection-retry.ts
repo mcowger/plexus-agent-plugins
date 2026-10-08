@@ -20,7 +20,10 @@ interface AssistantMessageLike {
 }
 
 function hasToolCall(content: unknown): boolean {
-	return Array.isArray(content) && (content as ContentBlock[]).some((block) => block?.type === "toolCall");
+	return (
+		Array.isArray(content) &&
+		(content as ContentBlock[]).some((block) => block?.type === "toolCall")
+	);
 }
 
 /**
@@ -29,13 +32,11 @@ function hasToolCall(content: unknown): boolean {
  * this intentionally updates the finalized message in place before agent-end
  * recovery evaluates it.
  */
-export function normalizeProviderConnectionClosed<T extends AssistantMessageLike>(
-	message: T,
-	providerName: string,
-): void {
+export function normalizeProviderConnectionClosed<
+	T extends AssistantMessageLike,
+>(message: T, providerName: string): void {
 	if (
-		!message ||
-		message.role !== "assistant" ||
+		message?.role !== "assistant" ||
 		message.provider !== providerName ||
 		message.stopReason !== "error" ||
 		typeof message.errorMessage !== "string" ||
@@ -46,6 +47,8 @@ export function normalizeProviderConnectionClosed<T extends AssistantMessageLike
 		return;
 	}
 
-	log("retryable-error: retagged closed provider connection for retry", { model: message.model });
+	log("retryable-error: retagged closed provider connection for retry", {
+		model: message.model,
+	});
 	message.errorMessage = NORMALIZED_MESSAGE;
 }

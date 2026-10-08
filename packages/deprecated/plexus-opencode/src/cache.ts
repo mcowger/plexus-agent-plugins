@@ -1,17 +1,21 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
-import { join } from "node:path"
-import type { PluginInput } from "@opencode-ai/plugin"
-import type { ConfigModel } from "./mapper.ts"
-import { isChatModel, isModelSuppressed, type PlexusApiResponse } from "../../../plexus-models/src/index.ts"
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import type { PluginInput } from "@opencode-ai/plugin";
+import {
+	isChatModel,
+	isModelSuppressed,
+	type PlexusApiResponse,
+} from "../../../plexus-models/src/index.ts";
+import type { ConfigModel } from "./mapper.ts";
 
-const PLUGIN_SUBDIR = join("plugins", "plexus")
-const CACHE_FILE = "models-cache.json"
-const RAW_FILE = "models-raw.json"
+const PLUGIN_SUBDIR = join("plugins", "plexus");
+const CACHE_FILE = "models-cache.json";
+const RAW_FILE = "models-raw.json";
 
 /** Default fallback path that doesn't require an API call. */
 function fallbackDir(): string {
-  return join(homedir(), ".local", "share", "opencode", PLUGIN_SUBDIR)
+	return join(homedir(), ".local", "share", "opencode", PLUGIN_SUBDIR);
 }
 
 /**
@@ -26,13 +30,13 @@ function fallbackDir(): string {
  * homedir path instead.
  */
 function getDir(): string {
-  return fallbackDir()
+	return fallbackDir();
 }
 
 interface ModelCache {
-  models: Record<string, ConfigModel>
-  timestamp: number
-  etag?: string
+	models: Record<string, ConfigModel>;
+	timestamp: number;
+	etag?: string;
 }
 
 /**
@@ -40,22 +44,23 @@ interface ModelCache {
  * reintroduce endpoint-specific models into OpenCode's static model listing.
  */
 export function filterCachedModels(
-  models: Record<string, ConfigModel>,
-  suppress?: string | string[] | null,
+	models: Record<string, ConfigModel>,
+	suppress?: string | string[] | null,
 ): Record<string, ConfigModel> {
-  return Object.fromEntries(
-    Object.entries(models).filter(([, model]) => {
-      if (isModelSuppressed({ id: model.id, name: model.name }, suppress)) return false
-      return isChatModel({
-        id: model.id,
-        name: model.name,
-        architecture: {
-          input_modalities: model.modalities.input,
-          output_modalities: model.modalities.output,
-        },
-      })
-    }),
-  )
+	return Object.fromEntries(
+		Object.entries(models).filter(([, model]) => {
+			if (isModelSuppressed({ id: model.id, name: model.name }, suppress))
+				return false;
+			return isChatModel({
+				id: model.id,
+				name: model.name,
+				architecture: {
+					input_modalities: model.modalities.input,
+					output_modalities: model.modalities.output,
+				},
+			});
+		}),
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -70,23 +75,27 @@ export function filterCachedModels(
  * getDir() for why.
  */
 export async function readCachedModels(
-  _client: PluginInput["client"],
-  suppress?: string | string[] | null,
+	_client: PluginInput["client"],
+	suppress?: string | string[] | null,
 ): Promise<{ models: Record<string, ConfigModel>; etag?: string } | null> {
-  try {
-    const dir = getDir()
-    const content = await readFile(join(dir, CACHE_FILE), "utf8")
-    const parsed = JSON.parse(content) as ModelCache
-    if (parsed && typeof parsed.models === "object" && !Array.isArray(parsed.models)) {
-      return {
-        models: filterCachedModels(parsed.models, suppress),
-        etag: typeof parsed.etag === "string" ? parsed.etag : undefined,
-      }
-    }
-    return null
-  } catch {
-    return null
-  }
+	try {
+		const dir = getDir();
+		const content = await readFile(join(dir, CACHE_FILE), "utf8");
+		const parsed = JSON.parse(content) as ModelCache;
+		if (
+			parsed &&
+			typeof parsed.models === "object" &&
+			!Array.isArray(parsed.models)
+		) {
+			return {
+				models: filterCachedModels(parsed.models, suppress),
+				etag: typeof parsed.etag === "string" ? parsed.etag : undefined,
+			};
+		}
+		return null;
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -96,22 +105,30 @@ export async function readCachedModels(
  * getDir() for why cache dir resolution must stay purely local.
  */
 export async function writeCache(
-  _client: PluginInput["client"],
-  models: Record<string, ConfigModel>,
-  raw?: PlexusApiResponse,
-  etag?: string,
+	_client: PluginInput["client"],
+	models: Record<string, ConfigModel>,
+	raw?: PlexusApiResponse,
+	etag?: string,
 ): Promise<void> {
-  try {
-    const dir = getDir()
-    await mkdir(dir, { recursive: true })
+	try {
+		const dir = getDir();
+		await mkdir(dir, { recursive: true });
 
-    const cache: ModelCache = { models, timestamp: Date.now(), etag }
-    await writeFile(join(dir, CACHE_FILE), JSON.stringify(cache, null, 2) + "\n", "utf8")
+		const cache: ModelCache = { models, timestamp: Date.now(), etag };
+		await writeFile(
+			join(dir, CACHE_FILE),
+			`${JSON.stringify(cache, null, 2)}\n`,
+			"utf8",
+		);
 
-    if (raw !== undefined) {
-      await writeFile(join(dir, RAW_FILE), JSON.stringify(raw, null, 2) + "\n", "utf8")
-    }
-  } catch {
-    // Never block plugin init on cache write failures
-  }
+		if (raw !== undefined) {
+			await writeFile(
+				join(dir, RAW_FILE),
+				`${JSON.stringify(raw, null, 2)}\n`,
+				"utf8",
+			);
+		}
+	} catch {
+		// Never block plugin init on cache write failures
+	}
 }

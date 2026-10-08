@@ -1,55 +1,10 @@
 // @bun
-// ../plexus-models/src/suppress.ts
-function parseSuppressionPatterns(raw) {
-  if (!raw)
-    return [];
-  const items = Array.isArray(raw) ? raw : raw.split(/[\n,;]+/);
-  return items.map((s) => s.trim()).filter((s) => s.length > 0);
-}
-function getEnvSuppressedModels() {
-  const env = typeof process !== "undefined" && process?.env ? process.env : {};
-  const raw = env.PLEXUS_SUPPRESS_MODELS ?? env.PLEXUS_EXCLUDE_MODELS;
-  return parseSuppressionPatterns(raw);
-}
-function isModelSuppressed(model, patterns) {
-  const envPatterns = getEnvSuppressedModels();
-  const explicitPatterns = parseSuppressionPatterns(patterns);
-  const allPatterns = [...envPatterns, ...explicitPatterns];
-  if (allPatterns.length === 0)
-    return false;
-  const id = model.id.toLowerCase();
-  const name = (model.name ?? "").toLowerCase();
-  const shortId = id.includes("/") ? id.split("/").pop() : id.includes(":") ? id.split(":").pop() : id;
-  for (const pattern of allPatterns) {
-    if (matchesPattern(id, name, shortId, pattern)) {
-      return true;
-    }
-  }
-  return false;
-}
-function matchesPattern(id, name, shortId, pattern) {
-  const p = pattern.toLowerCase();
-  if (p.startsWith("regex:")) {
-    try {
-      const re = new RegExp(pattern.slice(6), "i");
-      return re.test(id) || re.test(name) || re.test(shortId);
-    } catch {
-      return false;
-    }
-  }
-  if (p.includes("*") || p.includes("?")) {
-    const regexStr = "^" + p.replace(/([.+^${}()|[\]\\])/g, "\\$1").replace(/\*/g, ".*").replace(/\?/g, ".") + "$";
-    try {
-      const re = new RegExp(regexStr, "i");
-      return re.test(id) || re.test(name) || re.test(shortId);
-    } catch {
-      return false;
-    }
-  }
-  return id === p || name === p || shortId === p;
-}
 // ../plexus-models/src/convert.ts
-var REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
+var REASONING_PARAMS = new Set([
+  "reasoning",
+  "include_reasoning",
+  "reasoning_effort"
+]);
 var NON_CHAT_PATTERN = /(?:^|[\W_])(?:embed(?:ding|dings)?|transcri(?:be[ds]?|ptions?)|whisper|speech[\W_]*to[\W_]*text|stt|text[\W_]*to[\W_]*speech|tts|image(?:[\W_]*(?:gen(?:eration)?|\d+))?|diffusion|dall[\W_]*e|stable[\W_]*diffusion|sdxl|dream)(?:$|[\W_])/i;
 var API_DIALECT_MAP = {
   chat_completions: "openai-completions",
@@ -104,13 +59,13 @@ function parsePrice(raw) {
   if (raw === undefined)
     return 0;
   const n = parseFloat(raw);
-  return isFinite(n) && n >= 0 ? n : 0;
+  return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 function resolveContextWindow(model) {
   const v = model.context_length ?? model.top_provider?.context_length ?? null;
   return v != null && v > 0 ? v : 8192;
 }
-function resolveMaxTokens(model, contextWindow) {
+function resolveMaxTokens(model) {
   const v = model.top_provider?.max_completion_tokens ?? null;
   if (v == null || v < 100) {
     return 32768;
@@ -124,13 +79,15 @@ function resolvePricingTiers(model) {
   const tiers = pricing.tiers.flatMap((tier) => {
     if (!Number.isFinite(tier.input_tokens_above) || tier.input_tokens_above < 0)
       return [];
-    return [{
-      inputTokensAbove: tier.input_tokens_above,
-      input: parsePrice(tier.prompt ?? pricing.prompt),
-      output: parsePrice(tier.completion ?? pricing.completion),
-      cacheRead: parsePrice(tier.input_cache_read ?? pricing.input_cache_read),
-      cacheWrite: parsePrice(tier.input_cache_write ?? pricing.input_cache_write)
-    }];
+    return [
+      {
+        inputTokensAbove: tier.input_tokens_above,
+        input: parsePrice(tier.prompt ?? pricing.prompt),
+        output: parsePrice(tier.completion ?? pricing.completion),
+        cacheRead: parsePrice(tier.input_cache_read ?? pricing.input_cache_read),
+        cacheWrite: parsePrice(tier.input_cache_write ?? pricing.input_cache_write)
+      }
+    ];
   });
   return tiers.length > 0 ? tiers : undefined;
 }
@@ -138,7 +95,7 @@ function convertToDescriptor(raw, baseUrl) {
   const preferredApi = mapPreferredApi(raw.preferred_api);
   const adjustedBaseUrl = adjustBaseUrl(baseUrl, preferredApi);
   const contextWindow = resolveContextWindow(raw);
-  const maxTokens = resolveMaxTokens(raw, contextWindow);
+  const maxTokens = resolveMaxTokens(raw);
   const tiers = resolvePricingTiers(raw);
   const descriptor = {
     id: raw.id,
@@ -192,7 +149,7 @@ function isChatModel(model) {
   const apiHints = Array.isArray(model.preferred_api) ? model.preferred_api.join(" ") : model.preferred_api ?? "";
   return !NON_CHAT_PATTERN.test(`${model.id} ${model.name ?? ""} ${apiHints}`);
 }
-function parseSuppressionPatterns2(input) {
+function parseSuppressionPatterns(input) {
   if (!input)
     return [];
   const rawItems = Array.isArray(input) ? input : [input];
@@ -211,9 +168,9 @@ function parseSuppressionPatterns2(input) {
   return patterns;
 }
 function isSuppressedModel(model, suppress) {
-  if (!model || !model.id)
+  if (!model?.id)
     return false;
-  const patterns = parseSuppressionPatterns2(suppress);
+  const patterns = parseSuppressionPatterns(suppress);
   if (patterns.length === 0)
     return false;
   const idLower = model.id.toLowerCase();
@@ -237,7 +194,7 @@ function isSuppressedModel(model, suppress) {
     if (pattern.includes("*") || pattern.includes("?")) {
       try {
         const escaped = patternLower.replace(/[.+^$()|[{}]\\]/g, "\\$&");
-        const regexStr = "^" + escaped.replace(/\*/g, ".*").replace(/\?/g, ".") + "$";
+        const regexStr = `^${escaped.replace(/\*/g, ".*").replace(/\?/g, ".")}$`;
         const globRe = new RegExp(regexStr, "i");
         if (globRe.test(model.id) || model.name && globRe.test(model.name)) {
           return true;
@@ -350,13 +307,90 @@ async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_F
     clearTimeout(timer);
   }
 }
-// src/config.ts
+// ../plexus-models/src/suppress.ts
+function parseSuppressionPatterns2(raw) {
+  if (!raw)
+    return [];
+  const items = Array.isArray(raw) ? raw : raw.split(/[\n,;]+/);
+  return items.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+function getEnvSuppressedModels() {
+  const env = typeof process !== "undefined" && process?.env ? process.env : {};
+  const raw = env.PLEXUS_SUPPRESS_MODELS ?? env.PLEXUS_EXCLUDE_MODELS;
+  return parseSuppressionPatterns2(raw);
+}
+function isModelSuppressed(model, patterns) {
+  const envPatterns = getEnvSuppressedModels();
+  const explicitPatterns = parseSuppressionPatterns2(patterns);
+  const allPatterns = [...envPatterns, ...explicitPatterns];
+  if (allPatterns.length === 0)
+    return false;
+  const id = model.id.toLowerCase();
+  const name = (model.name ?? "").toLowerCase();
+  const separator = id.includes("/") ? "/" : id.includes(":") ? ":" : undefined;
+  const shortId = separator === undefined ? id : id.split(separator).pop() ?? id;
+  for (const pattern of allPatterns) {
+    if (matchesPattern(id, name, shortId, pattern)) {
+      return true;
+    }
+  }
+  return false;
+}
+function matchesPattern(id, name, shortId, pattern) {
+  const p = pattern.toLowerCase();
+  if (p.startsWith("regex:")) {
+    try {
+      const re = new RegExp(pattern.slice(6), "i");
+      return re.test(id) || re.test(name) || re.test(shortId);
+    } catch {
+      return false;
+    }
+  }
+  if (p.includes("*") || p.includes("?")) {
+    const regexStr = "^" + p.replace(/([.+^${}()|[\]\\])/g, "\\$1").replace(/\*/g, ".*").replace(/\?/g, ".") + "$";
+    try {
+      const re = new RegExp(regexStr, "i");
+      return re.test(id) || re.test(name) || re.test(shortId);
+    } catch {
+      return false;
+    }
+  }
+  return id === p || name === p || shortId === p;
+}
+// src/cache.ts
 import { existsSync, readFileSync } from "fs";
-import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
-var getConfigDir = () => join(getAgentDir(), "extensions", "plexus");
-var getConfigPath = () => join(getConfigDir(), "config.json");
+import {
+  getAgentDir
+} from "@earendil-works/pi-coding-agent";
+function readStoredModelsSync() {
+  try {
+    const path = join(getAgentDir(), "models-store.json");
+    if (!existsSync(path))
+      return null;
+    const data = JSON.parse(readFileSync(path, "utf8"));
+    const plexus = data.plexus;
+    if (!plexus || typeof plexus !== "object" || Array.isArray(plexus))
+      return null;
+    const catalog = plexus;
+    if (!Array.isArray(catalog.models))
+      return null;
+    return {
+      models: catalog.models,
+      checkedAt: typeof catalog.checkedAt === "number" ? catalog.checkedAt : 0
+    };
+  } catch {
+    return null;
+  }
+}
+
+// src/config.ts
+import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
+import { mkdir, writeFile } from "fs/promises";
+import { join as join2 } from "path";
+import { getAgentDir as getAgentDir2 } from "@earendil-works/pi-coding-agent";
+var getConfigDir = () => join2(getAgentDir2(), "extensions", "plexus");
+var getConfigPath = () => join2(getConfigDir(), "config.json");
 var ENV_BASE_URL = "PLEXUS_BASE_URL";
 var ENV_API_URL = "PLEXUS_API_URL";
 var ENV_API_KEY = "PLEXUS_API_KEY";
@@ -432,8 +466,8 @@ function getConfigSync() {
   if (cachedConfig)
     return cachedConfig;
   try {
-    if (existsSync(getConfigPath())) {
-      cachedConfig = JSON.parse(readFileSync(getConfigPath(), "utf8"));
+    if (existsSync2(getConfigPath())) {
+      cachedConfig = JSON.parse(readFileSync2(getConfigPath(), "utf8"));
       return cachedConfig;
     }
   } catch {}
@@ -517,167 +551,8 @@ function getBaseUrl() {
 function getSuppressedModels() {
   const config = getConfigSync();
   const envSuppressed = getEnvSuppressedModels();
-  const configSuppressed = parseSuppressionPatterns(config.suppressModels ?? config.suppress);
+  const configSuppressed = parseSuppressionPatterns2(config.suppressModels ?? config.suppress);
   return [...envSuppressed, ...configSuppressed];
-}
-
-// src/cache.ts
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "fs";
-import { join as join2 } from "path";
-import { getAgentDir as getAgentDir2 } from "@earendil-works/pi-coding-agent";
-function readStoredModelsSync() {
-  try {
-    const path = join2(getAgentDir2(), "models-store.json");
-    if (!existsSync2(path))
-      return null;
-    const data = JSON.parse(readFileSync2(path, "utf8"));
-    const plexus = data["plexus"];
-    if (!plexus || typeof plexus !== "object" || Array.isArray(plexus))
-      return null;
-    const catalog = plexus;
-    if (!Array.isArray(catalog["models"]))
-      return null;
-    return {
-      models: catalog["models"],
-      checkedAt: typeof catalog["checkedAt"] === "number" ? catalog["checkedAt"] : 0
-    };
-  } catch {
-    return null;
-  }
-}
-
-// src/log.ts
-import { mkdir as mkdir2, appendFile } from "fs/promises";
-import { join as join3 } from "path";
-import { getAgentDir as getAgentDir3 } from "@earendil-works/pi-coding-agent";
-var getCacheDir = () => join3(getAgentDir3(), "extensions", "plexus");
-var getLogPath = () => join3(getCacheDir(), "plexus.log");
-var dirEnsured = false;
-function log(message, data) {
-  writeLogLine(message, data);
-}
-async function writeLogLine(message, data) {
-  try {
-    if (!dirEnsured) {
-      await mkdir2(getCacheDir(), { recursive: true });
-      dirEnsured = true;
-    }
-    const ts = new Date().toISOString();
-    const line = data !== undefined ? `${ts} ${message} ${JSON.stringify(data)}
-` : `${ts} ${message}
-`;
-    await appendFile(getLogPath(), line, "utf8");
-  } catch {}
-}
-
-// src/mapper.ts
-import { getModel } from "@earendil-works/pi-ai/compat";
-var MINIMUM_OUTPUT_TOKENS = 8192;
-function descriptorToPiModel(descriptor) {
-  let builtinModel;
-  if (descriptor.piProvider && descriptor.piModel) {
-    try {
-      builtinModel = getModel(descriptor.piProvider, descriptor.piModel);
-    } catch {
-      builtinModel = undefined;
-    }
-  }
-  const cost = {
-    input: descriptor.cost.input * 1e6,
-    output: descriptor.cost.output * 1e6,
-    cacheRead: descriptor.cost.cacheRead * 1e6,
-    cacheWrite: descriptor.cost.cacheWrite * 1e6,
-    ...descriptor.cost.tiers ? {
-      tiers: descriptor.cost.tiers.map((tier) => ({
-        inputTokensAbove: tier.inputTokensAbove,
-        input: tier.input * 1e6,
-        output: tier.output * 1e6,
-        cacheRead: tier.cacheRead * 1e6,
-        cacheWrite: tier.cacheWrite * 1e6
-      }))
-    } : {}
-  };
-  let compat;
-  if (descriptor.preferredApi === "openai-completions") {
-    const heuristic = detectOpenAICompletionsCompat(descriptor.piProvider ?? descriptor.provider, descriptor.baseUrl);
-    const builtinCompat = builtinModel?.compat;
-    const merged = { ...heuristic, ...builtinCompat ?? {}, ...descriptor.piOptions ?? {} };
-    compat = merged;
-  } else if (descriptor.piOptions) {
-    compat = descriptor.piOptions;
-  } else if (builtinModel?.compat) {
-    compat = builtinModel.compat;
-  }
-  return {
-    id: descriptor.id,
-    name: descriptor.name,
-    api: descriptor.preferredApi,
-    provider: descriptor.provider,
-    baseUrl: descriptor.baseUrl,
-    reasoning: descriptor.reasoning,
-    input: descriptor.input,
-    cost,
-    contextWindow: descriptor.contextWindow,
-    maxTokens: Math.max(descriptor.maxTokens, MINIMUM_OUTPUT_TOKENS),
-    ...builtinModel?.thinkingLevelMap !== undefined ? { thinkingLevelMap: builtinModel.thinkingLevelMap } : {},
-    ...builtinModel?.headers !== undefined ? { headers: builtinModel.headers } : {},
-    ...compat !== undefined ? { compat } : {}
-  };
-}
-
-// src/gemini-malformed-retry.ts
-var MALFORMED_LEAK_PATTERN = /(?:print\()?call:\s*default_api[.:]|default_api\.\w+\s*\(/;
-var MALFORMED_DIAGNOSTIC_PATTERN = /\bmalformed[\s_-]?function[\s_-]?call\b/i;
-var TRUNCATED_JSON_PATTERN = /\bUnexpected end of JSON input\b/i;
-var PROVIDER_CONNECTION_CLOSED_PATTERN = /\bprovider connection closed\b/i;
-var NORMALIZED_PREFIX = "MALFORMED_FUNCTION_CALL:";
-var TRUNCATED_JSON_PREFIX = "TRUNCATED_JSON_RESPONSE:";
-var PROVIDER_CONNECTION_CLOSED_PREFIX = "PROVIDER_CONNECTION_CLOSED:";
-var NORMALIZED_MESSAGE = `${NORMALIZED_PREFIX} Gemini emitted a malformed tool call (its internal ` + `function-call syntax leaked as text). This is a transient model failure \u2014 ` + `please retry your request.`;
-var TRUNCATED_JSON_MESSAGE = `${TRUNCATED_JSON_PREFIX} Unexpected end of JSON input. The upstream provider ` + `returned a truncated JSON response. This is a transient provider failure \u2014 ` + `please retry your request.`;
-var PROVIDER_CONNECTION_CLOSED_MESSAGE = `${PROVIDER_CONNECTION_CLOSED_PREFIX} Provider connection closed. The upstream provider ` + `dropped the request. This is a transient provider failure \u2014 please retry your request.`;
-function hasLeakedFunctionCall(content) {
-  if (!Array.isArray(content))
-    return false;
-  for (const block of content) {
-    if (block?.type === "text" && typeof block.text === "string" && MALFORMED_LEAK_PATTERN.test(block.text)) {
-      return true;
-    }
-  }
-  return false;
-}
-function hasToolCall(content) {
-  return Array.isArray(content) && content.some((block) => block?.type === "toolCall");
-}
-function normalizeMalformedFunctionCall(message, providerName) {
-  if (!message || message.role !== "assistant" || message.provider !== providerName || message.stopReason !== "error") {
-    return;
-  }
-  if (typeof message.errorMessage === "string" && (message.errorMessage.startsWith(NORMALIZED_PREFIX) || message.errorMessage.startsWith(TRUNCATED_JSON_PREFIX) || message.errorMessage.startsWith(PROVIDER_CONNECTION_CLOSED_PREFIX))) {
-    return;
-  }
-  if (hasToolCall(message.content))
-    return;
-  if (typeof message.errorMessage === "string" && TRUNCATED_JSON_PATTERN.test(message.errorMessage)) {
-    log("retryable-error: retagged truncated JSON response for retry", {
-      model: message.model
-    });
-    return { message: { ...message, errorMessage: TRUNCATED_JSON_MESSAGE } };
-  }
-  if (typeof message.errorMessage === "string" && PROVIDER_CONNECTION_CLOSED_PATTERN.test(message.errorMessage)) {
-    log("retryable-error: retagged closed provider connection for retry", {
-      model: message.model
-    });
-    return { message: { ...message, errorMessage: PROVIDER_CONNECTION_CLOSED_MESSAGE } };
-  }
-  const via = hasLeakedFunctionCall(message.content) ? "leak" : typeof message.errorMessage === "string" && MALFORMED_DIAGNOSTIC_PATTERN.test(message.errorMessage) ? "diagnostic" : undefined;
-  if (!via)
-    return;
-  log("gemini-malformed-retry: retagged MALFORMED_FUNCTION_CALL for retry", {
-    model: message.model,
-    via
-  });
-  return { message: { ...message, errorMessage: NORMALIZED_MESSAGE } };
 }
 
 // src/context-policy.ts
@@ -6180,11 +6055,17 @@ var ContextPolicySnapshotSchema = object({
   for (const policy of snapshot.policies) {
     const pair = `${policy.provider}\x00${policy.modelId}`;
     if (pairs.has(pair))
-      ctx.addIssue({ code: "custom", message: "Duplicate provider/modelId policy" });
+      ctx.addIssue({
+        code: "custom",
+        message: "Duplicate provider/modelId policy"
+      });
     pairs.add(pair);
   }
   if (snapshot.status !== "ready" && snapshot.policies.length !== 0) {
-    ctx.addIssue({ code: "custom", message: "Non-ready snapshots must have no policies" });
+    ctx.addIssue({
+      code: "custom",
+      message: "Non-ready snapshots must have no policies"
+    });
   }
 }).transform((snapshot) => snapshot);
 var MAX_SNAPSHOT_BYTES = 1024 * 1024;
@@ -6233,20 +6114,37 @@ class ContextPolicyPublisher {
       reason
     };
     if (oversized)
-      next = { ...next, status: "unavailable", policies: [], reason: "Context policy snapshot exceeds the 1 MiB publication limit." };
+      next = {
+        ...next,
+        status: "unavailable",
+        policies: [],
+        reason: "Context policy snapshot exceeds the 1 MiB publication limit."
+      };
     if (status !== "ready" && policies.length > 0)
-      next = { ...next, status: "unavailable", policies: [], reason: "Context policy metadata is unavailable." };
+      next = {
+        ...next,
+        status: "unavailable",
+        policies: [],
+        reason: "Context policy metadata is unavailable."
+      };
     const { revision: _revision, ...stateWithoutRevision } = this.state;
     const { revision: _candidateRevision, ...nextWithoutRevision } = next;
     if (JSON.stringify(stateWithoutRevision) === JSON.stringify(nextWithoutRevision))
       return false;
     this.revision++;
-    this.state = Object.freeze({ ...next, revision: this.revision, policies: Object.freeze([...next.policies]) });
+    this.state = Object.freeze({
+      ...next,
+      revision: this.revision,
+      policies: Object.freeze([...next.policies])
+    });
     this.send();
     return true;
   }
   send(requestId) {
-    const snapshot = { ...this.state, ...requestId === undefined ? {} : { requestId } };
+    const snapshot = {
+      ...this.state,
+      ...requestId === undefined ? {} : { requestId }
+    };
     let valid = ContextPolicySnapshotSchema.safeParse(snapshot);
     if (!valid.success || new TextEncoder().encode(JSON.stringify(snapshot)).byteLength > MAX_SNAPSHOT_BYTES) {
       valid = ContextPolicySnapshotSchema.safeParse({
@@ -6268,131 +6166,260 @@ class ContextPolicyPublisher {
 }
 var CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON = SAFE_REASON;
 
-// src/service-tiers.ts
+// src/log.ts
+import { appendFile, mkdir as mkdir2 } from "fs/promises";
+import { join as join3 } from "path";
+import { getAgentDir as getAgentDir3 } from "@earendil-works/pi-coding-agent";
+var getCacheDir = () => join3(getAgentDir3(), "extensions", "plexus");
+var getLogPath = () => join3(getCacheDir(), "plexus.log");
+var dirEnsured = false;
+function log(message, data) {
+  writeLogLine(message, data);
+}
+async function writeLogLine(message, data) {
+  try {
+    if (!dirEnsured) {
+      await mkdir2(getCacheDir(), { recursive: true });
+      dirEnsured = true;
+    }
+    const ts = new Date().toISOString();
+    const line = data !== undefined ? `${ts} ${message} ${JSON.stringify(data)}
+` : `${ts} ${message}
+`;
+    await appendFile(getLogPath(), line, "utf8");
+  } catch {}
+}
+
+// src/gemini-malformed-retry.ts
+var MALFORMED_LEAK_PATTERN = /(?:print\()?call:\s*default_api[.:]|default_api\.\w+\s*\(/;
+var MALFORMED_DIAGNOSTIC_PATTERN = /\bmalformed[\s_-]?function[\s_-]?call\b/i;
+var TRUNCATED_JSON_PATTERN = /\bUnexpected end of JSON input\b/i;
+var PROVIDER_CONNECTION_CLOSED_PATTERN = /\bprovider connection closed\b/i;
+var NORMALIZED_PREFIX = "MALFORMED_FUNCTION_CALL:";
+var TRUNCATED_JSON_PREFIX = "TRUNCATED_JSON_RESPONSE:";
+var PROVIDER_CONNECTION_CLOSED_PREFIX = "PROVIDER_CONNECTION_CLOSED:";
+var NORMALIZED_MESSAGE = `${NORMALIZED_PREFIX} Gemini emitted a malformed tool call (its internal ` + `function-call syntax leaked as text). This is a transient model failure \u2014 ` + `please retry your request.`;
+var TRUNCATED_JSON_MESSAGE = `${TRUNCATED_JSON_PREFIX} Unexpected end of JSON input. The upstream provider ` + `returned a truncated JSON response. This is a transient provider failure \u2014 ` + `please retry your request.`;
+var PROVIDER_CONNECTION_CLOSED_MESSAGE = `${PROVIDER_CONNECTION_CLOSED_PREFIX} Provider connection closed. The upstream provider ` + `dropped the request. This is a transient provider failure \u2014 please retry your request.`;
+function hasLeakedFunctionCall(content) {
+  if (!Array.isArray(content))
+    return false;
+  for (const block of content) {
+    if (block?.type === "text" && typeof block.text === "string" && MALFORMED_LEAK_PATTERN.test(block.text)) {
+      return true;
+    }
+  }
+  return false;
+}
+function hasToolCall(content) {
+  return Array.isArray(content) && content.some((block) => block?.type === "toolCall");
+}
+function normalizeMalformedFunctionCall(message, providerName) {
+  if (message?.role !== "assistant" || message.provider !== providerName || message.stopReason !== "error") {
+    return;
+  }
+  if (typeof message.errorMessage === "string" && (message.errorMessage.startsWith(NORMALIZED_PREFIX) || message.errorMessage.startsWith(TRUNCATED_JSON_PREFIX) || message.errorMessage.startsWith(PROVIDER_CONNECTION_CLOSED_PREFIX))) {
+    return;
+  }
+  if (hasToolCall(message.content))
+    return;
+  if (typeof message.errorMessage === "string" && TRUNCATED_JSON_PATTERN.test(message.errorMessage)) {
+    log("retryable-error: retagged truncated JSON response for retry", {
+      model: message.model
+    });
+    return { message: { ...message, errorMessage: TRUNCATED_JSON_MESSAGE } };
+  }
+  if (typeof message.errorMessage === "string" && PROVIDER_CONNECTION_CLOSED_PATTERN.test(message.errorMessage)) {
+    log("retryable-error: retagged closed provider connection for retry", {
+      model: message.model
+    });
+    return {
+      message: { ...message, errorMessage: PROVIDER_CONNECTION_CLOSED_MESSAGE }
+    };
+  }
+  const via = hasLeakedFunctionCall(message.content) ? "leak" : typeof message.errorMessage === "string" && MALFORMED_DIAGNOSTIC_PATTERN.test(message.errorMessage) ? "diagnostic" : undefined;
+  if (!via)
+    return;
+  log("gemini-malformed-retry: retagged MALFORMED_FUNCTION_CALL for retry", {
+    model: message.model,
+    via
+  });
+  return { message: { ...message, errorMessage: NORMALIZED_MESSAGE } };
+}
+
+// src/mapper.ts
+import {
+  getModel
+} from "@earendil-works/pi-ai/compat";
+var MINIMUM_OUTPUT_TOKENS = 8192;
+function descriptorToPiModel(descriptor) {
+  let builtinModel;
+  if (descriptor.piProvider && descriptor.piModel) {
+    try {
+      builtinModel = getModel(descriptor.piProvider, descriptor.piModel);
+    } catch {
+      builtinModel = undefined;
+    }
+  }
+  const cost = {
+    input: descriptor.cost.input * 1e6,
+    output: descriptor.cost.output * 1e6,
+    cacheRead: descriptor.cost.cacheRead * 1e6,
+    cacheWrite: descriptor.cost.cacheWrite * 1e6,
+    ...descriptor.cost.tiers ? {
+      tiers: descriptor.cost.tiers.map((tier) => ({
+        inputTokensAbove: tier.inputTokensAbove,
+        input: tier.input * 1e6,
+        output: tier.output * 1e6,
+        cacheRead: tier.cacheRead * 1e6,
+        cacheWrite: tier.cacheWrite * 1e6
+      }))
+    } : {}
+  };
+  let compat;
+  if (descriptor.preferredApi === "openai-completions") {
+    const heuristic = detectOpenAICompletionsCompat(descriptor.piProvider ?? descriptor.provider, descriptor.baseUrl);
+    const builtinCompat = builtinModel?.compat;
+    const merged = {
+      ...heuristic,
+      ...builtinCompat ?? {},
+      ...descriptor.piOptions ?? {}
+    };
+    compat = merged;
+  } else if (descriptor.piOptions) {
+    compat = descriptor.piOptions;
+  } else if (builtinModel?.compat) {
+    compat = builtinModel.compat;
+  }
+  return {
+    id: descriptor.id,
+    name: descriptor.name,
+    api: descriptor.preferredApi,
+    provider: descriptor.provider,
+    baseUrl: descriptor.baseUrl,
+    reasoning: descriptor.reasoning,
+    input: descriptor.input,
+    cost,
+    contextWindow: descriptor.contextWindow,
+    maxTokens: Math.max(descriptor.maxTokens, MINIMUM_OUTPUT_TOKENS),
+    ...builtinModel?.thinkingLevelMap !== undefined ? { thinkingLevelMap: builtinModel.thinkingLevelMap } : {},
+    ...builtinModel?.headers !== undefined ? { headers: builtinModel.headers } : {},
+    ...compat !== undefined ? { compat } : {}
+  };
+}
+
+// src/models-control.ts
 import { randomUUID as randomUUID2 } from "crypto";
-var SERVICE_TIERS_REQUEST_CHANNEL = "plexus:service-tiers:request:v1";
-var SERVICE_TIERS_SNAPSHOT_CHANNEL = "plexus:service-tiers:snapshot:v1";
-var ServiceTierPolicySchema = object({
-  provider: string2().min(1),
-  modelId: string2().min(1),
-  serviceTiers: array(string2().min(1).max(100)).min(1).max(64)
-}).strict().refine((policy) => new Set(policy.serviceTiers).size === policy.serviceTiers.length);
-var ServiceTiersRequestSchema = object({
+var MODELS_REFRESH_CHANNEL = "plexus:models:refresh:v1";
+var MODELS_STATE_CHANNEL = "plexus:models:state:v1";
+var MAX_STATE_BYTES = 1024 * 1024;
+var ModelsRefreshSchema = object({
   version: literal(1),
   requestId: string2().min(1).max(1024)
 }).strict();
-var ServiceTiersSnapshotSchema = object({
+var ModelsStateSchema = object({
   version: literal(1),
   publisherId: string2().uuid(),
   revision: number2().int().positive().safe(),
   requestId: string2().min(1).max(1024).optional(),
-  status: _enum(["ready", "loading", "unavailable"]),
-  policies: array(ServiceTierPolicySchema),
-  fetchedAt: number2().int().nonnegative().safe().optional(),
-  cached: boolean2().optional(),
+  status: _enum(["idle", "refreshing", "ready", "error"]),
+  modelCount: number2().int().nonnegative().safe().optional(),
   reason: string2().max(500).optional()
-}).strict().superRefine((snapshot, ctx) => {
-  const pairs = new Set;
-  for (const policy of snapshot.policies) {
-    const pair = `${policy.provider}\x00${policy.modelId}`;
-    if (pairs.has(pair))
-      ctx.addIssue({ code: "custom", message: "Duplicate provider/modelId service-tier policy" });
-    pairs.add(pair);
-  }
-  if (snapshot.status !== "ready" && snapshot.policies.length !== 0) {
-    ctx.addIssue({ code: "custom", message: "Non-ready snapshots must have no policies" });
-  }
-});
-var MAX_SNAPSHOT_BYTES2 = 1024 * 1024;
-var SERVICE_TIERS_METADATA_UNAVAILABLE_REASON = "Service-tier metadata is not available from the committed Plexus catalog.";
+}).strict();
+var MODELS_REFRESH_FAILED_REASON = "The Plexus catalog refresh failed.";
+var encoder = new TextEncoder;
+function byteLength(value) {
+  return encoder.encode(JSON.stringify(value)).byteLength;
+}
+function freezeState(state) {
+  return Object.freeze({ ...state });
+}
+function freezeParsed(state) {
+  return Object.freeze({ ...state });
+}
+function statesEqual(current, next) {
+  return current.status === next.status && current.modelCount === next.modelCount && current.reason === next.reason;
+}
 
-class ServiceTiersPublisher {
+class ModelsControl {
+  host;
   publisherId = randomUUID2();
   revision = 1;
-  state = Object.freeze({
-    version: 1,
-    publisherId: this.publisherId,
-    revision: 1,
-    status: "loading",
-    policies: Object.freeze([])
-  });
+  state;
+  inFlight;
   emit;
   unsubscribe;
-  constructor(events) {
+  constructor(events, host) {
+    this.host = host;
     this.emit = events.emit.bind(events);
-    this.unsubscribe = events.on(SERVICE_TIERS_REQUEST_CHANNEL, (data) => {
-      const request = ServiceTiersRequestSchema.safeParse(data);
-      if (request.success)
-        this.send(request.data.requestId);
+    this.state = freezeState({
+      version: 1,
+      publisherId: this.publisherId,
+      revision: 1,
+      status: "idle"
     });
+    this.unsubscribe = events.on(MODELS_REFRESH_CHANNEL, (data) => this.handleCommand(data));
   }
-  getSnapshot() {
+  getState() {
     return this.state;
-  }
-  setCatalog(status, policies, metadata) {
-    const candidate = ServiceTiersSnapshotSchema.safeParse({
-      version: 1,
-      publisherId: this.publisherId,
-      revision: this.revision,
-      status,
-      policies: [...policies],
-      ...metadata
-    });
-    const oversized = candidate.success && new TextEncoder().encode(JSON.stringify(candidate.data)).byteLength > MAX_SNAPSHOT_BYTES2;
-    let next = candidate.success && !oversized ? candidate.data : {
-      version: 1,
-      publisherId: this.publisherId,
-      revision: this.revision,
-      status: "unavailable",
-      policies: [],
-      reason: oversized ? "Service-tier snapshot exceeds the 1 MiB publication limit." : "Service-tier snapshot could not be validated."
-    };
-    if (status !== "ready" && policies.length > 0) {
-      next = { ...next, status: "unavailable", policies: [], reason: "Service-tier metadata is unavailable." };
-    }
-    const { revision: _revision, ...stateWithoutRevision } = this.state;
-    const { revision: _candidateRevision, ...nextWithoutRevision } = next;
-    if (JSON.stringify(stateWithoutRevision) === JSON.stringify(nextWithoutRevision))
-      return false;
-    this.revision++;
-    this.state = Object.freeze({
-      ...next,
-      revision: this.revision,
-      policies: Object.freeze(next.policies.map((policy) => Object.freeze({
-        ...policy,
-        serviceTiers: Object.freeze([...policy.serviceTiers])
-      })))
-    });
-    this.send();
-    return true;
-  }
-  send(requestId) {
-    const snapshot = { ...this.state, ...requestId === undefined ? {} : { requestId } };
-    let valid = ServiceTiersSnapshotSchema.safeParse(snapshot);
-    if (!valid.success || new TextEncoder().encode(JSON.stringify(snapshot)).byteLength > MAX_SNAPSHOT_BYTES2) {
-      valid = ServiceTiersSnapshotSchema.safeParse({
-        version: 1,
-        publisherId: this.publisherId,
-        revision: this.revision,
-        status: "unavailable",
-        policies: [],
-        reason: "Service-tier snapshot exceeds publication limits or is invalid.",
-        ...requestId === undefined ? {} : { requestId }
-      });
-    }
-    if (valid.success) {
-      const immutable = Object.freeze({
-        ...valid.data,
-        policies: Object.freeze(valid.data.policies.map((policy) => Object.freeze({
-          ...policy,
-          serviceTiers: Object.freeze([...policy.serviceTiers])
-        })))
-      });
-      this.emit(SERVICE_TIERS_SNAPSHOT_CHANNEL, immutable);
-    }
   }
   dispose() {
     this.unsubscribe();
+  }
+  async handleCommand(data) {
+    const parsed = ModelsRefreshSchema.safeParse(data);
+    if (!parsed.success)
+      return;
+    if (!this.inFlight) {
+      const run = this.runRefresh();
+      this.inFlight = run.finally(() => {
+        this.inFlight = undefined;
+      });
+    }
+    await this.inFlight;
+    this.emitState(this.state, parsed.data.requestId);
+  }
+  async runRefresh() {
+    this.commit({ status: "refreshing" });
+    try {
+      const result = await this.host.refresh();
+      this.commit({ status: "ready", modelCount: result.modelCount });
+    } catch (error) {
+      log("models:refresh failed", { error: String(error) });
+      this.commit({ status: "error", reason: MODELS_REFRESH_FAILED_REASON });
+    }
+  }
+  commit(next) {
+    if (statesEqual(this.state, next))
+      return;
+    this.revision++;
+    this.state = freezeState({
+      version: 1,
+      publisherId: this.publisherId,
+      revision: this.revision,
+      status: next.status,
+      ...next.modelCount === undefined ? {} : { modelCount: next.modelCount },
+      ...next.reason === undefined ? {} : { reason: next.reason }
+    });
+    this.emitState(this.state);
+  }
+  emitState(state, requestId) {
+    const candidate = requestId === undefined ? state : { ...state, requestId };
+    const parsed = ModelsStateSchema.safeParse(candidate);
+    if (parsed.success && byteLength(parsed.data) <= MAX_STATE_BYTES) {
+      this.emit(MODELS_STATE_CHANNEL, freezeParsed(parsed.data));
+      return;
+    }
+    const fallback = ModelsStateSchema.safeParse({
+      version: 1,
+      publisherId: this.publisherId,
+      revision: this.revision,
+      ...requestId === undefined ? {} : { requestId },
+      status: "error",
+      reason: "Plexus catalog state is unavailable."
+    });
+    if (fallback.success)
+      this.emit(MODELS_STATE_CHANNEL, freezeParsed(fallback.data));
   }
 }
 
@@ -6400,7 +6427,7 @@ class ServiceTiersPublisher {
 import { randomUUID as randomUUID3 } from "crypto";
 var POLICY_SET_CHANNEL = "plexus:policy:set:v1";
 var POLICY_STATE_CHANNEL = "plexus:policy:state:v1";
-var MAX_STATE_BYTES = 1024 * 1024;
+var MAX_STATE_BYTES2 = 1024 * 1024;
 var PolicySetSchema = object({
   version: literal(1),
   requestId: string2().min(1).max(1024),
@@ -6426,7 +6453,10 @@ var PolicyStateSchema = object({
   reason: string2().max(500).optional()
 }).strict();
 var POLICY_UNAVAILABLE_REASON = "No Plexus context or service-tier policy is advertised for the active model.";
-var DEFAULT_SELECTION = Object.freeze({ longContext: true, serviceTier: null });
+var DEFAULT_SELECTION = Object.freeze({
+  longContext: true,
+  serviceTier: null
+});
 function policyAvailability(advertisement) {
   const context = advertisement?.context;
   return {
@@ -6450,11 +6480,11 @@ function injectServiceTier(payload, tier) {
     return payload;
   return { ...payload, service_tier: tier };
 }
-var encoder = new TextEncoder;
-function byteLength(value) {
-  return encoder.encode(JSON.stringify(value)).byteLength;
+var encoder2 = new TextEncoder;
+function byteLength2(value) {
+  return encoder2.encode(JSON.stringify(value)).byteLength;
 }
-function freezeParsed(state) {
+function freezeParsed2(state) {
   return Object.freeze({
     ...state,
     applied: Object.freeze({ ...state.applied }),
@@ -6469,7 +6499,11 @@ function freezePublished(state) {
   });
 }
 function selectionStatesEqual(current, next) {
-  const shape = (state) => JSON.stringify({ applied: state.applied, available: state.available, reason: state.reason ?? null });
+  const shape = (state) => JSON.stringify({
+    applied: state.applied,
+    available: state.available,
+    reason: state.reason ?? null
+  });
   return shape(current) === shape(next);
 }
 function validateSelection(model, advertisement, command) {
@@ -6486,7 +6520,7 @@ function validateSelection(model, advertisement, command) {
   }
   if (command.serviceTier !== undefined && command.serviceTier !== null) {
     const tiers = advertisement.serviceTier?.serviceTiers;
-    if (!tiers || !tiers.includes(command.serviceTier)) {
+    if (!tiers?.includes(command.serviceTier)) {
       return "The requested service tier is not advertised for the active model.";
     }
   }
@@ -6499,7 +6533,10 @@ class PolicyController {
   revision = 1;
   selection = { ...DEFAULT_SELECTION };
   boundModel;
-  available = { longContext: false, serviceTier: false };
+  available = {
+    longContext: false,
+    serviceTier: false
+  };
   contextWindow;
   reason;
   state;
@@ -6571,7 +6608,7 @@ class PolicyController {
     }
     if (selection.serviceTier !== null) {
       const tiers = advertisement?.serviceTier?.serviceTiers;
-      if (!tiers || !tiers.includes(selection.serviceTier)) {
+      if (!tiers?.includes(selection.serviceTier)) {
         selection = { ...selection, serviceTier: null };
         reason = "The selected service tier is no longer advertised for the active model.";
       }
@@ -6667,15 +6704,15 @@ class PolicyController {
       ...reason === undefined ? {} : { reason },
       requestId
     });
-    if (parsed.success && byteLength(parsed.data) <= MAX_STATE_BYTES) {
-      this.emit(POLICY_STATE_CHANNEL, freezeParsed(parsed.data));
+    if (parsed.success && byteLength2(parsed.data) <= MAX_STATE_BYTES2) {
+      this.emit(POLICY_STATE_CHANNEL, freezeParsed2(parsed.data));
     }
   }
   emitState(state, requestId) {
     const candidate = requestId === undefined ? state : { ...state, requestId };
     const parsed = PolicyStateSchema.safeParse(candidate);
-    if (parsed.success && byteLength(parsed.data) <= MAX_STATE_BYTES) {
-      this.emit(POLICY_STATE_CHANNEL, freezeParsed(parsed.data));
+    if (parsed.success && byteLength2(parsed.data) <= MAX_STATE_BYTES2) {
+      this.emit(POLICY_STATE_CHANNEL, freezeParsed2(parsed.data));
       return;
     }
     const fallback = PolicyStateSchema.safeParse({
@@ -6688,122 +6725,149 @@ class PolicyController {
       reason: "Plexus policy state is unavailable."
     });
     if (fallback.success)
-      this.emit(POLICY_STATE_CHANNEL, freezeParsed(fallback.data));
+      this.emit(POLICY_STATE_CHANNEL, freezeParsed2(fallback.data));
   }
 }
 
-// src/models-control.ts
+// src/service-tiers.ts
 import { randomUUID as randomUUID4 } from "crypto";
-var MODELS_REFRESH_CHANNEL = "plexus:models:refresh:v1";
-var MODELS_STATE_CHANNEL = "plexus:models:state:v1";
-var MAX_STATE_BYTES2 = 1024 * 1024;
-var ModelsRefreshSchema = object({
+var SERVICE_TIERS_REQUEST_CHANNEL = "plexus:service-tiers:request:v1";
+var SERVICE_TIERS_SNAPSHOT_CHANNEL = "plexus:service-tiers:snapshot:v1";
+var ServiceTierPolicySchema = object({
+  provider: string2().min(1),
+  modelId: string2().min(1),
+  serviceTiers: array(string2().min(1).max(100)).min(1).max(64)
+}).strict().refine((policy) => new Set(policy.serviceTiers).size === policy.serviceTiers.length);
+var ServiceTiersRequestSchema = object({
   version: literal(1),
   requestId: string2().min(1).max(1024)
 }).strict();
-var ModelsStateSchema = object({
+var ServiceTiersSnapshotSchema = object({
   version: literal(1),
   publisherId: string2().uuid(),
   revision: number2().int().positive().safe(),
   requestId: string2().min(1).max(1024).optional(),
-  status: _enum(["idle", "refreshing", "ready", "error"]),
-  modelCount: number2().int().nonnegative().safe().optional(),
+  status: _enum(["ready", "loading", "unavailable"]),
+  policies: array(ServiceTierPolicySchema),
+  fetchedAt: number2().int().nonnegative().safe().optional(),
+  cached: boolean2().optional(),
   reason: string2().max(500).optional()
-}).strict();
-var MODELS_REFRESH_FAILED_REASON = "The Plexus catalog refresh failed.";
-var encoder2 = new TextEncoder;
-function byteLength2(value) {
-  return encoder2.encode(JSON.stringify(value)).byteLength;
-}
-function freezeState(state) {
-  return Object.freeze({ ...state });
-}
-function freezeParsed2(state) {
-  return Object.freeze({ ...state });
-}
-function statesEqual(current, next) {
-  return current.status === next.status && current.modelCount === next.modelCount && current.reason === next.reason;
-}
+}).strict().superRefine((snapshot, ctx) => {
+  const pairs = new Set;
+  for (const policy of snapshot.policies) {
+    const pair = `${policy.provider}\x00${policy.modelId}`;
+    if (pairs.has(pair))
+      ctx.addIssue({
+        code: "custom",
+        message: "Duplicate provider/modelId service-tier policy"
+      });
+    pairs.add(pair);
+  }
+  if (snapshot.status !== "ready" && snapshot.policies.length !== 0) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Non-ready snapshots must have no policies"
+    });
+  }
+});
+var MAX_SNAPSHOT_BYTES2 = 1024 * 1024;
+var SERVICE_TIERS_METADATA_UNAVAILABLE_REASON = "Service-tier metadata is not available from the committed Plexus catalog.";
 
-class ModelsControl {
-  host;
+class ServiceTiersPublisher {
   publisherId = randomUUID4();
   revision = 1;
-  state;
-  inFlight;
+  state = Object.freeze({
+    version: 1,
+    publisherId: this.publisherId,
+    revision: 1,
+    status: "loading",
+    policies: Object.freeze([])
+  });
   emit;
   unsubscribe;
-  constructor(events, host) {
-    this.host = host;
+  constructor(events) {
     this.emit = events.emit.bind(events);
-    this.state = freezeState({
+    this.unsubscribe = events.on(SERVICE_TIERS_REQUEST_CHANNEL, (data) => {
+      const request = ServiceTiersRequestSchema.safeParse(data);
+      if (request.success)
+        this.send(request.data.requestId);
+    });
+  }
+  getSnapshot() {
+    return this.state;
+  }
+  setCatalog(status, policies, metadata) {
+    const candidate = ServiceTiersSnapshotSchema.safeParse({
       version: 1,
       publisherId: this.publisherId,
-      revision: 1,
-      status: "idle"
+      revision: this.revision,
+      status,
+      policies: [...policies],
+      ...metadata
     });
-    this.unsubscribe = events.on(MODELS_REFRESH_CHANNEL, (data) => this.handleCommand(data));
+    const oversized = candidate.success && new TextEncoder().encode(JSON.stringify(candidate.data)).byteLength > MAX_SNAPSHOT_BYTES2;
+    let next = candidate.success && !oversized ? candidate.data : {
+      version: 1,
+      publisherId: this.publisherId,
+      revision: this.revision,
+      status: "unavailable",
+      policies: [],
+      reason: oversized ? "Service-tier snapshot exceeds the 1 MiB publication limit." : "Service-tier snapshot could not be validated."
+    };
+    if (status !== "ready" && policies.length > 0) {
+      next = {
+        ...next,
+        status: "unavailable",
+        policies: [],
+        reason: "Service-tier metadata is unavailable."
+      };
+    }
+    const { revision: _revision, ...stateWithoutRevision } = this.state;
+    const { revision: _candidateRevision, ...nextWithoutRevision } = next;
+    if (JSON.stringify(stateWithoutRevision) === JSON.stringify(nextWithoutRevision))
+      return false;
+    this.revision++;
+    this.state = Object.freeze({
+      ...next,
+      revision: this.revision,
+      policies: Object.freeze(next.policies.map((policy) => Object.freeze({
+        ...policy,
+        serviceTiers: Object.freeze([...policy.serviceTiers])
+      })))
+    });
+    this.send();
+    return true;
   }
-  getState() {
-    return this.state;
+  send(requestId) {
+    const snapshot = {
+      ...this.state,
+      ...requestId === undefined ? {} : { requestId }
+    };
+    let valid = ServiceTiersSnapshotSchema.safeParse(snapshot);
+    if (!valid.success || new TextEncoder().encode(JSON.stringify(snapshot)).byteLength > MAX_SNAPSHOT_BYTES2) {
+      valid = ServiceTiersSnapshotSchema.safeParse({
+        version: 1,
+        publisherId: this.publisherId,
+        revision: this.revision,
+        status: "unavailable",
+        policies: [],
+        reason: "Service-tier snapshot exceeds publication limits or is invalid.",
+        ...requestId === undefined ? {} : { requestId }
+      });
+    }
+    if (valid.success) {
+      const immutable = Object.freeze({
+        ...valid.data,
+        policies: Object.freeze(valid.data.policies.map((policy) => Object.freeze({
+          ...policy,
+          serviceTiers: Object.freeze([...policy.serviceTiers])
+        })))
+      });
+      this.emit(SERVICE_TIERS_SNAPSHOT_CHANNEL, immutable);
+    }
   }
   dispose() {
     this.unsubscribe();
-  }
-  async handleCommand(data) {
-    const parsed = ModelsRefreshSchema.safeParse(data);
-    if (!parsed.success)
-      return;
-    if (!this.inFlight) {
-      const run = this.runRefresh();
-      this.inFlight = run.finally(() => {
-        this.inFlight = undefined;
-      });
-    }
-    await this.inFlight;
-    this.emitState(this.state, parsed.data.requestId);
-  }
-  async runRefresh() {
-    this.commit({ status: "refreshing" });
-    try {
-      const result = await this.host.refresh();
-      this.commit({ status: "ready", modelCount: result.modelCount });
-    } catch (error) {
-      log("models:refresh failed", { error: String(error) });
-      this.commit({ status: "error", reason: MODELS_REFRESH_FAILED_REASON });
-    }
-  }
-  commit(next) {
-    if (statesEqual(this.state, next))
-      return;
-    this.revision++;
-    this.state = freezeState({
-      version: 1,
-      publisherId: this.publisherId,
-      revision: this.revision,
-      status: next.status,
-      ...next.modelCount === undefined ? {} : { modelCount: next.modelCount },
-      ...next.reason === undefined ? {} : { reason: next.reason }
-    });
-    this.emitState(this.state);
-  }
-  emitState(state, requestId) {
-    const candidate = requestId === undefined ? state : { ...state, requestId };
-    const parsed = ModelsStateSchema.safeParse(candidate);
-    if (parsed.success && byteLength2(parsed.data) <= MAX_STATE_BYTES2) {
-      this.emit(MODELS_STATE_CHANNEL, freezeParsed2(parsed.data));
-      return;
-    }
-    const fallback = ModelsStateSchema.safeParse({
-      version: 1,
-      publisherId: this.publisherId,
-      revision: this.revision,
-      ...requestId === undefined ? {} : { requestId },
-      status: "error",
-      reason: "Plexus catalog state is unavailable."
-    });
-    if (fallback.success)
-      this.emit(MODELS_STATE_CHANNEL, freezeParsed2(fallback.data));
   }
 }
 
@@ -6811,31 +6875,27 @@ class ModelsControl {
 var PROVIDER_NAME = "plexus";
 var PLEXUS_CREDENTIAL_EXPIRES_AT = 253402300799000;
 var PLACEHOLDER_BASE_URL = "http://localhost/v1";
-var currentModels = [];
-var activeContextPolicies;
-var activeServiceTiers;
-var activePolicy;
-var activePolicyModel;
-var policyModelRegistry;
-var refreshSequence = 0;
-var catalogSource = "none";
 function enforceMinimumOutputTokens(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload))
     return payload;
   const next = { ...payload };
   let changed = false;
-  for (const field of ["max_completion_tokens", "max_tokens", "max_output_tokens"]) {
+  for (const field of [
+    "max_completion_tokens",
+    "max_tokens",
+    "max_output_tokens"
+  ]) {
     const value = next[field];
     if (typeof value === "number" && Number.isFinite(value) && value < MINIMUM_OUTPUT_TOKENS) {
       next[field] = MINIMUM_OUTPUT_TOKENS;
       changed = true;
     }
   }
-  const generationConfig = next["generationConfig"];
+  const generationConfig = next.generationConfig;
   if (generationConfig && typeof generationConfig === "object" && !Array.isArray(generationConfig)) {
-    const maxOutputTokens = generationConfig["maxOutputTokens"];
+    const maxOutputTokens = generationConfig.maxOutputTokens;
     if (typeof maxOutputTokens === "number" && Number.isFinite(maxOutputTokens) && maxOutputTokens < MINIMUM_OUTPUT_TOKENS) {
-      next["generationConfig"] = {
+      next.generationConfig = {
         ...generationConfig,
         maxOutputTokens: MINIMUM_OUTPUT_TOKENS
       };
@@ -6844,7 +6904,7 @@ function enforceMinimumOutputTokens(payload) {
   }
   return changed ? next : payload;
 }
-function withAuthoritativeApiKeyEnv(provider, envName, getHeaderModels = () => currentModels) {
+function withAuthoritativeApiKeyEnv(provider, envName, getHeaderModels = () => []) {
   const apiKey = provider.auth.apiKey;
   if (!apiKey)
     return provider;
@@ -6933,28 +6993,39 @@ function createPolicyHost(deps) {
 }
 function plexusExtension(pi) {
   const contextPolicies = new ContextPolicyPublisher(pi.events);
-  activeContextPolicies = contextPolicies;
   const serviceTiers = new ServiceTiersPublisher(pi.events);
-  activeServiceTiers = serviceTiers;
+  const state = {
+    models: [],
+    catalogSource: "none",
+    refreshSequence: 0,
+    contextPolicies,
+    serviceTiers,
+    policy: undefined,
+    activeModel: undefined,
+    registry: undefined
+  };
   const policy = new PolicyController(pi.events, createPolicyHost({
-    getActiveModel: () => activePolicyModel,
-    getModels: () => currentModels,
-    getRegistry: () => policyModelRegistry,
+    getActiveModel: () => state.activeModel,
+    getModels: () => state.models,
+    getRegistry: () => state.registry,
     setModel: (model) => pi.setModel(model),
     setActiveModel: (model) => {
-      activePolicyModel = model;
+      state.activeModel = model;
     }
   }));
-  activePolicy = policy;
+  state.policy = policy;
   const modelsControl = new ModelsControl(pi.events, {
     refresh: async () => {
-      const registry = policyModelRegistry;
+      const registry = state.registry;
       if (!registry) {
         const message = "Plexus model registry is unavailable before the session starts.";
         log("models:refresh unavailable", { reason: message });
         throw new Error(message);
       }
-      const result = await registry.refresh({ providers: [PROVIDER_NAME], force: true });
+      const result = await registry.refresh({
+        providers: [PROVIDER_NAME],
+        force: true
+      });
       if (result.aborted) {
         log("models:refresh aborted", {});
         throw new Error("Plexus model refresh was cancelled.");
@@ -6962,7 +7033,7 @@ function plexusExtension(pi) {
       const refreshError = result.errors.get(PROVIDER_NAME);
       if (refreshError)
         throw refreshError;
-      return { modelCount: currentModels.length };
+      return { modelCount: state.models.length };
     }
   });
   pi.on("session_shutdown", () => {
@@ -6970,12 +7041,12 @@ function plexusExtension(pi) {
     serviceTiers.dispose();
     policy.dispose();
     modelsControl.dispose();
-    if (activeContextPolicies === contextPolicies)
-      activeContextPolicies = undefined;
-    if (activeServiceTiers === serviceTiers)
-      activeServiceTiers = undefined;
-    if (activePolicy === policy)
-      activePolicy = undefined;
+    if (state.contextPolicies === contextPolicies)
+      state.contextPolicies = undefined;
+    if (state.serviceTiers === serviceTiers)
+      state.serviceTiers = undefined;
+    if (state.policy === policy)
+      state.policy = undefined;
   });
   const apiKeyEnvExplicit = isApiKeyEnvExplicit();
   const explicitApiKey = apiKeyEnvExplicit ? resolveExplicitApiKey() : undefined;
@@ -6985,30 +7056,33 @@ function plexusExtension(pi) {
   const suppressPatterns = getSuppressedModels();
   const storedCatalog = readStoredModelsSync();
   const startupModels = (storedCatalog?.models ?? []).filter((model) => !isModelSuppressed({ id: model.id, name: model.name }, suppressPatterns));
-  currentModels = startupModels;
-  catalogSource = startupModels.length > 0 ? "host store" : "none";
+  state.models = startupModels;
+  state.catalogSource = startupModels.length > 0 ? "host store" : "none";
   const startupPolicies = collectStoredContextPolicies(startupModels);
-  contextPolicies.setCatalog(startupPolicies.length > 0 ? "ready" : "unavailable", startupPolicies.map((entry) => entry.policy), startupPolicies.length > 0 ? { cached: true, fetchedAt: startupPolicies[0].fetchedAt } : { cached: true, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON });
+  contextPolicies.setCatalog(startupPolicies.length > 0 ? "ready" : "unavailable", startupPolicies.map((entry) => entry.policy), startupPolicies.length > 0 ? { cached: true, fetchedAt: startupPolicies[0]?.fetchedAt } : { cached: true, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON });
   if (storedCatalog) {
     const cachedTiers = collectStoredServiceTiers(startupModels);
-    serviceTiers.setCatalog(cachedTiers.complete ? "ready" : "unavailable", cachedTiers.policies, cachedTiers.complete ? { cached: true, ...cachedTiers.fetchedAt === undefined ? {} : { fetchedAt: cachedTiers.fetchedAt } } : { cached: true, reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON });
+    serviceTiers.setCatalog(cachedTiers.complete ? "ready" : "unavailable", cachedTiers.policies, cachedTiers.complete ? {
+      cached: true,
+      ...cachedTiers.fetchedAt === undefined ? {} : { fetchedAt: cachedTiers.fetchedAt }
+    } : { cached: true, reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON });
   }
   policy.reconcile();
   pi.on("session_start", (_event, ctx) => {
-    policyModelRegistry = ctx.modelRegistry;
-    activePolicyModel = ctx.model;
-    activePolicy?.reconcile();
+    state.registry = ctx.modelRegistry;
+    state.activeModel = ctx.model;
+    state.policy?.reconcile();
   });
   pi.on("model_select", (event, ctx) => {
-    policyModelRegistry = ctx.modelRegistry;
-    activePolicyModel = event.model;
-    activePolicy?.reconcile();
+    state.registry = ctx.modelRegistry;
+    state.activeModel = event.model;
+    state.policy?.reconcile();
   });
   pi.on("before_provider_request", (event, ctx) => {
     if (ctx.model?.provider !== PROVIDER_NAME)
       return;
-    activePolicyModel = ctx.model;
-    const withTier = injectServiceTier(event.payload, activePolicy?.serviceTierFor(ctx.model));
+    state.activeModel = ctx.model;
+    const withTier = injectServiceTier(event.payload, state.policy?.serviceTierFor(ctx.model));
     const next = enforceMinimumOutputTokens(withTier);
     return next === event.payload ? undefined : next;
   });
@@ -7024,7 +7098,7 @@ function plexusExtension(pi) {
     authHeader: true,
     baseUrl: startupBaseUrl ?? PLACEHOLDER_BASE_URL,
     models: startupModels,
-    refreshModels: refreshPlexusModels,
+    refreshModels: (context) => refreshPlexusModels(state, context),
     oauth: createPlexusLoginProvider()
   });
   if (apiKeyEnvExplicit) {
@@ -7036,57 +7110,81 @@ function plexusExtension(pi) {
       if (!composed?.auth.apiKey) {
         throw new Error("Plexus apiKeyEnv override failed: provider API-key auth is unavailable");
       }
-      pi.registerProvider(withAuthoritativeApiKeyEnv(composed, apiKeyEnvName));
+      pi.registerProvider(withAuthoritativeApiKeyEnv(composed, apiKeyEnvName, () => state.models));
       authOverrideApplied = true;
-      log("auth: applied authoritative apiKeyEnv override", { apiKeyEnv: apiKeyEnvName });
+      log("auth: applied authoritative apiKeyEnv override", {
+        apiKeyEnv: apiKeyEnvName
+      });
     });
   }
   pi.registerCommand("plexus", {
     description: "Plexus provider commands: refresh, status (setup: /login plexus)",
     getArgumentCompletions: (prefix) => {
       const subcommands = [
-        { value: "refresh", label: "refresh", description: "Refresh Plexus models from the API" },
-        { value: "status", label: "status", description: "Show Plexus configuration and catalog status" }
+        {
+          value: "refresh",
+          label: "refresh",
+          description: "Refresh Plexus models from the API"
+        },
+        {
+          value: "status",
+          label: "status",
+          description: "Show Plexus configuration and catalog status"
+        }
       ];
       return prefix.includes(" ") ? null : subcommands.filter((command) => command.value.startsWith(prefix));
     },
     handler: async (args, ctx) => {
       const sub = args.trim().toLowerCase();
       if (sub === "refresh" || sub === "")
-        return handleRefresh(ctx);
+        return handleRefresh(state, ctx);
       if (sub === "status")
-        return handleStatus(ctx);
+        return handleStatus(state, ctx);
       ctx.ui.notify(`Unknown sub-command: "${args}". Use /login plexus, /plexus refresh, or /plexus status.`, "warning");
     }
   });
 }
-async function refreshPlexusModels(context) {
-  const refreshId = ++refreshSequence;
+async function refreshPlexusModels(state, context) {
+  const refreshId = ++state.refreshSequence;
   const baseUrl = getBaseUrl();
   const modelsUrl = getModelsUrl();
   const apiKey = resolveApiKey(credentialApiKey(context.credential));
   const suppress = getSuppressedModels();
   if (!context.allowNetwork || !apiKey || !modelsUrl || !baseUrl) {
-    if (currentModels.length > 0) {
-      const filteredCurrent = currentModels.filter((m) => !isModelSuppressed({ id: m.id, name: m.name }, suppress));
+    if (state.models.length > 0) {
+      const filteredCurrent = state.models.filter((m) => !isModelSuppressed({ id: m.id, name: m.name }, suppress));
       await context.publish({
-        persist: { models: filteredCurrent, checkedAt: Date.now() },
+        persist: {
+          models: filteredCurrent,
+          checkedAt: Date.now()
+        },
         update: () => {
-          currentModels = filteredCurrent;
+          state.models = filteredCurrent;
           const cachedTiers = collectStoredServiceTiers(filteredCurrent);
-          activeServiceTiers?.setCatalog(cachedTiers.complete ? "ready" : "unavailable", cachedTiers.policies, cachedTiers.complete ? { cached: true, ...cachedTiers.fetchedAt === undefined ? {} : { fetchedAt: cachedTiers.fetchedAt } } : { cached: true, reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON });
+          state.serviceTiers?.setCatalog(cachedTiers.complete ? "ready" : "unavailable", cachedTiers.policies, cachedTiers.complete ? {
+            cached: true,
+            ...cachedTiers.fetchedAt === undefined ? {} : { fetchedAt: cachedTiers.fetchedAt }
+          } : {
+            cached: true,
+            reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON
+          });
           const cachedPolicies = collectStoredContextPolicies(filteredCurrent);
-          activeContextPolicies?.setCatalog(cachedPolicies.length > 0 ? "ready" : "unavailable", cachedPolicies.map((entry) => entry.policy), cachedPolicies.length > 0 ? { cached: true, fetchedAt: cachedPolicies[0].fetchedAt } : { cached: true, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON });
-          activePolicy?.reconcile();
+          state.contextPolicies?.setCatalog(cachedPolicies.length > 0 ? "ready" : "unavailable", cachedPolicies.map((entry) => entry.policy), cachedPolicies.length > 0 ? { cached: true, fetchedAt: cachedPolicies[0]?.fetchedAt } : {
+            cached: true,
+            reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON
+          });
+          state.policy?.reconcile();
         }
       });
       return filteredCurrent;
     }
-    const restored = await restoreStoredModels(context);
+    const restored = await restoreStoredModels(state, context);
     if (restored)
       return restored;
-    if (refreshId === refreshSequence && activeServiceTiers?.getSnapshot().status === "loading") {
-      activeServiceTiers.setCatalog("unavailable", [], { reason: "Plexus model metadata is not configured." });
+    if (refreshId === state.refreshSequence && state.serviceTiers?.getSnapshot().status === "loading") {
+      state.serviceTiers.setCatalog("unavailable", [], {
+        reason: "Plexus model metadata is not configured."
+      });
     }
     throw new Error(!modelsUrl || !baseUrl ? "Plexus base URL not configured. Run /login plexus first." : "No Plexus API key configured. Run /login plexus first.");
   }
@@ -7105,18 +7203,26 @@ async function refreshPlexusModels(context) {
       const policy = contextPolicyFromApiModel(model);
       if (policy)
         piModel.plexusContextPolicy = { policy, fetchedAt };
-      piModel.plexusServiceTiers = { policy: serviceTierPolicyFromApiModel(model), fetchedAt };
+      piModel.plexusServiceTiers = {
+        policy: serviceTierPolicyFromApiModel(model),
+        fetchedAt
+      };
     }
     const committedPolicies = collectStoredContextPolicies(piModels);
     const committedServiceTiers = collectStoredServiceTiers(piModels).policies;
     const published = await context.publish({
-      persist: { models: piModels, checkedAt: Date.now() },
+      persist: {
+        models: piModels,
+        checkedAt: Date.now()
+      },
       update: () => {
-        currentModels = piModels;
-        catalogSource = "live refresh";
-        activeServiceTiers?.setCatalog("ready", committedServiceTiers, { fetchedAt });
-        activeContextPolicies?.setCatalog(committedPolicies.length > 0 ? "ready" : "unavailable", committedPolicies.map((entry) => entry.policy), committedPolicies.length > 0 ? { fetchedAt } : { fetchedAt, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON });
-        activePolicy?.reconcile();
+        state.models = piModels;
+        state.catalogSource = "live refresh";
+        state.serviceTiers?.setCatalog("ready", committedServiceTiers, {
+          fetchedAt
+        });
+        state.contextPolicies?.setCatalog(committedPolicies.length > 0 ? "ready" : "unavailable", committedPolicies.map((entry) => entry.policy), committedPolicies.length > 0 ? { fetchedAt } : { fetchedAt, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON });
+        state.policy?.reconcile();
       }
     });
     if (!published) {
@@ -7125,17 +7231,21 @@ async function refreshPlexusModels(context) {
     log("refreshModels: fetched", { count: piModels.length });
     return piModels;
   } catch (error) {
-    if (refreshId === refreshSequence && activeContextPolicies?.getSnapshot().status === "loading") {
-      activeContextPolicies.setCatalog("unavailable", [], { reason: "Plexus model metadata could not be loaded." });
+    if (refreshId === state.refreshSequence && state.contextPolicies?.getSnapshot().status === "loading") {
+      state.contextPolicies.setCatalog("unavailable", [], {
+        reason: "Plexus model metadata could not be loaded."
+      });
     }
-    if (refreshId === refreshSequence && activeServiceTiers?.getSnapshot().status === "loading") {
-      activeServiceTiers.setCatalog("unavailable", [], { reason: "Plexus model metadata could not be loaded." });
+    if (refreshId === state.refreshSequence && state.serviceTiers?.getSnapshot().status === "loading") {
+      state.serviceTiers.setCatalog("unavailable", [], {
+        reason: "Plexus model metadata could not be loaded."
+      });
     }
     log("refreshModels: fetch failed", { error: String(error) });
     throw error;
   }
 }
-async function restoreStoredModels(context) {
+async function restoreStoredModels(state, context) {
   const stored = context.stored;
   if (!stored || stored.models.length === 0)
     return;
@@ -7143,13 +7253,19 @@ async function restoreStoredModels(context) {
   const models = stored.models.filter((m) => !isModelSuppressed({ id: m.id, name: m.name }, suppress));
   await context.publish({
     update: () => {
-      currentModels = models;
-      catalogSource = "host store";
+      state.models = models;
+      state.catalogSource = "host store";
       const cachedTiers = collectStoredServiceTiers(models);
-      activeServiceTiers?.setCatalog(cachedTiers.complete ? "ready" : "unavailable", cachedTiers.policies, cachedTiers.complete ? { cached: true, ...cachedTiers.fetchedAt === undefined ? {} : { fetchedAt: cachedTiers.fetchedAt } } : { cached: true, reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON });
+      state.serviceTiers?.setCatalog(cachedTiers.complete ? "ready" : "unavailable", cachedTiers.policies, cachedTiers.complete ? {
+        cached: true,
+        ...cachedTiers.fetchedAt === undefined ? {} : { fetchedAt: cachedTiers.fetchedAt }
+      } : { cached: true, reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON });
       const cachedPolicies = collectStoredContextPolicies(models);
-      activeContextPolicies?.setCatalog(cachedPolicies.length > 0 ? "ready" : "unavailable", cachedPolicies.map((entry) => entry.policy), cachedPolicies.length > 0 ? { cached: true, fetchedAt: cachedPolicies[0].fetchedAt } : { cached: true, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON });
-      activePolicy?.reconcile();
+      state.contextPolicies?.setCatalog(cachedPolicies.length > 0 ? "ready" : "unavailable", cachedPolicies.map((entry) => entry.policy), cachedPolicies.length > 0 ? { cached: true, fetchedAt: cachedPolicies[0]?.fetchedAt } : {
+        cached: true,
+        reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON
+      });
+      state.policy?.reconcile();
     }
   });
   log("refreshModels: restored from store", { count: models.length });
@@ -7158,7 +7274,7 @@ async function restoreStoredModels(context) {
 function contextPolicyFromApiModel(model) {
   const maxContextTokens = model.context_length;
   const pricingThresholdInputTokens = model.pricing?.tiers?.[0]?.input_tokens_above;
-  if (!Number.isSafeInteger(maxContextTokens) || maxContextTokens <= 0 || !Number.isSafeInteger(pricingThresholdInputTokens) || pricingThresholdInputTokens <= 0 || pricingThresholdInputTokens > maxContextTokens)
+  if (typeof maxContextTokens !== "number" || !Number.isSafeInteger(maxContextTokens) || maxContextTokens <= 0 || typeof pricingThresholdInputTokens !== "number" || !Number.isSafeInteger(pricingThresholdInputTokens) || pricingThresholdInputTokens <= 0 || pricingThresholdInputTokens > maxContextTokens)
     return;
   return {
     provider: PROVIDER_NAME,
@@ -7178,7 +7294,11 @@ function serviceTierPolicyFromApiModel(model) {
   const serviceTiers = model.service_tiers;
   if (!Array.isArray(serviceTiers) || serviceTiers.length === 0)
     return;
-  const candidate = { provider: PROVIDER_NAME, modelId: model.id, serviceTiers };
+  const candidate = {
+    provider: PROVIDER_NAME,
+    modelId: model.id,
+    serviceTiers
+  };
   const parsed = ServiceTierPolicySchema.safeParse(candidate);
   return parsed.success ? parsed.data : undefined;
 }
@@ -7237,7 +7357,7 @@ function createPlexusLoginProvider() {
     }
   };
 }
-async function handleRefresh(ctx) {
+async function handleRefresh(state, ctx) {
   let apiKey;
   try {
     apiKey = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER_NAME);
@@ -7250,7 +7370,10 @@ async function handleRefresh(ctx) {
     return;
   }
   ctx.ui.notify("Refreshing Plexus models\u2026", "info");
-  const result = await ctx.modelRegistry.refresh({ providers: [PROVIDER_NAME], force: true });
+  const result = await ctx.modelRegistry.refresh({
+    providers: [PROVIDER_NAME],
+    force: true
+  });
   if (result.aborted) {
     ctx.ui.notify("Plexus model refresh was cancelled.", "warning");
     return;
@@ -7260,9 +7383,9 @@ async function handleRefresh(ctx) {
     ctx.ui.notify(`Plexus model refresh failed: ${refreshError.message}`, "error");
     return;
   }
-  ctx.ui.notify(currentModels.length > 0 ? `Refreshed ${currentModels.length} Plexus models` : "Refresh finished but no Plexus models are available. Check the Plexus server and /login plexus.", currentModels.length > 0 ? "info" : "warning");
+  ctx.ui.notify(state.models.length > 0 ? `Refreshed ${state.models.length} Plexus models` : "Refresh finished but no Plexus models are available. Check the Plexus server and /login plexus.", state.models.length > 0 ? "info" : "warning");
 }
-async function handleStatus(ctx) {
+async function handleStatus(state, ctx) {
   const baseUrl = getBaseUrlResolution();
   const apiKeyEnvName = getApiKeyEnvName();
   const apiKey = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER_NAME).catch(() => {
@@ -7272,7 +7395,7 @@ async function handleStatus(ctx) {
   ctx.ui.notify([
     `Plexus base URL: ${baseUrl.baseUrl ?? "not configured"} (${baseUrl.source})`,
     `API key: ${apiKey ? explicitApiKey !== undefined ? `${apiKeyEnvName} (apiKeyEnv)` : getEnvApiKey() ? `host credential or ${apiKeyEnvName} fallback` : "host credential" : "not configured"}`,
-    `Catalog: ${currentModels.length} models (${catalogSource})`,
+    `Catalog: ${state.models.length} models (${state.catalogSource})`,
     "Default model: managed by Pi. Use /model and save the selection there."
   ].join(`
 `), "info");

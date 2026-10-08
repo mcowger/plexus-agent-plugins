@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	test,
+} from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,6 +50,7 @@ function clearConfig(): void {
 }
 
 beforeEach(() => {
+	delete process.env[CUSTOM_ENV];
 	clearConfig();
 });
 
@@ -50,35 +59,44 @@ afterEach(() => {
 });
 
 test("builds Plexus endpoints once before model dialect adjustment", () => {
-	expect(toPlexusApiBase("https://plexus.example.com")).toBe("https://plexus.example.com/v1");
-	expect(toPlexusApiBase("https://plexus.example.com/v1/")).toBe("https://plexus.example.com/v1");
+	expect(toPlexusApiBase("https://plexus.example.com")).toBe(
+		"https://plexus.example.com/v1",
+	);
+	expect(toPlexusApiBase("https://plexus.example.com/v1/")).toBe(
+		"https://plexus.example.com/v1",
+	);
 });
 
 describe("oh-my-pi config template resolution", () => {
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: intentional ${VAR} template literal under test
 	test("matches pi-style $VAR and ${VAR} interpolation", () => {
-		process.env["PLEXUS_TEST_HOST"] = "https://plexus.example.com";
-		process.env["PLEXUS_TEST_KEY"] = "secret";
+		process.env.PLEXUS_TEST_HOST = "https://plexus.example.com";
+		process.env.PLEXUS_TEST_KEY = "secret";
 
-		expect(resolveConfigTemplate("${PLEXUS_TEST_HOST}/v1")).toBe("https://plexus.example.com/v1");
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: intentional ${VAR} template literal under test
+		expect(resolveConfigTemplate("${PLEXUS_TEST_HOST}/v1")).toBe(
+			"https://plexus.example.com/v1",
+		);
 		expect(resolveConfigTemplate("$PLEXUS_TEST_KEY")).toBe("secret");
 		expect(resolveConfigTemplate("cost-$$5")).toBe("cost-$5");
 	});
 
 	test("returns undefined when a referenced env var is missing", () => {
-		delete process.env["PLEXUS_MISSING_VAR"];
+		delete process.env.PLEXUS_MISSING_VAR;
 
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: intentional ${VAR} template literal under test
 		expect(resolveConfigTemplate("${PLEXUS_MISSING_VAR}")).toBeUndefined();
 	});
 
 	test("resolves suppressed models from environment variable", () => {
-		process.env["PLEXUS_SUPPRESS_MODELS"] = "claude-2*, gpt-3.5*";
+		process.env.PLEXUS_SUPPRESS_MODELS = "claude-2*, gpt-3.5*";
 		expect(getSuppressedModels()).toEqual(["claude-2*", "gpt-3.5*"]);
 	});
 });
 
 describe("apiKeyEnv default behavior", () => {
 	test("omitted apiKeyEnv uses PLEXUS_API_KEY", () => {
-		process.env["PLEXUS_API_KEY"] = "default-key";
+		process.env.PLEXUS_API_KEY = "default-key";
 
 		expect(getApiKeyEnvName()).toBe("PLEXUS_API_KEY");
 		expect(resolveExplicitApiKey()).toBeUndefined();
@@ -86,7 +104,7 @@ describe("apiKeyEnv default behavior", () => {
 	});
 
 	test("omitted apiKeyEnv leaves PLEXUS_API_KEY optional", () => {
-		delete process.env["PLEXUS_API_KEY"];
+		delete process.env.PLEXUS_API_KEY;
 
 		expect(getEnvApiKey()).toBeNull();
 		expect(resolveApiKey("stored-key")).toBe("stored-key");
@@ -116,7 +134,7 @@ describe("apiKeyEnv custom variable", () => {
 describe("apiKeyEnv missing and empty", () => {
 	test("missing variable throws without falling back", () => {
 		writeConfig({ apiKeyEnv: CUSTOM_ENV });
-		process.env["PLEXUS_API_KEY"] = "default-key";
+		process.env.PLEXUS_API_KEY = "default-key";
 
 		expect(() => resolveExplicitApiKey()).toThrow(/is missing or empty/);
 		expect(() => resolveApiKey("stored-key")).toThrow(/is missing or empty/);
@@ -124,7 +142,7 @@ describe("apiKeyEnv missing and empty", () => {
 
 	test("empty variable throws without falling back", () => {
 		writeConfig({ apiKeyEnv: CUSTOM_ENV });
-		process.env["PLEXUS_API_KEY"] = "default-key";
+		process.env.PLEXUS_API_KEY = "default-key";
 
 		for (const value of ["", "   "]) {
 			process.env[CUSTOM_ENV] = value;
@@ -169,25 +187,25 @@ describe("apiKeyEnv validation", () => {
 
 describe("apiKeyEnv precedence", () => {
 	test("default keeps the host-resolved key ahead of the process fallback", () => {
-		process.env["PLEXUS_API_KEY"] = "env-key";
+		process.env.PLEXUS_API_KEY = "env-key";
 		expect(resolveApiKey("stored-key")).toBe("stored-key");
 	});
 
 	test("default falls back to PLEXUS_API_KEY when no stored credential exists", () => {
-		process.env["PLEXUS_API_KEY"] = "env-key";
+		process.env.PLEXUS_API_KEY = "env-key";
 		expect(resolveApiKey(undefined)).toBe("env-key");
 	});
 
 	test("explicit apiKeyEnv outranks the stored credential", () => {
 		writeConfig({ apiKeyEnv: CUSTOM_ENV });
 		process.env[CUSTOM_ENV] = "custom-key";
-		process.env["PLEXUS_API_KEY"] = "env-key";
+		process.env.PLEXUS_API_KEY = "env-key";
 		expect(resolveApiKey("stored-key")).toBe("custom-key");
 	});
 
 	test("explicit apiKeyEnv is authoritative even when it names PLEXUS_API_KEY", () => {
 		writeConfig({ apiKeyEnv: "PLEXUS_API_KEY" });
-		process.env["PLEXUS_API_KEY"] = "explicit-key";
+		process.env.PLEXUS_API_KEY = "explicit-key";
 		expect(resolveApiKey("stored-key")).toBe("explicit-key");
 	});
 });

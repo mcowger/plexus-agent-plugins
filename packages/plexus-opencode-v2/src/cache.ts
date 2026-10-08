@@ -6,8 +6,8 @@ import {
 	isModelSuppressed,
 	type PlexusApiResponse,
 } from "../../plexus-models/src/index.ts";
-import type { CachedModel } from "./mapper.ts";
 import { CACHE_VERSION } from "./constants.ts";
+import type { CachedModel } from "./mapper.ts";
 
 const PLUGIN_SUBDIR = join("plugins", "plexus");
 const CACHE_FILE = "models-cache-v2.json";
@@ -15,7 +15,8 @@ const RAW_FILE = "models-raw.json";
 
 /** ~/.local/share/opencode/plugins/plexus — never route through the server. */
 export function getDir(): string {
-	const dataHome = process.env.XDG_DATA_HOME || join(homedir(), ".local", "share");
+	const dataHome =
+		process.env.XDG_DATA_HOME || join(homedir(), ".local", "share");
 	return join(dataHome, "opencode", PLUGIN_SUBDIR);
 }
 
@@ -36,7 +37,8 @@ export function filterCachedModels(
 	suppress?: string | string[] | null,
 ): CachedModel[] {
 	return models.filter((model) => {
-		if (isModelSuppressed({ id: model.id, name: model.name }, suppress)) return false;
+		if (isModelSuppressed({ id: model.id, name: model.name }, suppress))
+			return false;
 		return isChatModel({
 			id: model.id,
 			name: model.name,
@@ -78,11 +80,24 @@ export async function writeCache(
 		const dir = getDir();
 		await mkdir(dir, { recursive: true });
 
-		const cache: ModelCacheFile = { version: CACHE_VERSION, models, timestamp: Date.now(), etag };
-		await writeFile(join(dir, CACHE_FILE), JSON.stringify(cache, null, 2) + "\n", "utf8");
+		const cache: ModelCacheFile = {
+			version: CACHE_VERSION,
+			models,
+			timestamp: Date.now(),
+			etag,
+		};
+		await writeFile(
+			join(dir, CACHE_FILE),
+			`${JSON.stringify(cache, null, 2)}\n`,
+			"utf8",
+		);
 
 		if (raw !== undefined) {
-			await writeFile(join(dir, RAW_FILE), JSON.stringify(raw, null, 2) + "\n", "utf8");
+			await writeFile(
+				join(dir, RAW_FILE),
+				`${JSON.stringify(raw, null, 2)}\n`,
+				"utf8",
+			);
 		}
 	} catch {
 		// Never block plugin init on cache write failures

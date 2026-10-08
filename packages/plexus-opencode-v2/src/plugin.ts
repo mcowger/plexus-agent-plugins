@@ -1,11 +1,11 @@
-import { Model, Plugin, Provider } from "@opencode/plugin";
+import { type Model, Plugin, Provider } from "@opencode/plugin";
 import { fetchPlexusModels } from "../../plexus-models/src/index.ts";
 import { readCachedModels, writeCache } from "./cache.ts";
 import {
-	getSuppressedModels,
-	resolveConfig,
 	type ConnectionCredential,
+	getSuppressedModels,
 	type PluginOptions,
+	resolveConfig,
 } from "./config-store.ts";
 import {
 	MODELS_FETCH_TIMEOUT_MS,
@@ -20,7 +20,11 @@ import {
 	REFRESH_TTL_MS,
 } from "./constants.ts";
 import { createLogger, type Logger } from "./log.ts";
-import { buildModels, placeholderModel, type PlexusModelInfo } from "./mapper.ts";
+import {
+	buildModels,
+	type PlexusModelInfo,
+	placeholderModel,
+} from "./mapper.ts";
 import { apiBase, modelsUrl } from "./url.ts";
 
 type Context = Plugin.Context;
@@ -48,19 +52,26 @@ function toModelInfo(models: PlexusModelInfo[]): Model.Info[] {
 async function resolveConnectionCredential(
 	ctx: Context,
 	log: Logger,
-): Promise<{ connection: unknown; credential: ConnectionCredential | undefined }> {
+): Promise<{
+	connection: unknown;
+	credential: ConnectionCredential | undefined;
+}> {
 	try {
-		const connection = await ctx.integration.connection.active(PLEXUS_INTEGRATION_ID);
+		const connection = await ctx.integration.connection.active(
+			PLEXUS_INTEGRATION_ID,
+		);
 		if (!connection) return { connection: undefined, credential: undefined };
 		const resolved = await ctx.integration.connection.resolve(connection);
-		if (!resolved || resolved.type !== "key") {
+		if (resolved?.type !== "key") {
 			return { connection, credential: undefined };
 		}
 		return {
 			connection,
 			credential: {
 				key: resolved.key,
-				metadata: (resolved.metadata ?? undefined) as Record<string, unknown> | undefined,
+				metadata: (resolved.metadata ?? undefined) as
+					| Record<string, unknown>
+					| undefined,
 				configuration: (resolved.configuration ?? undefined) as
 					| Record<string, string | number | boolean | string[]>
 					| undefined,
@@ -80,7 +91,9 @@ function refreshModels(
 	suppress?: string | string[] | null,
 ): Promise<PlexusModelInfo[]> {
 	if (!force && lastRefresh && Date.now() - lastRefresh.at < REFRESH_TTL_MS) {
-		log.info(`Using in-memory plexus model cache (${lastRefresh.models.length} models)`);
+		log.info(
+			`Using in-memory plexus model cache (${lastRefresh.models.length} models)`,
+		);
 		return Promise.resolve(lastRefresh.models);
 	}
 
@@ -89,7 +102,12 @@ function refreshModels(
 	const run = async (): Promise<PlexusModelInfo[]> => {
 		const url = modelsUrl(baseURL);
 		const cached = await readCachedModels(suppress);
-		const { models: apiModels, raw, etag, notModified } = await fetchPlexusModels(
+		const {
+			models: apiModels,
+			raw,
+			etag,
+			notModified,
+		} = await fetchPlexusModels(
 			apiKey ?? "",
 			url,
 			MODELS_FETCH_TIMEOUT_MS,
@@ -130,7 +148,10 @@ async function loadSource(
 	force: boolean,
 ): Promise<Source> {
 	const suppress = getSuppressedModels(options);
-	const { connection, credential } = await resolveConnectionCredential(ctx, log);
+	const { connection, credential } = await resolveConnectionCredential(
+		ctx,
+		log,
+	);
 	const { baseURL, apiKey } = resolveConfig(options, credential);
 	log.info(
 		`Resolved plexus config: baseURL=${baseURL ?? "(missing)"} apiKey=${apiKey ? "present" : "missing"}`,
@@ -149,10 +170,15 @@ async function loadSource(
 	try {
 		const models = await refreshModels(baseURL, log, apiKey, force, suppress);
 		if (models.length === 0) {
-			log.warn("Live fetch returned no models; falling back to cache or placeholder");
+			log.warn(
+				"Live fetch returned no models; falling back to cache or placeholder",
+			);
 			const cached = await readCachedModels(suppress);
 			return {
-				models: cached && cached.models.length > 0 ? cached.models : [placeholderModel()],
+				models:
+					cached && cached.models.length > 0
+						? cached.models
+						: [placeholderModel()],
 				baseURL,
 				apiKey,
 				connection,
@@ -194,7 +220,12 @@ export default Plugin.define({
 	async setup(ctx) {
 		const log = createLogger();
 		const options = (ctx.options ?? {}) as PluginOptions;
-		const source: Source = { models: [], baseURL: undefined, apiKey: undefined, connection: undefined };
+		const source: Source = {
+			models: [],
+			baseURL: undefined,
+			apiKey: undefined,
+			connection: undefined,
+		};
 
 		const reloadSource = async (force: boolean): Promise<void> => {
 			const next = await loadSource(ctx, log, options, force);
@@ -221,9 +252,13 @@ export default Plugin.define({
 			editor.add({
 				info: providerInfo(source),
 				models: toModelInfo(source.models),
-				...(source.connection ? { sourceConnection: source.connection as never } : {}),
+				...(source.connection
+					? { sourceConnection: source.connection as never }
+					: {}),
 			});
-			log.info(`Provider transform: registered ${PLEXUS_PROVIDER_ID} with ${source.models.length} models (present=${Boolean(editor.get(providerID))})`);
+			log.info(
+				`Provider transform: registered ${PLEXUS_PROVIDER_ID} with ${source.models.length} models (present=${Boolean(editor.get(providerID))})`,
+			);
 		});
 
 		// Re-read the connection on every rebuild so key rotation and
@@ -232,10 +267,10 @@ export default Plugin.define({
 		await ctx.provider.transform((editor) => {
 			editor.update(providerID, (provider) => {
 				const settings = (provider.settings ?? {}) as Record<string, unknown>;
-				if (source.baseURL) settings["baseURL"] = apiBase(source.baseURL);
-				else delete settings["baseURL"];
-				if (source.apiKey) settings["apiKey"] = source.apiKey;
-				else delete settings["apiKey"];
+				if (source.baseURL) settings.baseURL = apiBase(source.baseURL);
+				else delete settings.baseURL;
+				if (source.apiKey) settings.apiKey = source.apiKey;
+				else delete settings.apiKey;
 				provider.settings = settings as never;
 			});
 		});
@@ -263,7 +298,8 @@ export default Plugin.define({
 								type: "string",
 								key: PLEXUS_BASE_URL_OPTION,
 								title: "Plexus base URL",
-								description: "Plexus root URL (https://host or https://host/v1)",
+								description:
+									"Plexus root URL (https://host or https://host/v1)",
 								placeholder: "https://plexus.example.com",
 								required: true,
 							},
@@ -330,14 +366,17 @@ export default Plugin.define({
 			let pending: Promise<void> | null = null;
 			for await (const event of ctx.event.subscribe()) {
 				const type = (event as { type?: string }).type;
-				if (type !== "credential.updated" && type !== "credential.switched") continue;
+				if (type !== "credential.updated" && type !== "credential.switched")
+					continue;
 				if (pending) continue;
 				pending = (async () => {
 					try {
 						lastRefresh = null;
 						await reloadSource(true);
 						await ctx.provider.reload();
-						log.info(`Credentials changed (${type}); reloaded ${source.models.length} model(s)`);
+						log.info(
+							`Credentials changed (${type}); reloaded ${source.models.length} model(s)`,
+						);
 					} catch (e) {
 						log.warn(`Reload after credential change failed: ${String(e)}`);
 					} finally {

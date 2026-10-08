@@ -16023,20 +16023,12 @@ var init_devin2 = __esm(() => {
   DEVIN_IMAGE_BLIND_UIDS = new Set(["swe-1-6", "swe-1-6-fast"]);
 });
 
-// ../plexus-models/src/suppress.ts
-function parseSuppressionPatterns(raw) {
-  if (!raw)
-    return [];
-  const items = Array.isArray(raw) ? raw : raw.split(/[\n,;]+/);
-  return items.map((s) => s.trim()).filter((s) => s.length > 0);
-}
-function getEnvSuppressedModels() {
-  const env = typeof process !== "undefined" && process?.env ? process.env : {};
-  const raw = env.PLEXUS_SUPPRESS_MODELS ?? env.PLEXUS_EXCLUDE_MODELS;
-  return parseSuppressionPatterns(raw);
-}
 // ../plexus-models/src/convert.ts
-var REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
+var REASONING_PARAMS = new Set([
+  "reasoning",
+  "include_reasoning",
+  "reasoning_effort"
+]);
 var NON_CHAT_PATTERN = /(?:^|[\W_])(?:embed(?:ding|dings)?|transcri(?:be[ds]?|ptions?)|whisper|speech[\W_]*to[\W_]*text|stt|text[\W_]*to[\W_]*speech|tts|image(?:[\W_]*(?:gen(?:eration)?|\d+))?|diffusion|dall[\W_]*e|stable[\W_]*diffusion|sdxl|dream)(?:$|[\W_])/i;
 var API_DIALECT_MAP = {
   chat_completions: "openai-completions",
@@ -16091,13 +16083,13 @@ function parsePrice(raw) {
   if (raw === undefined)
     return 0;
   const n = parseFloat(raw);
-  return isFinite(n) && n >= 0 ? n : 0;
+  return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 function resolveContextWindow(model) {
   const v = model.context_length ?? model.top_provider?.context_length ?? null;
   return v != null && v > 0 ? v : 8192;
 }
-function resolveMaxTokens(model, contextWindow) {
+function resolveMaxTokens(model) {
   const v = model.top_provider?.max_completion_tokens ?? null;
   if (v == null || v < 100) {
     return 32768;
@@ -16111,13 +16103,15 @@ function resolvePricingTiers(model) {
   const tiers = pricing.tiers.flatMap((tier) => {
     if (!Number.isFinite(tier.input_tokens_above) || tier.input_tokens_above < 0)
       return [];
-    return [{
-      inputTokensAbove: tier.input_tokens_above,
-      input: parsePrice(tier.prompt ?? pricing.prompt),
-      output: parsePrice(tier.completion ?? pricing.completion),
-      cacheRead: parsePrice(tier.input_cache_read ?? pricing.input_cache_read),
-      cacheWrite: parsePrice(tier.input_cache_write ?? pricing.input_cache_write)
-    }];
+    return [
+      {
+        inputTokensAbove: tier.input_tokens_above,
+        input: parsePrice(tier.prompt ?? pricing.prompt),
+        output: parsePrice(tier.completion ?? pricing.completion),
+        cacheRead: parsePrice(tier.input_cache_read ?? pricing.input_cache_read),
+        cacheWrite: parsePrice(tier.input_cache_write ?? pricing.input_cache_write)
+      }
+    ];
   });
   return tiers.length > 0 ? tiers : undefined;
 }
@@ -16125,7 +16119,7 @@ function convertToDescriptor(raw, baseUrl) {
   const preferredApi = mapPreferredApi(raw.preferred_api);
   const adjustedBaseUrl = adjustBaseUrl(baseUrl, preferredApi);
   const contextWindow = resolveContextWindow(raw);
-  const maxTokens = resolveMaxTokens(raw, contextWindow);
+  const maxTokens = resolveMaxTokens(raw);
   const tiers = resolvePricingTiers(raw);
   const descriptor = {
     id: raw.id,
@@ -16179,7 +16173,7 @@ function isChatModel(model) {
   const apiHints = Array.isArray(model.preferred_api) ? model.preferred_api.join(" ") : model.preferred_api ?? "";
   return !NON_CHAT_PATTERN.test(`${model.id} ${model.name ?? ""} ${apiHints}`);
 }
-function parseSuppressionPatterns2(input) {
+function parseSuppressionPatterns(input) {
   if (!input)
     return [];
   const rawItems = Array.isArray(input) ? input : [input];
@@ -16198,9 +16192,9 @@ function parseSuppressionPatterns2(input) {
   return patterns;
 }
 function isSuppressedModel(model, suppress) {
-  if (!model || !model.id)
+  if (!model?.id)
     return false;
-  const patterns = parseSuppressionPatterns2(suppress);
+  const patterns = parseSuppressionPatterns(suppress);
   if (patterns.length === 0)
     return false;
   const idLower = model.id.toLowerCase();
@@ -16224,7 +16218,7 @@ function isSuppressedModel(model, suppress) {
     if (pattern.includes("*") || pattern.includes("?")) {
       try {
         const escaped = patternLower.replace(/[.+^$()|[{}]\\]/g, "\\$&");
-        const regexStr = "^" + escaped.replace(/\*/g, ".*").replace(/\?/g, ".") + "$";
+        const regexStr = `^${escaped.replace(/\*/g, ".*").replace(/\?/g, ".")}$`;
         const globRe = new RegExp(regexStr, "i");
         if (globRe.test(model.id) || model.name && globRe.test(model.name)) {
           return true;
@@ -16336,6 +16330,18 @@ async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_F
   } finally {
     clearTimeout(timer);
   }
+}
+// ../plexus-models/src/suppress.ts
+function parseSuppressionPatterns2(raw) {
+  if (!raw)
+    return [];
+  const items = Array.isArray(raw) ? raw : raw.split(/[\n,;]+/);
+  return items.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+function getEnvSuppressedModels() {
+  const env = typeof process !== "undefined" && process?.env ? process.env : {};
+  const raw = env.PLEXUS_SUPPRESS_MODELS ?? env.PLEXUS_EXCLUDE_MODELS;
+  return parseSuppressionPatterns2(raw);
 }
 // src/config.ts
 import { existsSync, readFileSync } from "fs";
@@ -16492,12 +16498,12 @@ function getBaseUrl() {
 function getSuppressedModels() {
   const config = getConfigSync();
   const envSuppressed = getEnvSuppressedModels();
-  const configSuppressed = parseSuppressionPatterns(config.suppressModels ?? config.suppress);
+  const configSuppressed = parseSuppressionPatterns2(config.suppressModels ?? config.suppress);
   return [...envSuppressed, ...configSuppressed];
 }
 
 // src/log.ts
-import { mkdir as mkdir2, appendFile } from "fs/promises";
+import { appendFile, mkdir as mkdir2 } from "fs/promises";
 import { join as join2 } from "path";
 import { getAgentDir as getAgentDir2 } from "@oh-my-pi/pi-utils";
 var getCacheDir = () => join2(getAgentDir2(), "extensions", "plexus");
@@ -23181,7 +23187,11 @@ function descriptorToOhMyPiModel(descriptor) {
   if (descriptor.preferredApi === "openai-completions") {
     const heuristic = detectOpenAICompletionsCompat(descriptor.piProvider ?? descriptor.provider, descriptor.baseUrl);
     const builtinCompat = builtinModel?.compat;
-    compat = { ...heuristic, ...builtinCompat ?? {}, ...descriptor.piOptions ?? {} };
+    compat = {
+      ...heuristic,
+      ...builtinCompat ?? {},
+      ...descriptor.piOptions ?? {}
+    };
   } else if (descriptor.piOptions) {
     compat = descriptor.piOptions;
   } else if (builtinModel?.compat) {
@@ -23212,10 +23222,12 @@ function hasToolCall(content) {
   return Array.isArray(content) && content.some((block) => block?.type === "toolCall");
 }
 function normalizeProviderConnectionClosed(message, providerName) {
-  if (!message || message.role !== "assistant" || message.provider !== providerName || message.stopReason !== "error" || typeof message.errorMessage !== "string" || message.errorMessage.startsWith(NORMALIZED_PREFIX) || hasToolCall(message.content) || !PROVIDER_CONNECTION_CLOSED_PATTERN.test(message.errorMessage)) {
+  if (message?.role !== "assistant" || message.provider !== providerName || message.stopReason !== "error" || typeof message.errorMessage !== "string" || message.errorMessage.startsWith(NORMALIZED_PREFIX) || hasToolCall(message.content) || !PROVIDER_CONNECTION_CLOSED_PATTERN.test(message.errorMessage)) {
     return;
   }
-  log("retryable-error: retagged closed provider connection for retry", { model: message.model });
+  log("retryable-error: retagged closed provider connection for retry", {
+    model: message.model
+  });
   message.errorMessage = NORMALIZED_MESSAGE;
 }
 
@@ -23264,8 +23276,16 @@ function plexusExtension(pi) {
     description: "Plexus provider commands: refresh, status (setup: /login plexus)",
     getArgumentCompletions: (prefix) => {
       const subcommands = [
-        { value: "refresh", label: "refresh", description: "Refresh Plexus models from the API" },
-        { value: "status", label: "status", description: "Show Plexus configuration and catalog status" }
+        {
+          value: "refresh",
+          label: "refresh",
+          description: "Refresh Plexus models from the API"
+        },
+        {
+          value: "status",
+          label: "status",
+          description: "Show Plexus configuration and catalog status"
+        }
       ];
       return prefix.includes(" ") ? null : subcommands.filter((command) => command.value.startsWith(prefix));
     },

@@ -2,7 +2,10 @@
 // `providers/all`: the extension loader aliases the package root to compat,
 // which makes that subpath resolve relative to compat.js.
 import type { Api } from "@earendil-works/pi-ai";
-import { getModel, type OpenAICompletionsCompat } from "@earendil-works/pi-ai/compat";
+import {
+	getModel,
+	type OpenAICompletionsCompat,
+} from "@earendil-works/pi-ai/compat";
 import {
 	convertDescriptors,
 	detectOpenAICompletionsCompat,
@@ -30,7 +33,10 @@ export function descriptorToPiModel(descriptor: PlexusModelDescriptor) {
 	let builtinModel: ReturnType<typeof getModel> | undefined;
 	if (descriptor.piProvider && descriptor.piModel) {
 		try {
-			builtinModel = getModel(descriptor.piProvider as never, descriptor.piModel as never);
+			builtinModel = getModel(
+				descriptor.piProvider as never,
+				descriptor.piModel as never,
+			);
 		} catch {
 			builtinModel = undefined;
 		}
@@ -43,14 +49,14 @@ export function descriptorToPiModel(descriptor: PlexusModelDescriptor) {
 		cacheWrite: descriptor.cost.cacheWrite * 1_000_000,
 		...(descriptor.cost.tiers
 			? {
-				tiers: descriptor.cost.tiers.map((tier) => ({
-					inputTokensAbove: tier.inputTokensAbove,
-					input: tier.input * 1_000_000,
-					output: tier.output * 1_000_000,
-					cacheRead: tier.cacheRead * 1_000_000,
-					cacheWrite: tier.cacheWrite * 1_000_000,
-				})),
-			}
+					tiers: descriptor.cost.tiers.map((tier) => ({
+						inputTokensAbove: tier.inputTokensAbove,
+						input: tier.input * 1_000_000,
+						output: tier.output * 1_000_000,
+						cacheRead: tier.cacheRead * 1_000_000,
+						cacheWrite: tier.cacheWrite * 1_000_000,
+					})),
+				}
 			: {}),
 	};
 
@@ -62,8 +68,14 @@ export function descriptorToPiModel(descriptor: PlexusModelDescriptor) {
 			descriptor.baseUrl,
 		);
 		// pi_options override heuristics — the Plexus server knows best
-		const builtinCompat = builtinModel?.compat as Record<string, unknown> | undefined;
-		const merged = { ...heuristic, ...(builtinCompat ?? {}), ...(descriptor.piOptions ?? {}) };
+		const builtinCompat = builtinModel?.compat as
+			| Record<string, unknown>
+			| undefined;
+		const merged = {
+			...heuristic,
+			...(builtinCompat ?? {}),
+			...(descriptor.piOptions ?? {}),
+		};
 		compat = merged as OpenAICompletionsCompat;
 	} else if (descriptor.piOptions) {
 		// For non-openai-completions dialects that still carry pi_options, pass them through
@@ -86,7 +98,9 @@ export function descriptorToPiModel(descriptor: PlexusModelDescriptor) {
 		...(builtinModel?.thinkingLevelMap !== undefined
 			? { thinkingLevelMap: builtinModel.thinkingLevelMap }
 			: {}),
-		...(builtinModel?.headers !== undefined ? { headers: builtinModel.headers } : {}),
+		...(builtinModel?.headers !== undefined
+			? { headers: builtinModel.headers }
+			: {}),
 		...(compat !== undefined ? { compat } : {}),
 	} as const;
 }

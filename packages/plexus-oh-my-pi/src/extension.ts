@@ -26,10 +26,19 @@
  *   /plexus status  — show effective configuration and catalog state
  */
 
-// Type-only — erased at runtime, never resolved by the module loader
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext, ProviderConfig, ProviderModelConfig } from "@oh-my-pi/pi-coding-agent";
 import type { Api, OAuthLoginCallbacks } from "@oh-my-pi/pi-ai";
-import { convertDescriptors, fetchPlexusModels } from "../../plexus-models/src/index.ts";
+// Type-only — erased at runtime, never resolved by the module loader
+import type {
+	ExtensionAPI,
+	ExtensionCommandContext,
+	ExtensionContext,
+	ProviderConfig,
+	ProviderModelConfig,
+} from "@oh-my-pi/pi-coding-agent";
+import {
+	convertDescriptors,
+	fetchPlexusModels,
+} from "../../plexus-models/src/index.ts";
 import {
 	getApiKeyEnvName,
 	getBaseUrl,
@@ -46,7 +55,10 @@ import { descriptorToOhMyPiModel } from "./mapper.ts";
 import { normalizeProviderConnectionClosed } from "./provider-connection-retry.ts";
 
 const PROVIDER_NAME = "plexus";
-export function getProviderApiKeyConfig(): Pick<ProviderConfig, "apiKey" | "authHeader"> {
+export function getProviderApiKeyConfig(): Pick<
+	ProviderConfig,
+	"apiKey" | "authHeader"
+> {
 	// An explicit apiKeyEnv is authoritative and throws when its variable is
 	// missing or empty; the default PLEXUS_API_KEY remains an optional fallback.
 	// OMP resolves provider env references through Bun.env and treats an unknown
@@ -88,7 +100,9 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, ctx) => {
 		let apiKey: string | null;
 		try {
-			apiKey = resolveApiKey(await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME));
+			apiKey = resolveApiKey(
+				await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME),
+			);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			log("session_start: api key resolution failed", { error: message });
@@ -111,34 +125,54 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	// /plexus command
 	// -------------------------------------------------------------------------
 	pi.registerCommand("plexus", {
-		description: "Plexus provider commands: refresh, status (setup: /login plexus)",
+		description:
+			"Plexus provider commands: refresh, status (setup: /login plexus)",
 		getArgumentCompletions: (prefix) => {
 			const subcommands = [
-				{ value: "refresh", label: "refresh", description: "Refresh Plexus models from the API" },
-				{ value: "status", label: "status", description: "Show Plexus configuration and catalog status" },
+				{
+					value: "refresh",
+					label: "refresh",
+					description: "Refresh Plexus models from the API",
+				},
+				{
+					value: "status",
+					label: "status",
+					description: "Show Plexus configuration and catalog status",
+				},
 			];
-			return prefix.includes(" ") ? null : subcommands.filter((command) => command.value.startsWith(prefix));
+			return prefix.includes(" ")
+				? null
+				: subcommands.filter((command) => command.value.startsWith(prefix));
 		},
 		handler: async (args, ctx) => {
 			const sub = args.trim().toLowerCase();
 			if (sub === "refresh" || sub === "") return handleRefresh(pi, ctx);
 			if (sub === "status") return handleStatus(ctx);
-			ctx.ui.notify(`Unknown sub-command: "${args}". Use /login plexus, /plexus refresh, or /plexus status.`, "warning");
+			ctx.ui.notify(
+				`Unknown sub-command: "${args}". Use /login plexus, /plexus refresh, or /plexus status.`,
+				"warning",
+			);
 		},
 	});
 }
 
-function createPlexusLoginProvider(pi: ExtensionAPI): NonNullable<ProviderConfig["oauth"]> {
+function createPlexusLoginProvider(
+	pi: ExtensionAPI,
+): NonNullable<ProviderConfig["oauth"]> {
 	return {
 		name: "Plexus",
 		async login(callbacks: OAuthLoginCallbacks): Promise<string> {
-			const baseUrl = (await callbacks.onPrompt({
-				message: "Plexus base URL",
-				placeholder: "https://plexus.example.com",
-			})).trim();
+			const baseUrl = (
+				await callbacks.onPrompt({
+					message: "Plexus base URL",
+					placeholder: "https://plexus.example.com",
+				})
+			).trim();
 			if (!baseUrl) throw new Error("Plexus base URL is required.");
 
-			const apiKey = (await callbacks.onPrompt({ message: "Plexus API key" })).trim();
+			const apiKey = (
+				await callbacks.onPrompt({ message: "Plexus API key" })
+			).trim();
 			if (!apiKey) throw new Error("Plexus API key is required.");
 
 			await saveBaseUrl(baseUrl);
@@ -153,16 +187,27 @@ function createPlexusLoginProvider(pi: ExtensionAPI): NonNullable<ProviderConfig
 // ---------------------------------------------------------------------------
 // Refresh command handler
 // ---------------------------------------------------------------------------
-async function handleRefresh(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {
+async function handleRefresh(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+): Promise<void> {
 	let apiKey: string | null;
 	try {
-		apiKey = resolveApiKey(await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME));
+		apiKey = resolveApiKey(
+			await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME),
+		);
 	} catch (error) {
-		ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+		ctx.ui.notify(
+			error instanceof Error ? error.message : String(error),
+			"error",
+		);
 		return;
 	}
 	if (!apiKey) {
-		ctx.ui.notify("No Plexus API key configured. Run /login plexus first.", "error");
+		ctx.ui.notify(
+			"No Plexus API key configured. Run /login plexus first.",
+			"error",
+		);
 		return;
 	}
 	ctx.ui.notify("Refreshing Plexus models…", "info");
@@ -172,12 +217,15 @@ async function handleRefresh(pi: ExtensionAPI, ctx: ExtensionCommandContext): Pr
 async function handleStatus(ctx: ExtensionCommandContext): Promise<void> {
 	const baseUrl = getBaseUrlResolution();
 	const apiKey = await ctx.modelRegistry.authStorage.getApiKey(PROVIDER_NAME);
-	ctx.ui.notify([
-		`Plexus base URL: ${baseUrl.baseUrl ?? "not configured"} (${baseUrl.source})`,
-		`API key: ${describeApiKey(apiKey)}`,
-		`Catalog: ${currentModels.length} models (${catalogSource})`,
-		"Default model: managed by OMP. Use /model or /models to save the selection there.",
-	].join("\n"), "info");
+	ctx.ui.notify(
+		[
+			`Plexus base URL: ${baseUrl.baseUrl ?? "not configured"} (${baseUrl.source})`,
+			`API key: ${describeApiKey(apiKey)}`,
+			`Catalog: ${currentModels.length} models (${catalogSource})`,
+			"Default model: managed by OMP. Use /model or /models to save the selection there.",
+		].join("\n"),
+		"info",
+	);
 }
 
 function describeApiKey(savedApiKey: string | undefined): string {
@@ -202,7 +250,11 @@ async function fetchPlexusModelConfigs(
 	const baseUrl = getBaseUrl();
 	if (!key || !modelsUrl || !baseUrl) return [];
 	const { models: apiModels } = await fetchPlexusModels(key, modelsUrl);
-	const descriptors = convertDescriptors(apiModels, baseUrl, getSuppressedModels());
+	const descriptors = convertDescriptors(
+		apiModels,
+		baseUrl,
+		getSuppressedModels(),
+	);
 	const models = descriptors.map(descriptorToOhMyPiModel);
 	currentModels = [...models];
 	catalogSource = "live refresh";
@@ -218,7 +270,11 @@ async function doRefresh(
 	const baseUrl = getBaseUrl();
 
 	if (!modelsUrl || !baseUrl) {
-		if (ctx) ctx.ui.notify("Plexus base URL not configured. Run /login plexus first.", "warning");
+		if (ctx)
+			ctx.ui.notify(
+				"Plexus base URL not configured. Run /login plexus first.",
+				"warning",
+			);
 		log("doRefresh: no base URL configured");
 		return;
 	}
@@ -226,14 +282,25 @@ async function doRefresh(
 	try {
 		const resolvedApiKey = resolveApiKey(apiKey);
 		if (!resolvedApiKey) {
-			if (ctx) ctx.ui.notify("No Plexus API key configured. Run /login plexus first.", "warning");
+			if (ctx)
+				ctx.ui.notify(
+					"No Plexus API key configured. Run /login plexus first.",
+					"warning",
+				);
 			log("doRefresh: no API key configured");
 			return;
 		}
-		const { models: apiModels } = await fetchPlexusModels(resolvedApiKey, modelsUrl);
+		const { models: apiModels } = await fetchPlexusModels(
+			resolvedApiKey,
+			modelsUrl,
+		);
 
 		const suppressPatterns = getSuppressedModels();
-		const descriptors = convertDescriptors(apiModels, baseUrl, suppressPatterns);
+		const descriptors = convertDescriptors(
+			apiModels,
+			baseUrl,
+			suppressPatterns,
+		);
 		const ohMyPiModels = descriptors.map(descriptorToOhMyPiModel);
 
 		currentModels = ohMyPiModels;
@@ -248,7 +315,8 @@ async function doRefresh(
 		});
 
 		log("doRefresh: registered", { count: ohMyPiModels.length });
-		if (ctx) ctx.ui.notify(`Refreshed ${ohMyPiModels.length} Plexus models`, "info");
+		if (ctx)
+			ctx.ui.notify(`Refreshed ${ohMyPiModels.length} Plexus models`, "info");
 	} catch (error) {
 		log("doRefresh: failed", { error: String(error) });
 		if (ctx) {

@@ -14,11 +14,7 @@ const result = await Bun.build({
 	outdir: path.join(import.meta.dir, "dist"),
 	target: "bun",
 	format: "esm",
-	external: [
-		"@opencode-ai/plugin",
-		"@opencode-ai/sdk",
-		"node:*",
-	],
+	external: ["@opencode-ai/plugin", "@opencode-ai/sdk", "node:*"],
 	naming: "index.js",
 	minify: false,
 });

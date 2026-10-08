@@ -2,57 +2,12 @@
 // src/plugin.ts
 import { Plugin, Provider } from "@opencode/plugin";
 
-// ../plexus-models/src/suppress.ts
-function parseSuppressionPatterns(raw) {
-  if (!raw)
-    return [];
-  const items = Array.isArray(raw) ? raw : raw.split(/[\n,;]+/);
-  return items.map((s) => s.trim()).filter((s) => s.length > 0);
-}
-function getEnvSuppressedModels() {
-  const env = typeof process !== "undefined" && process?.env ? process.env : {};
-  const raw = env.PLEXUS_SUPPRESS_MODELS ?? env.PLEXUS_EXCLUDE_MODELS;
-  return parseSuppressionPatterns(raw);
-}
-function isModelSuppressed(model, patterns) {
-  const envPatterns = getEnvSuppressedModels();
-  const explicitPatterns = parseSuppressionPatterns(patterns);
-  const allPatterns = [...envPatterns, ...explicitPatterns];
-  if (allPatterns.length === 0)
-    return false;
-  const id = model.id.toLowerCase();
-  const name = (model.name ?? "").toLowerCase();
-  const shortId = id.includes("/") ? id.split("/").pop() : id.includes(":") ? id.split(":").pop() : id;
-  for (const pattern of allPatterns) {
-    if (matchesPattern(id, name, shortId, pattern)) {
-      return true;
-    }
-  }
-  return false;
-}
-function matchesPattern(id, name, shortId, pattern) {
-  const p = pattern.toLowerCase();
-  if (p.startsWith("regex:")) {
-    try {
-      const re = new RegExp(pattern.slice(6), "i");
-      return re.test(id) || re.test(name) || re.test(shortId);
-    } catch {
-      return false;
-    }
-  }
-  if (p.includes("*") || p.includes("?")) {
-    const regexStr = "^" + p.replace(/([.+^${}()|[\]\\])/g, "\\$1").replace(/\*/g, ".*").replace(/\?/g, ".") + "$";
-    try {
-      const re = new RegExp(regexStr, "i");
-      return re.test(id) || re.test(name) || re.test(shortId);
-    } catch {
-      return false;
-    }
-  }
-  return id === p || name === p || shortId === p;
-}
 // ../plexus-models/src/convert.ts
-var REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
+var REASONING_PARAMS = new Set([
+  "reasoning",
+  "include_reasoning",
+  "reasoning_effort"
+]);
 var NON_CHAT_PATTERN = /(?:^|[\W_])(?:embed(?:ding|dings)?|transcri(?:be[ds]?|ptions?)|whisper|speech[\W_]*to[\W_]*text|stt|text[\W_]*to[\W_]*speech|tts|image(?:[\W_]*(?:gen(?:eration)?|\d+))?|diffusion|dall[\W_]*e|stable[\W_]*diffusion|sdxl|dream)(?:$|[\W_])/i;
 var API_DIALECT_MAP = {
   chat_completions: "openai-completions",
@@ -147,6 +102,56 @@ async function fetchPlexusModels(apiKey, modelsUrl, timeoutMs = DEFAULT_MODELS_F
     clearTimeout(timer);
   }
 }
+// ../plexus-models/src/suppress.ts
+function parseSuppressionPatterns(raw) {
+  if (!raw)
+    return [];
+  const items = Array.isArray(raw) ? raw : raw.split(/[\n,;]+/);
+  return items.map((s) => s.trim()).filter((s) => s.length > 0);
+}
+function getEnvSuppressedModels() {
+  const env = typeof process !== "undefined" && process?.env ? process.env : {};
+  const raw = env.PLEXUS_SUPPRESS_MODELS ?? env.PLEXUS_EXCLUDE_MODELS;
+  return parseSuppressionPatterns(raw);
+}
+function isModelSuppressed(model, patterns) {
+  const envPatterns = getEnvSuppressedModels();
+  const explicitPatterns = parseSuppressionPatterns(patterns);
+  const allPatterns = [...envPatterns, ...explicitPatterns];
+  if (allPatterns.length === 0)
+    return false;
+  const id = model.id.toLowerCase();
+  const name = (model.name ?? "").toLowerCase();
+  const separator = id.includes("/") ? "/" : id.includes(":") ? ":" : undefined;
+  const shortId = separator === undefined ? id : id.split(separator).pop() ?? id;
+  for (const pattern of allPatterns) {
+    if (matchesPattern(id, name, shortId, pattern)) {
+      return true;
+    }
+  }
+  return false;
+}
+function matchesPattern(id, name, shortId, pattern) {
+  const p = pattern.toLowerCase();
+  if (p.startsWith("regex:")) {
+    try {
+      const re = new RegExp(pattern.slice(6), "i");
+      return re.test(id) || re.test(name) || re.test(shortId);
+    } catch {
+      return false;
+    }
+  }
+  if (p.includes("*") || p.includes("?")) {
+    const regexStr = "^" + p.replace(/([.+^${}()|[\]\\])/g, "\\$1").replace(/\*/g, ".*").replace(/\?/g, ".") + "$";
+    try {
+      const re = new RegExp(regexStr, "i");
+      return re.test(id) || re.test(name) || re.test(shortId);
+    } catch {
+      return false;
+    }
+  }
+  return id === p || name === p || shortId === p;
+}
 // src/cache.ts
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { homedir } from "os";
@@ -215,11 +220,16 @@ async function writeCache(models, raw, etag) {
   try {
     const dir = getDir();
     await mkdir(dir, { recursive: true });
-    const cache = { version: CACHE_VERSION, models, timestamp: Date.now(), etag };
-    await writeFile(join(dir, CACHE_FILE), JSON.stringify(cache, null, 2) + `
+    const cache = {
+      version: CACHE_VERSION,
+      models,
+      timestamp: Date.now(),
+      etag
+    };
+    await writeFile(join(dir, CACHE_FILE), `${JSON.stringify(cache, null, 2)}
 `, "utf8");
     if (raw !== undefined) {
-      await writeFile(join(dir, RAW_FILE), JSON.stringify(raw, null, 2) + `
+      await writeFile(join(dir, RAW_FILE), `${JSON.stringify(raw, null, 2)}
 `, "utf8");
     }
   } catch {}
@@ -334,7 +344,7 @@ function resolveConfig(options, credential) {
   const envApiKey = process.env[ENV_API_KEY];
   const metaBaseURL = credential ? metadataBaseURL(credential) : undefined;
   const optBaseURL = resolveStringOption(options?.[PLEXUS_BASE_URL_OPTION]);
-  const optApiKey = resolveStringOption(options?.["apiKey"]);
+  const optApiKey = resolveStringOption(options?.apiKey);
   const baseURL = (envBaseURL ? rootURL(envBaseURL) : undefined) || (metaBaseURL ? rootURL(metaBaseURL) : undefined) || (optBaseURL ? rootURL(optBaseURL) : undefined) || undefined;
   const apiKey = explicitApiKey || (envApiKey ? envApiKey.trim() : undefined) || credential?.key?.trim() || optApiKey || undefined;
   return {
@@ -344,7 +354,7 @@ function resolveConfig(options, credential) {
 }
 function getSuppressedModels(options) {
   const envSuppressed = getEnvSuppressedModels();
-  const opt = options?.["suppressModels"] ?? options?.["suppress"] ?? options?.["suppress_models"];
+  const opt = options?.suppressModels ?? options?.suppress ?? options?.suppress_models;
   const optSuppressed = parseSuppressionPatterns(opt);
   return [...envSuppressed, ...optSuppressed];
 }
@@ -378,7 +388,11 @@ function createLogger(prefix = "plexus") {
 }
 
 // src/mapper.ts
-var REASONING_PARAMS2 = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
+var REASONING_PARAMS2 = new Set([
+  "reasoning",
+  "include_reasoning",
+  "reasoning_effort"
+]);
 var OPEN_CODE_NONE = "none";
 var DEFAULT_CONTEXT = 250000;
 var PER_TOKEN_TO_PER_MILLION = 1e6;
@@ -390,7 +404,9 @@ function reasoningVariantSettings(preferredApi, effort) {
     case "anthropic-messages":
       return { effort };
     case "google-generative-ai":
-      return { thinkingConfig: { includeThoughts: true, thinkingLevel: effort } };
+      return {
+        thinkingConfig: { includeThoughts: true, thinkingLevel: effort }
+      };
     default:
       return { reasoningEffort: effort };
   }
@@ -403,7 +419,10 @@ function buildReasoningVariants(model, preferredApi, hasReasoning) {
     return;
   return effortOption.values.map((value) => {
     const effort = normalizeReasoningEffort(value);
-    return { id: effort, settings: reasoningVariantSettings(preferredApi, effort) };
+    return {
+      id: effort,
+      settings: reasoningVariantSettings(preferredApi, effort)
+    };
   });
 }
 function resolveModelPackage(preferredApi) {
@@ -414,7 +433,6 @@ function resolveModelPackage(preferredApi) {
       return GOOGLE_PKG;
     case "openai-responses":
       return OPENAI_RESPONSES_PKG;
-    case "openai-completions":
     default:
       return;
   }
@@ -604,7 +622,7 @@ async function resolveConnectionCredential(ctx, log) {
     if (!connection)
       return { connection: undefined, credential: undefined };
     const resolved = await ctx.integration.connection.resolve(connection);
-    if (!resolved || resolved.type !== "key") {
+    if (resolved?.type !== "key") {
       return { connection, credential: undefined };
     }
     return {
@@ -630,7 +648,12 @@ function refreshModels(baseURL, log, apiKey, force = false, suppress) {
   const run = async () => {
     const url = modelsUrl(baseURL);
     const cached = await readCachedModels(suppress);
-    const { models: apiModels, raw, etag, notModified } = await fetchPlexusModels(apiKey ?? "", url, MODELS_FETCH_TIMEOUT_MS, cached?.etag);
+    const {
+      models: apiModels,
+      raw,
+      etag,
+      notModified
+    } = await fetchPlexusModels(apiKey ?? "", url, MODELS_FETCH_TIMEOUT_MS, cached?.etag);
     if (notModified && cached?.models) {
       log.info(`Plexus models not modified (etag: ${cached.etag})`);
       lastRefresh = { at: Date.now(), models: cached.models };
@@ -703,7 +726,12 @@ var plugin_default = Plugin.define({
   async setup(ctx) {
     const log = createLogger();
     const options = ctx.options ?? {};
-    const source = { models: [], baseURL: undefined, apiKey: undefined, connection: undefined };
+    const source = {
+      models: [],
+      baseURL: undefined,
+      apiKey: undefined,
+      connection: undefined
+    };
     const reloadSource = async (force) => {
       const next = await loadSource(ctx, log, options, force);
       source.models = next.models;
@@ -733,13 +761,13 @@ var plugin_default = Plugin.define({
       editor.update(providerID, (provider) => {
         const settings = provider.settings ?? {};
         if (source.baseURL)
-          settings["baseURL"] = apiBase(source.baseURL);
+          settings.baseURL = apiBase(source.baseURL);
         else
-          delete settings["baseURL"];
+          delete settings.baseURL;
         if (source.apiKey)
-          settings["apiKey"] = source.apiKey;
+          settings.apiKey = source.apiKey;
         else
-          delete settings["apiKey"];
+          delete settings.apiKey;
         provider.settings = settings;
       });
     });

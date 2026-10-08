@@ -98,7 +98,9 @@ function resolveStringOption(value: unknown): string | undefined {
  * of falling back to the saved credential or `options.apiKey`. Error messages
  * name the variable but never include its value.
  */
-export function resolveExplicitApiKey(options?: PluginOptions): string | undefined {
+export function resolveExplicitApiKey(
+	options?: PluginOptions,
+): string | undefined {
 	const raw = options?.[PLEXUS_API_KEY_ENV_OPTION];
 	if (raw === undefined || raw === null) return undefined;
 
@@ -118,12 +120,18 @@ export function resolveExplicitApiKey(options?: PluginOptions): string | undefin
 	return value;
 }
 
-function metadataBaseURL(credential: ConnectionCredential | undefined): string | undefined {
+function metadataBaseURL(
+	credential: ConnectionCredential | undefined,
+): string | undefined {
 	if (!credential) return undefined;
-	const fromMetadata = resolveStringOption(credential.metadata?.[PLEXUS_BASE_URL_OPTION]);
+	const fromMetadata = resolveStringOption(
+		credential.metadata?.[PLEXUS_BASE_URL_OPTION],
+	);
 	if (fromMetadata) return fromMetadata;
 	const rawConfig = credential.configuration?.[PLEXUS_BASE_URL_OPTION];
-	return typeof rawConfig === "string" ? resolveStringOption(rawConfig) : undefined;
+	return typeof rawConfig === "string"
+		? resolveStringOption(rawConfig)
+		: undefined;
 }
 
 /**
@@ -149,7 +157,7 @@ export function resolveConfig(
 
 	const metaBaseURL = credential ? metadataBaseURL(credential) : undefined;
 	const optBaseURL = resolveStringOption(options?.[PLEXUS_BASE_URL_OPTION]);
-	const optApiKey = resolveStringOption(options?.["apiKey"]);
+	const optApiKey = resolveStringOption(options?.apiKey);
 
 	const baseURL =
 		(envBaseURL ? rootURL(envBaseURL) : undefined) ||
@@ -157,7 +165,11 @@ export function resolveConfig(
 		(optBaseURL ? rootURL(optBaseURL) : undefined) ||
 		undefined;
 	const apiKey =
-		explicitApiKey || (envApiKey ? envApiKey.trim() : undefined) || credential?.key?.trim() || optApiKey || undefined;
+		explicitApiKey ||
+		(envApiKey ? envApiKey.trim() : undefined) ||
+		credential?.key?.trim() ||
+		optApiKey ||
+		undefined;
 
 	return {
 		baseURL: baseURL || undefined,
@@ -171,7 +183,10 @@ export function resolveConfig(
  */
 export function getSuppressedModels(options?: PluginOptions): string[] {
 	const envSuppressed = getEnvSuppressedModels();
-	const opt = options?.["suppressModels"] ?? options?.["suppress"] ?? options?.["suppress_models"];
-	const optSuppressed = parseSuppressionPatterns(opt as string | string[] | undefined);
+	const opt =
+		options?.suppressModels ?? options?.suppress ?? options?.suppress_models;
+	const optSuppressed = parseSuppressionPatterns(
+		opt as string | string[] | undefined,
+	);
 	return [...envSuppressed, ...optSuppressed];
 }

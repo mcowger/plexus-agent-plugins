@@ -6,7 +6,11 @@ import {
 	type PlexusApiModel,
 	type PlexusReasoningOption,
 } from "../../plexus-models/src/index.ts";
-import { ANTHROPIC_PKG, GOOGLE_PKG, OPENAI_RESPONSES_PKG } from "./constants.ts";
+import {
+	ANTHROPIC_PKG,
+	GOOGLE_PKG,
+	OPENAI_RESPONSES_PKG,
+} from "./constants.ts";
 
 export type Modality = "text" | "audio" | "image" | "video" | "pdf";
 
@@ -68,7 +72,11 @@ export interface ModelPricingTier {
 	cacheWrite: number;
 }
 
-const REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
+const REASONING_PARAMS = new Set([
+	"reasoning",
+	"include_reasoning",
+	"reasoning_effort",
+]);
 const OPEN_CODE_NONE = "none";
 const DEFAULT_CONTEXT = 250_000;
 const PER_TOKEN_TO_PER_MILLION = 1_000_000;
@@ -77,12 +85,17 @@ function normalizeReasoningEffort(value: string | null): string {
 	return value === null || value === "off" ? OPEN_CODE_NONE : value;
 }
 
-function reasoningVariantSettings(preferredApi: string, effort: string): Record<string, unknown> {
+function reasoningVariantSettings(
+	preferredApi: string,
+	effort: string,
+): Record<string, unknown> {
 	switch (preferredApi) {
 		case "anthropic-messages":
 			return { effort };
 		case "google-generative-ai":
-			return { thinkingConfig: { includeThoughts: true, thinkingLevel: effort } };
+			return {
+				thinkingConfig: { includeThoughts: true, thinkingLevel: effort },
+			};
 		default:
 			return { reasoningEffort: effort };
 	}
@@ -96,13 +109,17 @@ function buildReasoningVariants(
 	if (!hasReasoning) return undefined;
 
 	const effortOption = model.reasoning_options?.find(
-		(option): option is Extract<PlexusReasoningOption, { type: "effort" }> => option.type === "effort",
+		(option): option is Extract<PlexusReasoningOption, { type: "effort" }> =>
+			option.type === "effort",
 	);
 	if (!effortOption) return undefined;
 
 	return effortOption.values.map((value) => {
 		const effort = normalizeReasoningEffort(value);
-		return { id: effort, settings: reasoningVariantSettings(preferredApi, effort) };
+		return {
+			id: effort,
+			settings: reasoningVariantSettings(preferredApi, effort),
+		};
 	});
 }
 
@@ -120,7 +137,6 @@ function resolveModelPackage(preferredApi: string): string | undefined {
 			return GOOGLE_PKG;
 		case "openai-responses":
 			return OPENAI_RESPONSES_PKG;
-		case "openai-completions":
 		default:
 			return undefined;
 	}
@@ -136,19 +152,29 @@ function parsePrice(value: string | undefined): number {
 	return Number.isFinite(n) && n >= 0 ? n * PER_TOKEN_TO_PER_MILLION : 0;
 }
 
-function buildPricingTiers(model: PlexusApiModel): ModelPricingTier[] | undefined {
+function buildPricingTiers(
+	model: PlexusApiModel,
+): ModelPricingTier[] | undefined {
 	const pricing = model.pricing;
 	if (!pricing?.tiers) return undefined;
 
 	const tiers = pricing.tiers.flatMap((tier) => {
-		if (!Number.isFinite(tier.input_tokens_above) || tier.input_tokens_above < 0) return [];
+		if (
+			!Number.isFinite(tier.input_tokens_above) ||
+			tier.input_tokens_above < 0
+		)
+			return [];
 		return [
 			{
 				inputTokensAbove: tier.input_tokens_above,
 				input: parsePrice(tier.prompt ?? pricing.prompt),
 				output: parsePrice(tier.completion ?? pricing.completion),
-				cacheRead: parsePrice(tier.input_cache_read ?? pricing.input_cache_read),
-				cacheWrite: parsePrice(tier.input_cache_write ?? pricing.input_cache_write),
+				cacheRead: parsePrice(
+					tier.input_cache_read ?? pricing.input_cache_read,
+				),
+				cacheWrite: parsePrice(
+					tier.input_cache_write ?? pricing.input_cache_write,
+				),
 			},
 		];
 	});
@@ -179,7 +205,8 @@ function mapModality(m: string): Modality | null {
 }
 
 function releaseTime(created: number | undefined): number {
-	if (typeof created !== "number" || !Number.isFinite(created) || created <= 0) return 0;
+	if (typeof created !== "number" || !Number.isFinite(created) || created <= 0)
+		return 0;
 	return Math.floor(created * 1000);
 }
 
@@ -189,7 +216,10 @@ function reasoningCompatibility(
 ): PlexusModelInfo["compatibility"] | undefined {
 	// DeepSeek streams reasoning in `reasoning_content`; the runtime must
 	// preserve that field across tool-call turns.
-	if (preferredApi === "openai-completions" && model.id.toLowerCase().includes("deepseek")) {
+	if (
+		preferredApi === "openai-completions" &&
+		model.id.toLowerCase().includes("deepseek")
+	) {
 		return { reasoningField: "reasoning_content" };
 	}
 	return undefined;
@@ -207,7 +237,9 @@ function buildOutputModalities(model: PlexusApiModel): Modality[] | null {
 	if (raw !== undefined) {
 		// Architecture is present — require text output.
 		if (!raw.includes("text")) return null;
-		const mapped = raw.map(mapModality).filter((m): m is Modality => m !== null);
+		const mapped = raw
+			.map(mapModality)
+			.filter((m): m is Modality => m !== null);
 		return mapped.length > 0 ? [...new Set(mapped)] : ["text"];
 	}
 
@@ -221,7 +253,9 @@ function buildOutputModalities(model: PlexusApiModel): Modality[] | null {
  * clients on /v1/chat/completions for Plexus. Order only — no ID, package,
  * endpoint, or routing changes.
  */
-export function orderModelsByApiBase(models: PlexusModelInfo[]): PlexusModelInfo[] {
+export function orderModelsByApiBase(
+	models: PlexusModelInfo[],
+): PlexusModelInfo[] {
 	const current: PlexusModelInfo[] = [];
 	const beta: PlexusModelInfo[] = [];
 
@@ -263,8 +297,11 @@ export function buildModels(
 		const params = m.supported_parameters ?? [];
 
 		const contextLength =
-			(typeof m.context_length === "number" && m.context_length > 0 ? m.context_length : undefined) ??
-			(typeof m.top_provider?.context_length === "number" && m.top_provider.context_length > 0
+			(typeof m.context_length === "number" && m.context_length > 0
+				? m.context_length
+				: undefined) ??
+			(typeof m.top_provider?.context_length === "number" &&
+			m.top_provider.context_length > 0
 				? m.top_provider.context_length
 				: undefined) ??
 			DEFAULT_CONTEXT;

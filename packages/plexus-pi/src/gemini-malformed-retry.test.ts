@@ -11,7 +11,10 @@ function malformedMessage(overrides: Record<string, unknown> = {}) {
 		errorMessage: "An unknown error occurred",
 		content: [
 			{ type: "thinking", thinking: "..." },
-			{ type: "text", text: "Format repository filescall:default_api:bash{command:bun run format}" },
+			{
+				type: "text",
+				text: "Format repository filescall:default_api:bash{command:bun run format}",
+			},
 		],
 		...overrides,
 	};
@@ -20,7 +23,10 @@ function malformedMessage(overrides: Record<string, unknown> = {}) {
 describe("normalizeMalformedFunctionCall", () => {
 	describe("detection", () => {
 		test("normalizes an error turn carrying the call:default_api leak", () => {
-			const result = normalizeMalformedFunctionCall(malformedMessage(), PROVIDER);
+			const result = normalizeMalformedFunctionCall(
+				malformedMessage(),
+				PROVIDER,
+			);
 			expect(result).toBeDefined();
 			expect(result?.message.errorMessage).toContain("MALFORMED_FUNCTION_CALL");
 		});
@@ -52,7 +58,10 @@ describe("normalizeMalformedFunctionCall", () => {
 
 	describe("normalization payload", () => {
 		test("retains the MALFORMED_FUNCTION_CALL diagnostic and a retryable token", () => {
-			const result = normalizeMalformedFunctionCall(malformedMessage(), PROVIDER);
+			const result = normalizeMalformedFunctionCall(
+				malformedMessage(),
+				PROVIDER,
+			);
 			const errorMessage = result?.message.errorMessage ?? "";
 			expect(errorMessage.startsWith("MALFORMED_FUNCTION_CALL:")).toBe(true);
 			// Matches pi's RETRYABLE_PROVIDER_ERROR_PATTERN → native retry classifies transient.
@@ -60,7 +69,10 @@ describe("normalizeMalformedFunctionCall", () => {
 		});
 
 		test("preserves the original message role and other fields", () => {
-			const result = normalizeMalformedFunctionCall(malformedMessage(), PROVIDER);
+			const result = normalizeMalformedFunctionCall(
+				malformedMessage(),
+				PROVIDER,
+			);
 			expect(result?.message.role).toBe("assistant");
 			expect(result?.message.provider).toBe(PROVIDER);
 			expect(result?.message.stopReason).toBe("error");
@@ -73,15 +85,21 @@ describe("normalizeMalformedFunctionCall", () => {
 				malformedMessage({ errorMessage: "Provider connection closed" }),
 				PROVIDER,
 			);
-			expect(result?.message.errorMessage).toContain("PROVIDER_CONNECTION_CLOSED");
-			expect(result?.message.errorMessage).toContain("please retry your request");
+			expect(result?.message.errorMessage).toContain(
+				"PROVIDER_CONNECTION_CLOSED",
+			);
+			expect(result?.message.errorMessage).toContain(
+				"please retry your request",
+			);
 		});
 
 		test("does not normalize a closed provider connection after a structured tool call", () => {
 			const result = normalizeMalformedFunctionCall(
 				malformedMessage({
 					errorMessage: "Provider connection closed",
-					content: [{ type: "toolCall", id: "abc", name: "bash", arguments: {} }],
+					content: [
+						{ type: "toolCall", id: "abc", name: "bash", arguments: {} },
+					],
 				}),
 				PROVIDER,
 			);
@@ -95,13 +113,20 @@ describe("normalizeMalformedFunctionCall", () => {
 				malformedMessage({ errorMessage: "Unexpected end of JSON input" }),
 				PROVIDER,
 			);
-			expect(result?.message.errorMessage).toContain("Unexpected end of JSON input");
-			expect(result?.message.errorMessage).toContain("please retry your request");
+			expect(result?.message.errorMessage).toContain(
+				"Unexpected end of JSON input",
+			);
+			expect(result?.message.errorMessage).toContain(
+				"please retry your request",
+			);
 		});
 
 		test("does not normalize a truncated JSON response from another provider", () => {
 			const result = normalizeMalformedFunctionCall(
-				malformedMessage({ provider: "openai", errorMessage: "Unexpected end of JSON input" }),
+				malformedMessage({
+					provider: "openai",
+					errorMessage: "Unexpected end of JSON input",
+				}),
 				PROVIDER,
 			);
 			expect(result).toBeUndefined();
@@ -111,7 +136,9 @@ describe("normalizeMalformedFunctionCall", () => {
 			const result = normalizeMalformedFunctionCall(
 				malformedMessage({
 					errorMessage: "Unexpected end of JSON input",
-					content: [{ type: "toolCall", id: "abc", name: "bash", arguments: {} }],
+					content: [
+						{ type: "toolCall", id: "abc", name: "bash", arguments: {} },
+					],
 				}),
 				PROVIDER,
 			);
@@ -121,7 +148,10 @@ describe("normalizeMalformedFunctionCall", () => {
 
 	describe("idempotency", () => {
 		test("does not re-normalize an already-normalized message", () => {
-			const first = normalizeMalformedFunctionCall(malformedMessage(), PROVIDER);
+			const first = normalizeMalformedFunctionCall(
+				malformedMessage(),
+				PROVIDER,
+			);
 			expect(first).toBeDefined();
 			const second = normalizeMalformedFunctionCall(
 				malformedMessage({ errorMessage: first?.message.errorMessage }),
@@ -139,7 +169,9 @@ describe("normalizeMalformedFunctionCall", () => {
 
 		test("honors a custom provider name", () => {
 			const msg = malformedMessage({ provider: "custom-plexus" });
-			expect(normalizeMalformedFunctionCall(msg, "custom-plexus")).toBeDefined();
+			expect(
+				normalizeMalformedFunctionCall(msg, "custom-plexus"),
+			).toBeDefined();
 		});
 	});
 

@@ -87,7 +87,9 @@ export function resolveConfigTemplate(value: string): string | undefined {
 	return result;
 }
 
-function resolveStringOption(value: string | undefined | null): string | undefined {
+function resolveStringOption(
+	value: string | undefined | null,
+): string | undefined {
 	if (!value) return undefined;
 	const resolved = resolveConfigTemplate(value)?.trim();
 	return resolved || undefined;
@@ -112,7 +114,8 @@ export const toPlexusApiBase = (raw: string): string => {
  */
 function resolveApiKeyEnvSetting(): { name: string; explicit: boolean } {
 	const raw = getConfigSync().apiKeyEnv;
-	if (raw === undefined || raw === null) return { name: ENV_API_KEY, explicit: false };
+	if (raw === undefined || raw === null)
+		return { name: ENV_API_KEY, explicit: false };
 
 	const name = typeof raw === "string" ? raw.trim() : "";
 	if (!ENV_VAR_NAME_RE.test(name)) {
@@ -141,7 +144,9 @@ export function resolveExplicitApiKey(): string | undefined {
 
 	const value = process.env[name]?.trim();
 	if (!value) {
-		throw new Error(`apiKeyEnv environment variable "${name}" is missing or empty`);
+		throw new Error(
+			`apiKeyEnv environment variable "${name}" is missing or empty`,
+		);
 	}
 	return value;
 }
@@ -160,7 +165,9 @@ export function getConfigSync(): PlexusConfig {
 	if (cachedConfig) return cachedConfig;
 	try {
 		if (existsSync(getConfigPath())) {
-			cachedConfig = JSON.parse(readFileSync(getConfigPath(), "utf8")) as PlexusConfig;
+			cachedConfig = JSON.parse(
+				readFileSync(getConfigPath(), "utf8"),
+			) as PlexusConfig;
 			return cachedConfig;
 		}
 	} catch {}
@@ -170,18 +177,30 @@ export function getConfigSync(): PlexusConfig {
 
 export async function saveBaseUrl(baseUrl: string): Promise<void> {
 	await mkdir(getConfigDir(), { recursive: true });
-	const { defaultModel: _defaultModel, ...existing } = getConfigSync() as PlexusConfig & { defaultModel?: unknown };
+	const { defaultModel: _defaultModel, ...existing } =
+		getConfigSync() as PlexusConfig & { defaultModel?: unknown };
 	const config: PlexusConfig = {
 		...existing,
 		baseUrl: normalizeConfigBaseUrl(baseUrl),
 	};
-	await writeFile(getConfigPath(), `${JSON.stringify(config, null, 2)}\n`, "utf8");
+	await writeFile(
+		getConfigPath(),
+		`${JSON.stringify(config, null, 2)}\n`,
+		"utf8",
+	);
 	cachedConfig = config;
 }
 
-export type BaseUrlSource = "PLEXUS_API_URL" | "PLEXUS_BASE_URL" | "saved" | "none";
+export type BaseUrlSource =
+	| "PLEXUS_API_URL"
+	| "PLEXUS_BASE_URL"
+	| "saved"
+	| "none";
 
-export function getBaseUrlResolution(): { baseUrl: string | null; source: BaseUrlSource } {
+export function getBaseUrlResolution(): {
+	baseUrl: string | null;
+	source: BaseUrlSource;
+} {
 	const config = getConfigSync();
 	const apiUrl = resolveStringOption(process.env[ENV_API_URL]);
 	if (apiUrl) return { baseUrl: apiUrl, source: ENV_API_URL };
@@ -203,7 +222,9 @@ export function getEnvApiKey(): string | null {
  * default chain keeps the host-resolved key ahead of the process fallback;
  * OMP's host resolver includes the registered environment override.
  */
-export function resolveApiKey(storedKey: string | null | undefined): string | null {
+export function resolveApiKey(
+	storedKey: string | null | undefined,
+): string | null {
 	const explicit = resolveExplicitApiKey();
 	if (explicit) return explicit;
 	return storedKey ?? getEnvApiKey();
@@ -224,6 +245,8 @@ export function getBaseUrl(): string | null {
 export function getSuppressedModels(): string[] {
 	const config = getConfigSync();
 	const envSuppressed = getEnvSuppressedModels();
-	const configSuppressed = parseSuppressionPatterns(config.suppressModels ?? config.suppress);
+	const configSuppressed = parseSuppressionPatterns(
+		config.suppressModels ?? config.suppress,
+	);
 	return [...envSuppressed, ...configSuppressed];
 }

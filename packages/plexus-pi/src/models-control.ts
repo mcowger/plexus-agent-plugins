@@ -52,7 +52,8 @@ export interface ModelsControlHost {
 	refresh(): Promise<ModelsRefreshResult>;
 }
 
-export const MODELS_REFRESH_FAILED_REASON = "The Plexus catalog refresh failed.";
+export const MODELS_REFRESH_FAILED_REASON =
+	"The Plexus catalog refresh failed.";
 
 const encoder = new TextEncoder();
 function byteLength(value: unknown): number {
@@ -108,7 +109,9 @@ export class ModelsControl {
 			revision: 1,
 			status: "idle",
 		});
-		this.unsubscribe = events.on(MODELS_REFRESH_CHANNEL, (data) => this.handleCommand(data));
+		this.unsubscribe = events.on(MODELS_REFRESH_CHANNEL, (data) =>
+			this.handleCommand(data),
+		);
 	}
 
 	getState(): PublishedModelsState {
@@ -144,7 +147,11 @@ export class ModelsControl {
 		}
 	}
 
-	private commit(next: { status: ModelsStatus; modelCount?: number; reason?: string }): void {
+	private commit(next: {
+		status: ModelsStatus;
+		modelCount?: number;
+		reason?: string;
+	}): void {
 		if (statesEqual(this.state, next)) return;
 		this.revision++;
 		this.state = freezeState({
@@ -173,6 +180,7 @@ export class ModelsControl {
 			status: "error",
 			reason: "Plexus catalog state is unavailable.",
 		});
-		if (fallback.success) this.emit(MODELS_STATE_CHANNEL, freezeParsed(fallback.data));
+		if (fallback.success)
+			this.emit(MODELS_STATE_CHANNEL, freezeParsed(fallback.data));
 	}
 }

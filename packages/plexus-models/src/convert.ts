@@ -1,7 +1,10 @@
 import type { PlexusApiModel, PlexusModelDescriptor } from "./types.ts";
-import { isModelSuppressed } from "./suppress.ts";
 
-const REASONING_PARAMS = new Set(["reasoning", "include_reasoning", "reasoning_effort"]);
+const REASONING_PARAMS = new Set([
+	"reasoning",
+	"include_reasoning",
+	"reasoning_effort",
+]);
 
 // Identifiers and API hints commonly used for endpoint-specific models that
 // cannot be used by chat-oriented agent hosts. A bare `image` token covers the
@@ -63,9 +66,13 @@ export function adjustBaseUrl(
 	const stripped = baseUrl.replace(/\/+$/, "");
 	switch (preferredApi) {
 		case "anthropic-messages":
-			return anthropicBaseStyle === "root" && stripped.endsWith("/v1") ? stripped.slice(0, -3) : stripped;
+			return anthropicBaseStyle === "root" && stripped.endsWith("/v1")
+				? stripped.slice(0, -3)
+				: stripped;
 		case "google-generative-ai":
-			return stripped.endsWith("/v1") ? `${stripped.slice(0, -3)}/v1beta` : stripped;
+			return stripped.endsWith("/v1")
+				? `${stripped.slice(0, -3)}/v1beta`
+				: stripped;
 		default:
 			return stripped;
 	}
@@ -75,7 +82,9 @@ export function adjustBaseUrl(
  * Normalizes the input_modalities array to only "text" and "image".
  * Defaults to ["text"] when the field is absent or the result would be empty.
  */
-export function mapInputModalities(model: PlexusApiModel): ("text" | "image")[] {
+export function mapInputModalities(
+	model: PlexusApiModel,
+): ("text" | "image")[] {
 	const raw = model.architecture?.input_modalities;
 	if (!raw || raw.length === 0) return ["text"];
 	const result: ("text" | "image")[] = [];
@@ -97,7 +106,7 @@ export function inferReasoning(model: PlexusApiModel): boolean {
 function parsePrice(raw: string | undefined): number {
 	if (raw === undefined) return 0;
 	const n = parseFloat(raw);
-	return isFinite(n) && n >= 0 ? n : 0;
+	return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
 function resolveContextWindow(model: PlexusApiModel): number {
@@ -105,7 +114,7 @@ function resolveContextWindow(model: PlexusApiModel): number {
 	return v != null && v > 0 ? v : 8192;
 }
 
-function resolveMaxTokens(model: PlexusApiModel, contextWindow: number): number {
+function resolveMaxTokens(model: PlexusApiModel): number {
 	const v = model.top_provider?.max_completion_tokens ?? null;
 	// Use 32K as a safe default for modern chat models if top_provider value is missing or too low
 	if (v == null || v < 100) {
@@ -114,19 +123,31 @@ function resolveMaxTokens(model: PlexusApiModel, contextWindow: number): number 
 	return v;
 }
 
-function resolvePricingTiers(model: PlexusApiModel): PlexusModelDescriptor["cost"]["tiers"] {
+function resolvePricingTiers(
+	model: PlexusApiModel,
+): PlexusModelDescriptor["cost"]["tiers"] {
 	const pricing = model.pricing;
 	if (!pricing?.tiers) return undefined;
 
 	const tiers = pricing.tiers.flatMap((tier) => {
-		if (!Number.isFinite(tier.input_tokens_above) || tier.input_tokens_above < 0) return [];
-		return [{
-			inputTokensAbove: tier.input_tokens_above,
-			input: parsePrice(tier.prompt ?? pricing.prompt),
-			output: parsePrice(tier.completion ?? pricing.completion),
-			cacheRead: parsePrice(tier.input_cache_read ?? pricing.input_cache_read),
-			cacheWrite: parsePrice(tier.input_cache_write ?? pricing.input_cache_write),
-		}];
+		if (
+			!Number.isFinite(tier.input_tokens_above) ||
+			tier.input_tokens_above < 0
+		)
+			return [];
+		return [
+			{
+				inputTokensAbove: tier.input_tokens_above,
+				input: parsePrice(tier.prompt ?? pricing.prompt),
+				output: parsePrice(tier.completion ?? pricing.completion),
+				cacheRead: parsePrice(
+					tier.input_cache_read ?? pricing.input_cache_read,
+				),
+				cacheWrite: parsePrice(
+					tier.input_cache_write ?? pricing.input_cache_write,
+				),
+			},
+		];
 	});
 
 	return tiers.length > 0 ? tiers : undefined;
@@ -136,11 +157,14 @@ function resolvePricingTiers(model: PlexusApiModel): PlexusModelDescriptor["cost
  * Converts a single PlexusApiModel into a PlexusModelDescriptor.
  * Does NOT populate compat or thinkingLevelMap — those are reserved for host packages.
  */
-export function convertToDescriptor(raw: PlexusApiModel, baseUrl: string): PlexusModelDescriptor {
+export function convertToDescriptor(
+	raw: PlexusApiModel,
+	baseUrl: string,
+): PlexusModelDescriptor {
 	const preferredApi = mapPreferredApi(raw.preferred_api);
 	const adjustedBaseUrl = adjustBaseUrl(baseUrl, preferredApi);
 	const contextWindow = resolveContextWindow(raw);
-	const maxTokens = resolveMaxTokens(raw, contextWindow);
+	const maxTokens = resolveMaxTokens(raw);
 	const tiers = resolvePricingTiers(raw);
 
 	const descriptor: PlexusModelDescriptor = {
@@ -164,7 +188,8 @@ export function convertToDescriptor(raw: PlexusApiModel, baseUrl: string): Plexu
 
 	if (raw.pi_provider) descriptor.piProvider = raw.pi_provider;
 	if (raw.pi_model) descriptor.piModel = raw.pi_model;
-	if (raw.pi_options && Object.keys(raw.pi_options).length > 0) descriptor.piOptions = raw.pi_options;
+	if (raw.pi_options && Object.keys(raw.pi_options).length > 0)
+		descriptor.piOptions = raw.pi_options;
 
 	return descriptor;
 }
@@ -185,7 +210,11 @@ export function isChatModel(model: PlexusApiModel): boolean {
 	if (model.type !== undefined && model.type !== "text") return false;
 
 	const inputModalities = model.architecture?.input_modalities;
-	if (inputModalities !== undefined && inputModalities.length > 0 && !inputModalities.includes("text")) {
+	if (
+		inputModalities !== undefined &&
+		inputModalities.length > 0 &&
+		!inputModalities.includes("text")
+	) {
 		return false;
 	}
 
@@ -195,7 +224,8 @@ export function isChatModel(model: PlexusApiModel): boolean {
 	const outputModalities = model.architecture?.output_modalities;
 	if (
 		outputModalities !== undefined &&
-		(outputModalities.length === 0 || outputModalities.some((m) => m !== "text"))
+		(outputModalities.length === 0 ||
+			outputModalities.some((m) => m !== "text"))
 	) {
 		return false;
 	}
@@ -211,7 +241,8 @@ export function isChatModel(model: PlexusApiModel): boolean {
 			.split(/[+,]/)
 			.map((t) => t.trim())
 			.filter((t) => t.length > 0);
-		if (outputTokens.length === 0 || outputTokens.some((t) => t !== "text")) return false;
+		if (outputTokens.length === 0 || outputTokens.some((t) => t !== "text"))
+			return false;
 	}
 
 	const apiHints = Array.isArray(model.preferred_api)
@@ -253,7 +284,7 @@ export function isSuppressedModel(
 	model: { id: string; name?: string },
 	suppress?: string | (string | undefined | null)[] | null,
 ): boolean {
-	if (!model || !model.id) return false;
+	if (!model?.id) return false;
 	const patterns = parseSuppressionPatterns(suppress);
 	if (patterns.length === 0) return false;
 
@@ -287,7 +318,7 @@ export function isSuppressedModel(
 		if (pattern.includes("*") || pattern.includes("?")) {
 			try {
 				const escaped = patternLower.replace(/[.+^$()|[{}]\\]/g, "\\$&");
-				const regexStr = "^" + escaped.replace(/\*/g, ".*").replace(/\?/g, ".") + "$";
+				const regexStr = `^${escaped.replace(/\*/g, ".*").replace(/\?/g, ".")}$`;
 				const globRe = new RegExp(regexStr, "i");
 				if (globRe.test(model.id) || (model.name && globRe.test(model.name))) {
 					return true;
@@ -362,14 +393,18 @@ export function detectOpenAICompletionsCompat(
 	const isCerebras = name === "cerebras" || host.includes("cerebras");
 	const isChutes = name === "chutes.ai" || host.includes("chutes.ai");
 	const isXai = name === "xai" || host === "api.x.ai";
-	const isZai = name === "zai" || host === "api.zai.com" || host.includes("z.ai");
+	const isZai =
+		name === "zai" || host === "api.zai.com" || host.includes("z.ai");
 	const isMoonshot =
-		name === "moonshotai" || name === "moonshotai-cn" || host.includes("moonshot") || host.includes("kimi");
+		name === "moonshotai" ||
+		name === "moonshotai-cn" ||
+		host.includes("moonshot") ||
+		host.includes("kimi");
 	const isOpencode = name === "opencode" || host.includes("opencode");
 	const isCloudflareWorkers =
-		host.includes("workers.cloudflare.com") || host.includes("ai.cloudflare.com");
-	const isCloudflareGateway =
-		host.includes("gateway.ai.cloudflare.com");
+		host.includes("workers.cloudflare.com") ||
+		host.includes("ai.cloudflare.com");
+	const isCloudflareGateway = host.includes("gateway.ai.cloudflare.com");
 	const isCloudflare = isCloudflareWorkers || isCloudflareGateway;
 	const isDeepSeek = name === "deepseek" || host.includes("deepseek");
 	const isOpenRouter = name === "openrouter" || host.includes("openrouter.ai");
@@ -389,7 +424,8 @@ export function detectOpenAICompletionsCompat(
 	const supportsReasoningEffort =
 		!isXai && !isZai && !isMoonshot && !isCloudflareGateway;
 
-	let maxTokensField: "max_tokens" | "max_completion_tokens" = "max_completion_tokens";
+	let maxTokensField: "max_tokens" | "max_completion_tokens" =
+		"max_completion_tokens";
 	if (isChutes || isMoonshot || isCloudflareGateway) {
 		maxTokensField = "max_tokens";
 	}
@@ -401,7 +437,9 @@ export function detectOpenAICompletionsCompat(
 
 	const requiresReasoningContentOnAssistantMessages = isDeepSeek;
 
-	const cacheControlFormat: "anthropic" | undefined = isOpenRouter ? "anthropic" : undefined;
+	const cacheControlFormat: "anthropic" | undefined = isOpenRouter
+		? "anthropic"
+		: undefined;
 
 	const supportsStrictMode = !isMoonshot && !isCloudflareGateway;
 
@@ -450,10 +488,17 @@ export async function fetchPlexusModels(
 	timeoutMs: number = DEFAULT_MODELS_FETCH_TIMEOUT_MS,
 	etag?: string,
 	signal?: AbortSignal,
-): Promise<{ models: PlexusApiModel[]; raw?: import("./types.ts").PlexusApiResponse; etag?: string; notModified?: boolean }> {
+): Promise<{
+	models: PlexusApiModel[];
+	raw?: import("./types.ts").PlexusApiResponse;
+	etag?: string;
+	notModified?: boolean;
+}> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), timeoutMs);
-	const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+	const requestSignal = signal
+		? AbortSignal.any([signal, controller.signal])
+		: controller.signal;
 	try {
 		const headers: Record<string, string> = { Accept: "application/json" };
 		if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
@@ -463,13 +508,15 @@ export async function fetchPlexusModels(
 			headers,
 			signal: requestSignal,
 		});
-		
+
 		if (res.status === 304) {
 			return { models: [], notModified: true };
 		}
-		
+
 		if (!res.ok) {
-			throw new Error(`Plexus models fetch failed: ${res.status} ${res.statusText}`);
+			throw new Error(
+				`Plexus models fetch failed: ${res.status} ${res.statusText}`,
+			);
 		}
 		const raw = (await res.json()) as import("./types.ts").PlexusApiResponse;
 		const responseEtag = res.headers.get("etag") ?? undefined;

@@ -35,7 +35,8 @@ import { log } from "./log.ts";
 // `call:default_api:bash{...}` or `default_api.bash(...)` (optionally wrapped in
 // `print(...)`). The leak is glued onto preceding text with no separator, so we
 // anchor on the `default_api` marker rather than a line start.
-const MALFORMED_LEAK_PATTERN = /(?:print\()?call:\s*default_api[.:]|default_api\.\w+\s*\(/;
+const MALFORMED_LEAK_PATTERN =
+	/(?:print\()?call:\s*default_api[.:]|default_api\.\w+\s*\(/;
 
 // Defensive: a diagnostic that already names the failure, in case a future pi
 // version preserves the finishReason text on the error message.
@@ -113,8 +114,7 @@ export function normalizeMalformedFunctionCall<T extends AssistantMessageLike>(
 	providerName: string,
 ): { message: T } | undefined {
 	if (
-		!message ||
-		message.role !== "assistant" ||
+		message?.role !== "assistant" ||
 		message.provider !== providerName ||
 		message.stopReason !== "error"
 	) {
@@ -135,18 +135,26 @@ export function normalizeMalformedFunctionCall<T extends AssistantMessageLike>(
 	// after one could repeat an externally visible side effect.
 	if (hasToolCall(message.content)) return undefined;
 
-	if (typeof message.errorMessage === "string" && TRUNCATED_JSON_PATTERN.test(message.errorMessage)) {
+	if (
+		typeof message.errorMessage === "string" &&
+		TRUNCATED_JSON_PATTERN.test(message.errorMessage)
+	) {
 		log("retryable-error: retagged truncated JSON response for retry", {
 			model: message.model,
 		});
 		return { message: { ...message, errorMessage: TRUNCATED_JSON_MESSAGE } };
 	}
 
-	if (typeof message.errorMessage === "string" && PROVIDER_CONNECTION_CLOSED_PATTERN.test(message.errorMessage)) {
+	if (
+		typeof message.errorMessage === "string" &&
+		PROVIDER_CONNECTION_CLOSED_PATTERN.test(message.errorMessage)
+	) {
 		log("retryable-error: retagged closed provider connection for retry", {
 			model: message.model,
 		});
-		return { message: { ...message, errorMessage: PROVIDER_CONNECTION_CLOSED_MESSAGE } };
+		return {
+			message: { ...message, errorMessage: PROVIDER_CONNECTION_CLOSED_MESSAGE },
+		};
 	}
 
 	const via = hasLeakedFunctionCall(message.content)

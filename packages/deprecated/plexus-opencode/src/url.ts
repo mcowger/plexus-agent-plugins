@@ -3,7 +3,7 @@
  * Returns "" for blank/invalid input.
  */
 export function trimURL(s: string): string {
-  return s.trim().replace(/\/+$/, "")
+	return s.trim().replace(/\/+$/, "");
 }
 
 /**
@@ -11,9 +11,9 @@ export function trimURL(s: string): string {
  * Idempotent — accepts either https://host or https://host/v1.
  */
 export function rootURL(s: string): string {
-  const next = trimURL(s)
-  if (!next) return ""
-  return next.endsWith("/v1") ? next.slice(0, -3) : next
+	const next = trimURL(s);
+	if (!next) return "";
+	return next.endsWith("/v1") ? next.slice(0, -3) : next;
 }
 
 /**
@@ -21,15 +21,15 @@ export function rootURL(s: string): string {
  * Idempotent — if the URL already ends with /v1, returns it unchanged.
  */
 export function apiBase(baseURL: string): string {
-  const next = rootURL(baseURL)
-  if (!next) return ""
-  return `${next}/v1`
+	const next = rootURL(baseURL);
+	if (!next) return "";
+	return `${next}/v1`;
 }
 
 /**
  * Return the /v1/models URL for a given root URL.
  */
 export function modelsUrl(baseURL: string): string {
-  const base = apiBase(baseURL)
-  return base ? `${base}/models` : ""
+	const base = apiBase(baseURL);
+	return base ? `${base}/models` : "";
 }

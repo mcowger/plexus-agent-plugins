@@ -1,9 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-	getEnvSuppressedModels,
-	isModelSuppressed,
-	parseSuppressionPatterns,
-} from "./suppress.ts";
+import { isModelSuppressed, parseSuppressionPatterns } from "./suppress.ts";
 
 describe("parseSuppressionPatterns", () => {
 	test("returns empty array for empty inputs", () => {
@@ -46,7 +42,8 @@ describe("isModelSuppressed", () => {
 	afterEach(() => {
 		if (origEnv !== undefined) process.env.PLEXUS_SUPPRESS_MODELS = origEnv;
 		else delete process.env.PLEXUS_SUPPRESS_MODELS;
-		if (origExclEnv !== undefined) process.env.PLEXUS_EXCLUDE_MODELS = origExclEnv;
+		if (origExclEnv !== undefined)
+			process.env.PLEXUS_EXCLUDE_MODELS = origExclEnv;
 		else delete process.env.PLEXUS_EXCLUDE_MODELS;
 	});
 
@@ -60,25 +57,44 @@ describe("isModelSuppressed", () => {
 	});
 
 	test("matches exact Name case-insensitively", () => {
-		expect(isModelSuppressed({ id: "custom-id-1", name: "Claude 3.5 Sonnet" }, "claude 3.5 sonnet")).toBe(true);
+		expect(
+			isModelSuppressed(
+				{ id: "custom-id-1", name: "Claude 3.5 Sonnet" },
+				"claude 3.5 sonnet",
+			),
+		).toBe(true);
 	});
 
 	test("matches short ID prefix/suffix", () => {
-		expect(isModelSuppressed({ id: "openai/gpt-3.5-turbo" }, "gpt-3.5-turbo")).toBe(true);
-		expect(isModelSuppressed({ id: "provider:claude-2.0" }, "claude-2.0")).toBe(true);
+		expect(
+			isModelSuppressed({ id: "openai/gpt-3.5-turbo" }, "gpt-3.5-turbo"),
+		).toBe(true);
+		expect(isModelSuppressed({ id: "provider:claude-2.0" }, "claude-2.0")).toBe(
+			true,
+		);
 	});
 
 	test("matches glob patterns with wildcards", () => {
-		expect(isModelSuppressed({ id: "openai/gpt-3.5-turbo" }, "gpt-3.5*")).toBe(true);
-		expect(isModelSuppressed({ id: "deprecated-model-v1" }, "*deprecated*")).toBe(true);
-		expect(isModelSuppressed({ id: "anthropic/claude-3-haiku" }, "anthropic/*")).toBe(true);
+		expect(isModelSuppressed({ id: "openai/gpt-3.5-turbo" }, "gpt-3.5*")).toBe(
+			true,
+		);
+		expect(
+			isModelSuppressed({ id: "deprecated-model-v1" }, "*deprecated*"),
+		).toBe(true);
+		expect(
+			isModelSuppressed({ id: "anthropic/claude-3-haiku" }, "anthropic/*"),
+		).toBe(true);
 		expect(isModelSuppressed({ id: "gpt-4o" }, "gpt-4?")).toBe(true);
 		expect(isModelSuppressed({ id: "gpt-4o-mini" }, "gpt-4?")).toBe(false);
 	});
 
 	test("matches regex patterns", () => {
-		expect(isModelSuppressed({ id: "gpt-3.5-turbo" }, "regex:^gpt-[34]")).toBe(true);
-		expect(isModelSuppressed({ id: "gpt-5-preview" }, "regex:^gpt-[34]")).toBe(false);
+		expect(isModelSuppressed({ id: "gpt-3.5-turbo" }, "regex:^gpt-[34]")).toBe(
+			true,
+		);
+		expect(isModelSuppressed({ id: "gpt-5-preview" }, "regex:^gpt-[34]")).toBe(
+			false,
+		);
 	});
 
 	test("honors PLEXUS_SUPPRESS_MODELS environment variable", () => {

@@ -85,7 +85,9 @@ export function resolveConfigTemplate(value: string): string | undefined {
 	return result;
 }
 
-function resolveStringOption(value: string | undefined | null): string | undefined {
+function resolveStringOption(
+	value: string | undefined | null,
+): string | undefined {
 	if (!value) return undefined;
 	const resolved = resolveConfigTemplate(value)?.trim();
 	return resolved || undefined;
@@ -115,7 +117,9 @@ export function getConfigSync(): PlexusConfig {
 	if (cachedConfig) return cachedConfig;
 	try {
 		if (existsSync(getConfigPath())) {
-			cachedConfig = JSON.parse(readFileSync(getConfigPath(), "utf8")) as PlexusConfig;
+			cachedConfig = JSON.parse(
+				readFileSync(getConfigPath(), "utf8"),
+			) as PlexusConfig;
 			return cachedConfig;
 		}
 	} catch {}
@@ -125,18 +129,30 @@ export function getConfigSync(): PlexusConfig {
 
 export async function saveBaseUrl(baseUrl: string): Promise<void> {
 	await mkdir(getConfigDir(), { recursive: true });
-	const { defaultModel: _defaultModel, ...existing } = getConfigSync() as PlexusConfig & { defaultModel?: unknown };
+	const { defaultModel: _defaultModel, ...existing } =
+		getConfigSync() as PlexusConfig & { defaultModel?: unknown };
 	const config: PlexusConfig = {
 		...existing,
 		baseUrl: normalizeConfigBaseUrl(baseUrl),
 	};
-	await writeFile(getConfigPath(), `${JSON.stringify(config, null, 2)}\n`, "utf8");
+	await writeFile(
+		getConfigPath(),
+		`${JSON.stringify(config, null, 2)}\n`,
+		"utf8",
+	);
 	cachedConfig = config;
 }
 
-export type BaseUrlSource = "PLEXUS_API_URL" | "PLEXUS_BASE_URL" | "saved" | "none";
+export type BaseUrlSource =
+	| "PLEXUS_API_URL"
+	| "PLEXUS_BASE_URL"
+	| "saved"
+	| "none";
 
-export function getBaseUrlResolution(): { baseUrl: string | null; source: BaseUrlSource } {
+export function getBaseUrlResolution(): {
+	baseUrl: string | null;
+	source: BaseUrlSource;
+} {
 	const config = getConfigSync();
 	const apiUrl = resolveStringOption(process.env[ENV_API_URL]);
 	if (apiUrl) return { baseUrl: apiUrl, source: ENV_API_URL };
@@ -155,7 +171,8 @@ export function getBaseUrlResolution(): { baseUrl: string | null; source: BaseUr
  */
 function resolveApiKeyEnvSetting(): { name: string; explicit: boolean } {
 	const raw = getConfigSync().apiKeyEnv;
-	if (raw === undefined || raw === null) return { name: ENV_API_KEY, explicit: false };
+	if (raw === undefined || raw === null)
+		return { name: ENV_API_KEY, explicit: false };
 
 	const name = typeof raw === "string" ? raw.trim() : "";
 	if (!ENV_VAR_NAME_RE.test(name)) {
@@ -177,7 +194,9 @@ export function isApiKeyEnvExplicit(): boolean {
 function requireApiKeyEnvValue(name: string, raw: string | undefined): string {
 	const value = raw?.trim();
 	if (!value) {
-		throw new Error(`apiKeyEnv environment variable "${name}" is missing or empty`);
+		throw new Error(
+			`apiKeyEnv environment variable "${name}" is missing or empty`,
+		);
 	}
 	return value;
 }
@@ -219,7 +238,9 @@ export function resolveExplicitApiKey(): string | undefined {
  * default chain keeps a stored credential ahead of the `PLEXUS_API_KEY`
  * process fallback.
  */
-export function resolveApiKey(storedKey: string | undefined): string | undefined {
+export function resolveApiKey(
+	storedKey: string | undefined,
+): string | undefined {
 	const explicit = resolveExplicitApiKey();
 	if (explicit) return explicit;
 	return storedKey || getEnvApiKey() || undefined;
@@ -245,6 +266,8 @@ export function getBaseUrl(): string | null {
 export function getSuppressedModels(): string[] {
 	const config = getConfigSync();
 	const envSuppressed = getEnvSuppressedModels();
-	const configSuppressed = parseSuppressionPatterns(config.suppressModels ?? config.suppress);
+	const configSuppressed = parseSuppressionPatterns(
+		config.suppressModels ?? config.suppress,
+	);
 	return [...envSuppressed, ...configSuppressed];
 }

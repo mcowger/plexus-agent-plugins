@@ -1,4 +1,4 @@
-import { mkdir, appendFile } from "node:fs/promises";
+import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { getAgentDir } from "@oh-my-pi/pi-utils";
 
@@ -19,16 +19,20 @@ export function log(message: string, data?: Record<string, unknown>): void {
 	void writeLogLine(message, data);
 }
 
-async function writeLogLine(message: string, data?: Record<string, unknown>): Promise<void> {
+async function writeLogLine(
+	message: string,
+	data?: Record<string, unknown>,
+): Promise<void> {
 	try {
 		if (!dirEnsured) {
 			await mkdir(getCacheDir(), { recursive: true });
 			dirEnsured = true;
 		}
 		const ts = new Date().toISOString();
-		const line = data !== undefined
-			? `${ts} ${message} ${JSON.stringify(data)}\n`
-			: `${ts} ${message}\n`;
+		const line =
+			data !== undefined
+				? `${ts} ${message} ${JSON.stringify(data)}\n`
+				: `${ts} ${message}\n`;
 		await appendFile(getLogPath(), line, "utf8");
 	} catch {
 		// logging must never throw

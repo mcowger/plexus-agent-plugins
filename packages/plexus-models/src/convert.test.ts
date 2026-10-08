@@ -12,39 +12,45 @@ import type { PlexusApiModel } from "./types.ts";
 
 describe("adjustBaseUrl", () => {
 	test("strips trailing /v1 for anthropic messages models", () => {
-		expect(adjustBaseUrl("https://plexus.example.com/v1", "anthropic-messages")).toBe(
-			"https://plexus.example.com",
-		);
+		expect(
+			adjustBaseUrl("https://plexus.example.com/v1", "anthropic-messages"),
+		).toBe("https://plexus.example.com");
 	});
 
 	test("preserves /v1 for openai-compatible models", () => {
-		expect(adjustBaseUrl("https://plexus.example.com/v1", "openai-completions")).toBe(
-			"https://plexus.example.com/v1",
-		);
+		expect(
+			adjustBaseUrl("https://plexus.example.com/v1", "openai-completions"),
+		).toBe("https://plexus.example.com/v1");
 	});
 
 	test("switches /v1 to /v1beta for google models", () => {
-		expect(adjustBaseUrl("https://plexus.example.com/v1", "google-generative-ai")).toBe(
-			"https://plexus.example.com/v1beta",
-		);
+		expect(
+			adjustBaseUrl("https://plexus.example.com/v1", "google-generative-ai"),
+		).toBe("https://plexus.example.com/v1beta");
 	});
 
 	test("remains stable when the anthropic base URL is already a root URL", () => {
-		expect(adjustBaseUrl("https://plexus.example.com", "anthropic-messages")).toBe(
-			"https://plexus.example.com",
-		);
+		expect(
+			adjustBaseUrl("https://plexus.example.com", "anthropic-messages"),
+		).toBe("https://plexus.example.com");
 	});
 
 	test("preserves /v1 for AI SDK anthropic clients", () => {
-		expect(adjustBaseUrl("https://plexus.example.com/v1", "anthropic-messages", "versioned")).toBe(
-			"https://plexus.example.com/v1",
-		);
+		expect(
+			adjustBaseUrl(
+				"https://plexus.example.com/v1",
+				"anthropic-messages",
+				"versioned",
+			),
+		).toBe("https://plexus.example.com/v1");
 	});
 });
 
 describe("mapPreferredApi", () => {
 	test("uses the first recognized preferred_api entry", () => {
-		expect(mapPreferredApi(["unknown", "messages", "chat_completions"])).toBe("anthropic-messages");
+		expect(mapPreferredApi(["unknown", "messages", "chat_completions"])).toBe(
+			"anthropic-messages",
+		);
 	});
 
 	test("falls back to openai-compatible completions", () => {
@@ -87,7 +93,10 @@ describe("convertToDescriptor", () => {
 	};
 
 	test("maps new Plexus metadata into the host-neutral descriptor", () => {
-		const descriptor = convertToDescriptor(baseModel, "https://plexus.example.com/v1");
+		const descriptor = convertToDescriptor(
+			baseModel,
+			"https://plexus.example.com/v1",
+		);
 
 		expect(descriptor).toMatchObject({
 			id: "claude-haiku-4-5",
@@ -138,52 +147,81 @@ describe("isChatModel", () => {
 	});
 
 	test("rejects endpoint-specific preferred API hints", () => {
-		expect(isChatModel({ id: "opaque-model", preferred_api: "embeddings" })).toBe(false);
-		expect(isChatModel({ id: "opaque-model", preferred_api: "audio_transcriptions" })).toBe(false);
+		expect(
+			isChatModel({ id: "opaque-model", preferred_api: "embeddings" }),
+		).toBe(false);
+		expect(
+			isChatModel({
+				id: "opaque-model",
+				preferred_api: "audio_transcriptions",
+			}),
+		).toBe(false);
 	});
 
 	test("rejects non-text output and preserves multimodal chat models", () => {
-		expect(isChatModel({
-			id: "image-model",
-			architecture: { output_modalities: ["image"] },
-		})).toBe(false);
-		expect(isChatModel({
-			id: "transcriber",
-			name: "GPT-4o mini Transcribe",
-			architecture: { input_modalities: ["audio"], output_modalities: ["text"] },
-		})).toBe(false);
-		expect(isChatModel({ id: "gpt-4o-mini", name: "GPT-4o mini Transcribe" })).toBe(false);
-		expect(isChatModel({
-			id: "multimodal-chat",
-			architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
-		})).toBe(true);
+		expect(
+			isChatModel({
+				id: "image-model",
+				architecture: { output_modalities: ["image"] },
+			}),
+		).toBe(false);
+		expect(
+			isChatModel({
+				id: "transcriber",
+				name: "GPT-4o mini Transcribe",
+				architecture: {
+					input_modalities: ["audio"],
+					output_modalities: ["text"],
+				},
+			}),
+		).toBe(false);
+		expect(
+			isChatModel({ id: "gpt-4o-mini", name: "GPT-4o mini Transcribe" }),
+		).toBe(false);
+		expect(
+			isChatModel({
+				id: "multimodal-chat",
+				architecture: {
+					input_modalities: ["text", "image"],
+					output_modalities: ["text"],
+				},
+			}),
+		).toBe(true);
 	});
 
 	test("rejects image-generation models by output modalities", () => {
-		expect(isChatModel({
-			id: "gemini-3.1-flash-image",
-			architecture: {
-				modality: "text+image+video+pdf->text+image",
-				input_modalities: ["text", "image", "video", "pdf"],
-				output_modalities: ["text", "image"],
-			},
-		})).toBe(false);
-		expect(isChatModel({
-			id: "gemini-3.1-flash-lite-image",
-			architecture: {
-				modality: "text+image->text+image",
-				input_modalities: ["text", "image"],
-				output_modalities: ["text", "image"],
-			},
-		})).toBe(false);
-		expect(isChatModel({
-			id: "image-output-model",
-			architecture: { output_modalities: ["text", "image"] },
-		})).toBe(false);
-		expect(isChatModel({
-			id: "gen-image-model",
-			architecture: { modality: "text->image" },
-		})).toBe(false);
+		expect(
+			isChatModel({
+				id: "gemini-3.1-flash-image",
+				architecture: {
+					modality: "text+image+video+pdf->text+image",
+					input_modalities: ["text", "image", "video", "pdf"],
+					output_modalities: ["text", "image"],
+				},
+			}),
+		).toBe(false);
+		expect(
+			isChatModel({
+				id: "gemini-3.1-flash-lite-image",
+				architecture: {
+					modality: "text+image->text+image",
+					input_modalities: ["text", "image"],
+					output_modalities: ["text", "image"],
+				},
+			}),
+		).toBe(false);
+		expect(
+			isChatModel({
+				id: "image-output-model",
+				architecture: { output_modalities: ["text", "image"] },
+			}),
+		).toBe(false);
+		expect(
+			isChatModel({
+				id: "gen-image-model",
+				architecture: { modality: "text->image" },
+			}),
+		).toBe(false);
 	});
 
 	test("rejects image-generation models by trailing -image identifier when metadata is absent", () => {
@@ -192,18 +230,30 @@ describe("isChatModel", () => {
 	});
 
 	test("preserves text-only-output vision models", () => {
-		expect(isChatModel({
-			id: "gemini-3.1-pro-vision",
-			architecture: { modality: "text+image->text", output_modalities: ["text"] },
-		})).toBe(true);
-		expect(isChatModel({
-			id: "vision-chat",
-			architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
-		})).toBe(true);
-		expect(isChatModel({
-			id: "gemini-3.1-flash-vision",
-			architecture: { modality: "text+image->text" },
-		})).toBe(true);
+		expect(
+			isChatModel({
+				id: "gemini-3.1-pro-vision",
+				architecture: {
+					modality: "text+image->text",
+					output_modalities: ["text"],
+				},
+			}),
+		).toBe(true);
+		expect(
+			isChatModel({
+				id: "vision-chat",
+				architecture: {
+					input_modalities: ["text", "image"],
+					output_modalities: ["text"],
+				},
+			}),
+		).toBe(true);
+		expect(
+			isChatModel({
+				id: "gemini-3.1-flash-vision",
+				architecture: { modality: "text+image->text" },
+			}),
+		).toBe(true);
 	});
 
 	test("batch conversion excludes non-chat models", () => {
@@ -222,7 +272,9 @@ describe("isChatModel", () => {
 	test("rejects non-text capability types advertised by the server", () => {
 		expect(isChatModel({ id: "chat-model", type: "text" })).toBe(true);
 		expect(isChatModel({ id: "embed-model", type: "embeddings" })).toBe(false);
-		expect(isChatModel({ id: "stt-model", type: "transcriptions" })).toBe(false);
+		expect(isChatModel({ id: "stt-model", type: "transcriptions" })).toBe(
+			false,
+		);
 		expect(isChatModel({ id: "tts-model", type: "speech" })).toBe(false);
 		expect(isChatModel({ id: "img-model", type: "image" })).toBe(false);
 		expect(isChatModel({ id: "jev-model", type: "decisions" })).toBe(false);
@@ -243,13 +295,21 @@ describe("isChatModel", () => {
 			"https://plexus.example.com/v1",
 		);
 
-		expect(descriptors.map((model) => model.id)).toEqual(["chat-model", "legacy-model"]);
+		expect(descriptors.map((model) => model.id)).toEqual([
+			"chat-model",
+			"legacy-model",
+		]);
 	});
 });
 
 describe("inferReasoning", () => {
 	test("detects any supported reasoning parameter", () => {
-		expect(inferReasoning({ id: "reasoner", supported_parameters: ["include_reasoning"] })).toBe(true);
+		expect(
+			inferReasoning({
+				id: "reasoner",
+				supported_parameters: ["include_reasoning"],
+			}),
+		).toBe(true);
 	});
 });
 
@@ -264,7 +324,9 @@ describe("fetchPlexusModels", () => {
 		let headers: unknown;
 		globalThis.fetch = (async (_url, init) => {
 			headers = init?.headers;
-			return new Response(JSON.stringify({ object: "list", data: [] }), { status: 200 });
+			return new Response(JSON.stringify({ object: "list", data: [] }), {
+				status: 200,
+			});
 		}) as typeof fetch;
 
 		await fetchPlexusModels("", "https://plexus.example.com/v1/models");
@@ -276,7 +338,9 @@ describe("fetchPlexusModels", () => {
 		let headers: unknown;
 		globalThis.fetch = (async (_url, init) => {
 			headers = init?.headers;
-			return new Response(JSON.stringify({ object: "list", data: [] }), { status: 200 });
+			return new Response(JSON.stringify({ object: "list", data: [] }), {
+				status: 200,
+			});
 		}) as typeof fetch;
 
 		await fetchPlexusModels("secret", "https://plexus.example.com/v1/models");

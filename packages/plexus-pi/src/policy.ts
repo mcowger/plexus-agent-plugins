@@ -31,7 +31,8 @@ export const PolicySetSchema = z
 	})
 	.strict()
 	.refine(
-		(command) => command.longContext !== undefined || command.serviceTier !== undefined,
+		(command) =>
+			command.longContext !== undefined || command.serviceTier !== undefined,
 		{ message: "At least one of longContext or serviceTier is required." },
 	);
 
@@ -85,7 +86,10 @@ export interface PolicyHost {
 	/** The active session model identity, or `undefined` when none is selected. */
 	getActiveModel(): { provider: string; id: string } | undefined;
 	/** The committed advertisement for the model, or `undefined` when none exists. */
-	getAdvertisement(model: { provider: string; id: string }): PolicyAdvertisement | undefined;
+	getAdvertisement(model: {
+		provider: string;
+		id: string;
+	}): PolicyAdvertisement | undefined;
 	/** The session's current effective context window, or `undefined` when unknown. */
 	getEffectiveContextWindow(): number | undefined;
 	/**
@@ -102,13 +106,20 @@ export interface PolicyHost {
 export const POLICY_UNAVAILABLE_REASON =
 	"No Plexus context or service-tier policy is advertised for the active model.";
 
-const DEFAULT_SELECTION: PolicySelection = Object.freeze({ longContext: true, serviceTier: null });
+const DEFAULT_SELECTION: PolicySelection = Object.freeze({
+	longContext: true,
+	serviceTier: null,
+});
 
 /** Whether the advertisement exposes a distinct short/max context budget and any service tiers. */
-export function policyAvailability(advertisement: PolicyAdvertisement | undefined): PolicyAvailability {
+export function policyAvailability(
+	advertisement: PolicyAdvertisement | undefined,
+): PolicyAvailability {
 	const context = advertisement?.context;
 	return {
-		longContext: context !== undefined && context.shortContextBudgetTokens < context.maxContextTokens,
+		longContext:
+			context !== undefined &&
+			context.shortContextBudgetTokens < context.maxContextTokens,
 		serviceTier: (advertisement?.serviceTier?.serviceTiers.length ?? 0) > 0,
 	};
 }
@@ -120,16 +131,23 @@ export function effectiveContextWindow(
 ): number | undefined {
 	const context = advertisement?.context;
 	if (!context) return undefined;
-	if (!selection.longContext && context.shortContextBudgetTokens < context.maxContextTokens) {
+	if (
+		!selection.longContext &&
+		context.shortContextBudgetTokens < context.maxContextTokens
+	) {
 		return context.shortContextBudgetTokens;
 	}
 	return context.maxContextTokens;
 }
 
 /** Injects `service_tier` into a request payload, leaving non-object payloads untouched. */
-export function injectServiceTier(payload: unknown, tier: string | null | undefined): unknown {
+export function injectServiceTier(
+	payload: unknown,
+	tier: string | null | undefined,
+): unknown {
 	if (tier === null || tier === undefined) return payload;
-	if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+	if (!payload || typeof payload !== "object" || Array.isArray(payload))
+		return payload;
 	return { ...(payload as Record<string, unknown>), service_tier: tier };
 }
 
@@ -156,10 +174,22 @@ function freezePublished(state: PublishedPolicyState): PublishedPolicyState {
 
 function selectionStatesEqual(
 	current: PublishedPolicyState,
-	next: { applied: PolicyApplied; available: PolicyAvailability; reason?: string },
+	next: {
+		applied: PolicyApplied;
+		available: PolicyAvailability;
+		reason?: string;
+	},
 ): boolean {
-	const shape = (state: { applied: PolicyApplied; available: PolicyAvailability; reason?: string }) =>
-		JSON.stringify({ applied: state.applied, available: state.available, reason: state.reason ?? null });
+	const shape = (state: {
+		applied: PolicyApplied;
+		available: PolicyAvailability;
+		reason?: string;
+	}) =>
+		JSON.stringify({
+			applied: state.applied,
+			available: state.available,
+			reason: state.reason ?? null,
+		});
 	return shape(current) === shape(next);
 }
 
@@ -171,20 +201,22 @@ function validateSelection(
 	if (
 		model === undefined ||
 		advertisement === undefined ||
-		(advertisement.context === undefined && advertisement.serviceTier === undefined)
+		(advertisement.context === undefined &&
+			advertisement.serviceTier === undefined)
 	) {
 		return POLICY_UNAVAILABLE_REASON;
 	}
 	if (command.longContext !== undefined) {
 		const context = advertisement.context;
-		if (context === undefined) return "No context budget is advertised for the active model.";
+		if (context === undefined)
+			return "No context budget is advertised for the active model.";
 		if (context.shortContextBudgetTokens >= context.maxContextTokens) {
 			return "The active model has no distinct short and maximum context budget.";
 		}
 	}
 	if (command.serviceTier !== undefined && command.serviceTier !== null) {
 		const tiers = advertisement.serviceTier?.serviceTiers;
-		if (!tiers || !tiers.includes(command.serviceTier)) {
+		if (!tiers?.includes(command.serviceTier)) {
 			return "The requested service tier is not advertised for the active model.";
 		}
 	}
@@ -203,7 +235,10 @@ export class PolicyController {
 	private revision = 1;
 	private selection: PolicySelection = { ...DEFAULT_SELECTION };
 	private boundModel: { provider: string; id: string } | undefined;
-	private available: PolicyAvailability = { longContext: false, serviceTier: false };
+	private available: PolicyAvailability = {
+		longContext: false,
+		serviceTier: false,
+	};
 	private contextWindow: number | undefined;
 	private reason: string | undefined;
 	private state: PublishedPolicyState;
@@ -226,7 +261,9 @@ export class PolicyController {
 			applied: { longContext: true, serviceTier: null },
 			available: { longContext: false, serviceTier: false },
 		});
-		this.unsubscribe = events.on(POLICY_SET_CHANNEL, (data) => this.enqueue(() => this.handleSet(data)));
+		this.unsubscribe = events.on(POLICY_SET_CHANNEL, (data) =>
+			this.enqueue(() => this.handleSet(data)),
+		);
 	}
 
 	getState(): PublishedPolicyState {
@@ -234,9 +271,15 @@ export class PolicyController {
 	}
 
 	/** The active tier to inject for a request model, or `null` when none applies. */
-	serviceTierFor(model: { provider: string; id: string } | undefined): string | null {
+	serviceTierFor(
+		model: { provider: string; id: string } | undefined,
+	): string | null {
 		if (!model || !this.boundModel) return null;
-		if (this.boundModel.provider !== model.provider || this.boundModel.id !== model.id) return null;
+		if (
+			this.boundModel.provider !== model.provider ||
+			this.boundModel.id !== model.id
+		)
+			return null;
 		if (!this.available.serviceTier) return null;
 		return this.selection.serviceTier;
 	}
@@ -271,28 +314,37 @@ export class PolicyController {
 
 		const advertisement = this.host.getAdvertisement(model);
 		const sameModel =
-			this.boundModel?.provider === model.provider && this.boundModel.id === model.id;
-		let selection: PolicySelection = sameModel ? { ...this.selection } : { ...DEFAULT_SELECTION };
+			this.boundModel?.provider === model.provider &&
+			this.boundModel.id === model.id;
+		let selection: PolicySelection = sameModel
+			? { ...this.selection }
+			: { ...DEFAULT_SELECTION };
 		let reason: string | undefined;
 		const available = policyAvailability(advertisement);
 
 		if (advertisement?.context === undefined) {
 			if (!selection.longContext) {
 				selection = { ...selection, longContext: true };
-				reason = "The active model no longer advertises a short context budget.";
+				reason =
+					"The active model no longer advertises a short context budget.";
 			}
 		} else if (!available.longContext && !selection.longContext) {
 			selection = { ...selection, longContext: true };
-			reason = "The active model no longer advertises a distinct short context budget.";
+			reason =
+				"The active model no longer advertises a distinct short context budget.";
 		}
 		if (selection.serviceTier !== null) {
 			const tiers = advertisement?.serviceTier?.serviceTiers;
-			if (!tiers || !tiers.includes(selection.serviceTier)) {
+			if (!tiers?.includes(selection.serviceTier)) {
 				selection = { ...selection, serviceTier: null };
-				reason = "The selected service tier is no longer advertised for the active model.";
+				reason =
+					"The selected service tier is no longer advertised for the active model.";
 			}
 		}
-		if (advertisement?.context === undefined && advertisement?.serviceTier === undefined) {
+		if (
+			advertisement?.context === undefined &&
+			advertisement?.serviceTier === undefined
+		) {
 			reason = POLICY_UNAVAILABLE_REASON;
 		}
 
@@ -306,7 +358,8 @@ export class PolicyController {
 			selection,
 			boundModel: model,
 			available,
-			contextWindow: advertisement?.context !== undefined ? appliedWindow : undefined,
+			contextWindow:
+				advertisement?.context !== undefined ? appliedWindow : undefined,
 			reason,
 		});
 	}
@@ -317,15 +370,21 @@ export class PolicyController {
 		const command = parsed.data;
 
 		const model = this.host.getActiveModel();
-		const advertisement = model === undefined ? undefined : this.host.getAdvertisement(model);
+		const advertisement =
+			model === undefined ? undefined : this.host.getAdvertisement(model);
 		const sameModel =
 			model !== undefined &&
 			this.boundModel?.provider === model.provider &&
 			this.boundModel.id === model.id;
-		const current: PolicySelection = sameModel ? { ...this.selection } : { ...DEFAULT_SELECTION };
+		const current: PolicySelection = sameModel
+			? { ...this.selection }
+			: { ...DEFAULT_SELECTION };
 		const nextSelection: PolicySelection = {
 			longContext: command.longContext ?? current.longContext,
-			serviceTier: command.serviceTier === undefined ? current.serviceTier : command.serviceTier,
+			serviceTier:
+				command.serviceTier === undefined
+					? current.serviceTier
+					: command.serviceTier,
 		};
 
 		const rejection = validateSelection(model, advertisement, command);
@@ -335,9 +394,13 @@ export class PolicyController {
 		}
 
 		const desired = effectiveContextWindow(advertisement, nextSelection);
-		const appliedWindow = model === undefined ? undefined : await this.applyContext(model, desired);
+		const appliedWindow =
+			model === undefined ? undefined : await this.applyContext(model, desired);
 		if (advertisement?.context !== undefined && appliedWindow === undefined) {
-			this.emitReply(command.requestId, "The session context window could not be updated.");
+			this.emitReply(
+				command.requestId,
+				"The session context window could not be updated.",
+			);
 			return;
 		}
 
@@ -346,7 +409,8 @@ export class PolicyController {
 				selection: nextSelection,
 				boundModel: model,
 				available: policyAvailability(advertisement),
-				contextWindow: advertisement?.context !== undefined ? appliedWindow : undefined,
+				contextWindow:
+					advertisement?.context !== undefined ? appliedWindow : undefined,
 				reason: undefined,
 			},
 			command.requestId,
@@ -384,7 +448,9 @@ export class PolicyController {
 			applied: {
 				longContext: next.selection.longContext,
 				serviceTier: next.selection.serviceTier,
-				...(next.contextWindow === undefined ? {} : { contextWindow: next.contextWindow }),
+				...(next.contextWindow === undefined
+					? {}
+					: { contextWindow: next.contextWindow }),
 			},
 			available: { ...next.available },
 			...(next.reason === undefined ? {} : { reason: next.reason }),
@@ -433,6 +499,7 @@ export class PolicyController {
 			available: { longContext: false, serviceTier: false },
 			reason: "Plexus policy state is unavailable.",
 		});
-		if (fallback.success) this.emit(POLICY_STATE_CHANNEL, freezeParsed(fallback.data));
+		if (fallback.success)
+			this.emit(POLICY_STATE_CHANNEL, freezeParsed(fallback.data));
 	}
 }

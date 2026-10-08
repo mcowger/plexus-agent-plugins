@@ -9,7 +9,9 @@
  * Parses raw suppression pattern input into an array of trimmed, non-empty pattern strings.
  * Input can be a string (comma-, semicolon-, or newline-separated) or an array of strings.
  */
-export function parseSuppressionPatterns(raw: string | string[] | undefined | null): string[] {
+export function parseSuppressionPatterns(
+	raw: string | string[] | undefined | null,
+): string[] {
 	if (!raw) return [];
 	const items = Array.isArray(raw) ? raw : raw.split(/[\n,;]+/);
 	return items.map((s) => s.trim()).filter((s) => s.length > 0);
@@ -47,11 +49,9 @@ export function isModelSuppressed(
 
 	const id = model.id.toLowerCase();
 	const name = (model.name ?? "").toLowerCase();
-	const shortId = id.includes("/")
-		? id.split("/").pop()!
-		: id.includes(":")
-			? id.split(":").pop()!
-			: id;
+	const separator = id.includes("/") ? "/" : id.includes(":") ? ":" : undefined;
+	const shortId =
+		separator === undefined ? id : (id.split(separator).pop() ?? id);
 
 	for (const pattern of allPatterns) {
 		if (matchesPattern(id, name, shortId, pattern)) {
@@ -62,7 +62,12 @@ export function isModelSuppressed(
 	return false;
 }
 
-function matchesPattern(id: string, name: string, shortId: string, pattern: string): boolean {
+function matchesPattern(
+	id: string,
+	name: string,
+	shortId: string,
+	pattern: string,
+): boolean {
 	const p = pattern.toLowerCase();
 	if (p.startsWith("regex:")) {
 		try {

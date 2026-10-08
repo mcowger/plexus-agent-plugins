@@ -35,13 +35,17 @@ describe("descriptorToOhMyPiModel", () => {
 			"https://plexus.example.com/v1",
 		);
 
-		expect(Object.fromEntries(models.map((model) => [model.id, model.baseUrl]))).toEqual({
+		expect(
+			Object.fromEntries(models.map((model) => [model.id, model.baseUrl])),
+		).toEqual({
 			chat: "https://plexus.example.com/v1",
 			responses: "https://plexus.example.com/v1",
 			messages: "https://plexus.example.com",
 			gemini: "https://plexus.example.com/v1beta",
 		});
-		expect(Object.fromEntries(models.map((model) => [model.id, model.api]))).toEqual({
+		expect(
+			Object.fromEntries(models.map((model) => [model.id, model.api])),
+		).toEqual({
 			chat: "openai-completions",
 			responses: "openai-responses",
 			messages: "anthropic-messages",
