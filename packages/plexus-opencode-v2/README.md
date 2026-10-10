@@ -75,3 +75,29 @@ When `apiKeyEnv` is set:
 - Until a base URL is configured, the provider shows a single `plexus-unconfigured` placeholder so it stays selectable in `/connect`.
 - `/plexus-refresh` forces a live fetch and reloads the provider.
 - Plugin logs are written to `~/.local/share/opencode/plugins/plexus/plugin.log` (the OpenCode service discards plugin stdout).
+
+## Session service-tier and context-budget selection
+
+Two slash commands select, per session, which advertised Plexus
+`service_tier` is sent on that session's requests and whether the session
+budgets against the model's short or maximum context window:
+
+- `/plexus-tier [tier|default|status]` — tier names match the model's
+  advertised `service_tiers` verbatim (case-sensitive). `default` clears to
+  the provider default; bare or `status` reports the session selection plus
+  what the model advertises. Unknown tiers are rejected without changing
+  anything.
+- `/plexus-context [short|max|status]` — `short` selects the first
+  `pricing.tiers[].input_tokens_above` budget, `max` the `context_length`.
+  Rejected when the model advertises no distinct short/max pair; bare or
+  `status` reports the session selection plus the advertised budget.
+
+Selections are session-scoped: two sessions on the same model can hold
+different tier/budget selections without leaking into each other, and
+switching a session's model resets its selection. The shared model
+definitions are never mutated — the tier is injected as `service_tier` into
+the session's outgoing request bodies, and the budget rides the request in
+`SessionRequestOptions.plexusContextBudget`. `/plexus-refresh` (and
+credential rotation) reconciles selections against the new catalog: a
+removed tier clears, an equalized or removed short budget resets to max,
+and a lowered short budget is re-applied.

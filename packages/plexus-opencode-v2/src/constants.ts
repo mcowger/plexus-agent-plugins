@@ -36,7 +36,7 @@ export const REFRESH_TTL_MS = 60_000;
  *  handling changes: the model cache stores *mapped* models and is otherwise
  *  reused verbatim on an unchanged server etag, so a mapper change would be
  *  masked until the raw Plexus response itself changed. */
-export const CACHE_VERSION = 2;
+export const CACHE_VERSION = 3;
 
 /** Sentinel model published when no baseURL is configured yet, so the
  *  provider survives OpenCode's "zero-models → delete" pruning and still
@@ -45,3 +45,9 @@ export const PLACEHOLDER_MODEL_ID = "plexus-unconfigured";
 
 /** Slash command that forces a live model refresh and reloads the provider. */
 export const PLEXUS_REFRESH_COMMAND = "plexus-refresh";
+
+/** Slash command selecting the session's Plexus service tier. */
+export const PLEXUS_TIER_COMMAND = "plexus-tier";
+
+/** Slash command selecting the session's short/max context budget. */
+export const PLEXUS_CONTEXT_COMMAND = "plexus-context";

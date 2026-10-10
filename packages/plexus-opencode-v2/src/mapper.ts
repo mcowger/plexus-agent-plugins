@@ -11,6 +11,10 @@ import {
 	GOOGLE_PKG,
 	OPENAI_RESPONSES_PKG,
 } from "./constants.ts";
+import {
+	type PlexusModelPolicy,
+	policyAdvertisementFromApiModel,
+} from "./session-policy.ts";
 
 export type Modality = "text" | "audio" | "image" | "video" | "pdf";
 
@@ -55,6 +59,14 @@ export interface PlexusModelInfo {
 	}>;
 	status: "active";
 	enabled: boolean;
+	/**
+	 * Per-model policy advertisement retained from the raw Plexus catalog
+	 * entry (service tiers + short/max context budgets). Shared catalog
+	 * data — safe on the shared definition; per-session *selection* lives
+	 * in `SessionPolicyStore` and never mutates this. Absent when the model
+	 * advertises neither.
+	 */
+	policy?: PlexusModelPolicy;
 	limit: {
 		context: number;
 		output: number;
@@ -321,6 +333,7 @@ export function buildModels(
 		const preferredApi = mapPreferredApi(m.preferred_api);
 		const pkg = resolveModelPackage(preferredApi);
 		const compatibility = reasoningCompatibility(m, preferredApi);
+		const policy = policyAdvertisementFromApiModel(m);
 		const hasReasoning = params.some((p) => REASONING_PARAMS.has(p));
 		const variants = buildReasoningVariants(m, preferredApi, hasReasoning);
 
@@ -348,6 +361,7 @@ export function buildModels(
 			name: m.name ?? m.id,
 			...(compatibility ? { compatibility } : {}),
 			...(pkg ? { package: pkg } : {}),
+			...(policy ? { policy } : {}),
 			settings: { baseURL: resolveModelBaseURL(preferredApi, apiBaseURL) },
 			capabilities: {
 				tools: params.includes("tools"),

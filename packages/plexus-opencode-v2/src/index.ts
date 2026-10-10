@@ -5,6 +5,7 @@ export * from "./config-store.ts";
 export * from "./constants.ts";
 export * from "./mapper.ts";
 export * from "./plugin.ts";
+export * from "./session-policy.ts";
 export * from "./url.ts";
 
 export default plugin;

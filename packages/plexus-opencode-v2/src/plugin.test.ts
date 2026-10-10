@@ -19,6 +19,7 @@ describe("provider registration", () => {
 			baseURL,
 			apiKey,
 			connection: undefined,
+			fresh: true,
 		});
 		expect(info.settings?.apiKey).toBe("registered-env-key");
 		expect(info.settings?.baseURL).toBe("https://plexus.example.com/v1");
@@ -27,7 +28,12 @@ describe("provider registration", () => {
 	test("default PLEXUS_API_KEY still registers when apiKeyEnv is omitted", () => {
 		process.env.PLEXUS_API_KEY = "default-key";
 		const { apiKey } = resolveConfig();
-		const info = providerInfo({ models: [], apiKey, connection: undefined });
+		const info = providerInfo({
+			models: [],
+			apiKey,
+			connection: undefined,
+			fresh: true,
+		});
 		expect(info.settings?.apiKey).toBe("default-key");
 	});
 });

@@ -174,9 +174,11 @@ var ENV_API_KEY = "PLEXUS_API_KEY";
 var PLEXUS_SUPPRESS_MODELS_OPTION = "suppressModels";
 var MODELS_FETCH_TIMEOUT_MS = 1e4;
 var REFRESH_TTL_MS = 60000;
-var CACHE_VERSION = 2;
+var CACHE_VERSION = 3;
 var PLACEHOLDER_MODEL_ID = "plexus-unconfigured";
 var PLEXUS_REFRESH_COMMAND = "plexus-refresh";
+var PLEXUS_TIER_COMMAND = "plexus-tier";
+var PLEXUS_CONTEXT_COMMAND = "plexus-context";
 
 // src/cache.ts
 var PLUGIN_SUBDIR = join("plugins", "plexus");
@@ -387,6 +389,321 @@ function createLogger(prefix = "plexus") {
   };
 }
 
+// src/session-policy.ts
+var CONTEXT_BUDGET_OPTION = "plexusContextBudget";
+var DEFAULT_SELECTION = Object.freeze({
+  longContext: true,
+  serviceTier: null
+});
+function defaultSelection() {
+  return { ...DEFAULT_SELECTION };
+}
+function isPositiveSafeInt(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+function validServiceTiers(raw) {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > 64)
+    return;
+  const tiers = [];
+  for (const entry of raw) {
+    if (typeof entry !== "string" || entry.length === 0 || entry.length > 100)
+      return;
+    tiers.push(entry);
+  }
+  if (new Set(tiers).size !== tiers.length)
+    return;
+  return tiers;
+}
+function policyAdvertisementFromApiModel(model) {
+  const serviceTiers = validServiceTiers(model.service_tiers);
+  const maxContextTokens = model.context_length;
+  const shortBudget = model.pricing?.tiers?.[0]?.input_tokens_above;
+  const contextValid = isPositiveSafeInt(maxContextTokens) && isPositiveSafeInt(shortBudget) && shortBudget <= maxContextTokens;
+  if (serviceTiers === undefined && !contextValid)
+    return;
+  return {
+    serviceTiers: serviceTiers ?? [],
+    ...contextValid ? {
+      shortContextBudgetTokens: shortBudget,
+      maxContextTokens
+    } : {}
+  };
+}
+function policyAvailability(policy) {
+  return {
+    longContext: policy !== undefined && policy.shortContextBudgetTokens !== undefined && policy.maxContextTokens !== undefined && policy.shortContextBudgetTokens < policy.maxContextTokens,
+    serviceTier: (policy?.serviceTiers.length ?? 0) > 0
+  };
+}
+function effectiveContextWindow(policy, selection) {
+  if (policy?.shortContextBudgetTokens === undefined || policy.maxContextTokens === undefined)
+    return;
+  if (!selection.longContext && policy.shortContextBudgetTokens < policy.maxContextTokens) {
+    return policy.shortContextBudgetTokens;
+  }
+  return policy.maxContextTokens;
+}
+function injectServiceTier(payload, tier) {
+  if (tier === null || tier === undefined)
+    return payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload))
+    return payload;
+  return { ...payload, service_tier: tier };
+}
+function injectServiceTierIntoBody(bodyText, tier) {
+  let parsed;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    return;
+  if (parsed.service_tier === tier)
+    return;
+  return JSON.stringify(injectServiceTier(parsed, tier));
+}
+async function withServiceTier(request, tier) {
+  if (tier === null)
+    return;
+  if (request.method === "GET" || request.method === "HEAD")
+    return;
+  const contentType = request.headers.get("content-type");
+  if (!contentType?.includes("application/json"))
+    return;
+  let text;
+  try {
+    text = await request.clone().text();
+  } catch {
+    return;
+  }
+  if (text === "")
+    return;
+  const replacement = injectServiceTierIntoBody(text, tier);
+  if (replacement === undefined)
+    return;
+  const headers = new Headers(request.headers);
+  headers.delete("content-length");
+  return new Request(request.url, {
+    method: request.method,
+    headers,
+    body: replacement
+  });
+}
+function formatTiers(policy) {
+  if (!policy || policy.serviceTiers.length === 0)
+    return "no service tiers";
+  return policy.serviceTiers.join(", ");
+}
+function formatBudget(policy) {
+  if (policy?.shortContextBudgetTokens === undefined || policy.maxContextTokens === undefined)
+    return "no context budget";
+  return `short ${policy.shortContextBudgetTokens} / max ${policy.maxContextTokens}`;
+}
+function formatTierStatus(modelID, selection, policy) {
+  const active = selection.serviceTier ?? "default (provider default)";
+  return `Plexus service tier for ${modelID} (this session): ${active}. ` + `Advertised tiers: ${formatTiers(policy)}. ` + `Change with /plexus-tier <tier|default>.`;
+}
+function formatContextStatus(modelID, selection, policy, effectiveWindow) {
+  const mode = selection.longContext ? "max" : "short";
+  const window = effectiveWindow === undefined ? "unknown" : String(effectiveWindow);
+  return `Plexus context for ${modelID} (this session): ${mode} (${window} tokens). ` + `Advertised budget: ${formatBudget(policy)}. ` + `Change with /plexus-context <short|max>.`;
+}
+function firstToken(text) {
+  return (text ?? "").trim().split(/\s+/)[0] ?? "";
+}
+function parseTierCommand(text) {
+  const arg = firstToken(text);
+  if (arg === "" || arg.toLowerCase() === "status")
+    return { kind: "status" };
+  if (arg.toLowerCase() === "default")
+    return { kind: "clear" };
+  return { kind: "select", tier: arg };
+}
+function parseContextCommand(text) {
+  const arg = firstToken(text);
+  if (arg === "" || arg.toLowerCase() === "status")
+    return { kind: "status" };
+  if (arg.toLowerCase() === "short")
+    return { kind: "short" };
+  if (arg.toLowerCase() === "max")
+    return { kind: "max" };
+  return { kind: "invalid", value: arg };
+}
+function sameModel(a, b) {
+  return a.providerID === b.providerID && a.id === b.id;
+}
+function validateSelection(policy, patch) {
+  if (patch.longContext === false) {
+    if (policy?.shortContextBudgetTokens === undefined || policy.maxContextTokens === undefined)
+      return "No context budget is advertised for the active model.";
+    if (policy.shortContextBudgetTokens >= policy.maxContextTokens) {
+      return "The active model has no distinct short and maximum context budget.";
+    }
+  }
+  if (patch.serviceTier !== undefined && patch.serviceTier !== null) {
+    if (!policy?.serviceTiers.includes(patch.serviceTier)) {
+      return "The requested service tier is not advertised for the active model.";
+    }
+  }
+  return;
+}
+
+class SessionPolicyStore {
+  catalog = new Map;
+  sessions = new Map;
+  setCatalog(models) {
+    const previous = this.catalog;
+    const next = new Map;
+    for (const model of models) {
+      if (model.policy)
+        next.set(model.id, model.policy);
+    }
+    this.catalog = next;
+    return this.reconcile(previous);
+  }
+  policyFor(modelID) {
+    return this.catalog.get(modelID);
+  }
+  lastBoundModel(sessionID) {
+    const entry = this.sessions.get(sessionID);
+    return entry ? { ...entry.boundModel } : undefined;
+  }
+  ensureBound(sessionID, model) {
+    const entry = this.sessions.get(sessionID);
+    if (!entry) {
+      this.sessions.set(sessionID, {
+        boundModel: { providerID: model.providerID, id: model.id },
+        selection: defaultSelection()
+      });
+      return false;
+    }
+    if (sameModel(entry.boundModel, model))
+      return false;
+    entry.boundModel = { providerID: model.providerID, id: model.id };
+    entry.selection = defaultSelection();
+    return true;
+  }
+  select(sessionID, model, patch) {
+    this.ensureBound(sessionID, model);
+    const entry = this.sessions.get(sessionID);
+    if (!entry) {
+      const selection = defaultSelection();
+      return { ok: false, reason: "No session selection.", selection };
+    }
+    const policy = this.catalog.get(entry.boundModel.id);
+    const reason = validateSelection(policy, patch);
+    if (reason !== undefined) {
+      return { ok: false, reason, selection: { ...entry.selection } };
+    }
+    if (patch.longContext !== undefined)
+      entry.selection.longContext = patch.longContext;
+    if (patch.serviceTier !== undefined)
+      entry.selection.serviceTier = patch.serviceTier;
+    return { ok: true, selection: { ...entry.selection } };
+  }
+  status(sessionID, model) {
+    const reset = this.ensureBound(sessionID, model);
+    const entry = this.sessions.get(sessionID);
+    const selection = entry ? { ...entry.selection } : defaultSelection();
+    const policy = this.catalog.get(model.id);
+    return {
+      selection,
+      policy,
+      available: policyAvailability(policy),
+      effectiveWindow: effectiveContextWindow(policy, selection),
+      reset
+    };
+  }
+  tierForRequest(sessionID, model) {
+    try {
+      this.ensureBound(sessionID, model);
+      const entry = this.sessions.get(sessionID);
+      if (!entry || !sameModel(entry.boundModel, model))
+        return null;
+      const policy = this.catalog.get(entry.boundModel.id);
+      if (!policy || policy.serviceTiers.length === 0)
+        return null;
+      const tier = entry.selection.serviceTier;
+      if (tier === null || !policy.serviceTiers.includes(tier))
+        return null;
+      return tier;
+    } catch {
+      return null;
+    }
+  }
+  contextBudgetForRequest(sessionID, model) {
+    try {
+      this.ensureBound(sessionID, model);
+      const entry = this.sessions.get(sessionID);
+      if (!entry || !sameModel(entry.boundModel, model))
+        return;
+      return effectiveContextWindow(this.catalog.get(entry.boundModel.id), entry.selection);
+    } catch {
+      return;
+    }
+  }
+  applyToOptions(options, sessionID, model) {
+    const budget = this.contextBudgetForRequest(sessionID, model);
+    if (budget === undefined)
+      delete options[CONTEXT_BUDGET_OPTION];
+    else
+      options[CONTEXT_BUDGET_OPTION] = budget;
+  }
+  reconcile(previous) {
+    const changes = [];
+    for (const [sessionID, entry] of this.sessions) {
+      const policy = this.catalog.get(entry.boundModel.id);
+      const before = { ...entry.selection };
+      const beforeWindow = effectiveContextWindow(previous?.get(entry.boundModel.id) ?? policy, before);
+      let reason;
+      if (policy?.shortContextBudgetTokens === undefined) {
+        if (!entry.selection.longContext) {
+          entry.selection.longContext = true;
+          reason = "The active model no longer advertises a short context budget.";
+        }
+      } else if (policy.shortContextBudgetTokens >= policy.maxContextTokens && !entry.selection.longContext) {
+        entry.selection.longContext = true;
+        reason = "The active model no longer advertises a distinct short context budget.";
+      }
+      if (entry.selection.serviceTier !== null) {
+        if (!policy?.serviceTiers.includes(entry.selection.serviceTier)) {
+          entry.selection.serviceTier = null;
+          reason = "The selected service tier is no longer advertised for the active model.";
+        }
+      }
+      const afterWindow = effectiveContextWindow(policy, entry.selection);
+      const tierChanged = entry.selection.serviceTier !== before.serviceTier;
+      const contextChanged = entry.selection.longContext !== before.longContext;
+      if (tierChanged) {
+        changes.push({
+          sessionID,
+          modelID: entry.boundModel.id,
+          kind: "tier-cleared",
+          detail: reason ?? "Service tier selection cleared."
+        });
+      }
+      if (contextChanged) {
+        changes.push({
+          sessionID,
+          modelID: entry.boundModel.id,
+          kind: "context-reset-max",
+          detail: reason ?? "Context selection reset to the maximum budget."
+        });
+      }
+      if (!entry.selection.longContext && beforeWindow !== undefined && afterWindow !== undefined && afterWindow !== beforeWindow) {
+        changes.push({
+          sessionID,
+          modelID: entry.boundModel.id,
+          kind: "short-lowered",
+          detail: `Short context budget changed ${beforeWindow} -> ${afterWindow}; re-applied.`
+        });
+      }
+    }
+    return changes;
+  }
+}
+
 // src/mapper.ts
 var REASONING_PARAMS2 = new Set([
   "reasoning",
@@ -546,6 +863,7 @@ function buildModels(models, apiBaseURL, suppress) {
     const preferredApi = mapPreferredApi(m.preferred_api);
     const pkg = resolveModelPackage(preferredApi);
     const compatibility = reasoningCompatibility(m, preferredApi);
+    const policy = policyAdvertisementFromApiModel(m);
     const hasReasoning = params.some((p) => REASONING_PARAMS2.has(p));
     const variants = buildReasoningVariants(m, preferredApi, hasReasoning);
     const cost = [];
@@ -571,6 +889,7 @@ function buildModels(models, apiBaseURL, suppress) {
       name: m.name ?? m.id,
       ...compatibility ? { compatibility } : {},
       ...pkg ? { package: pkg } : {},
+      ...policy ? { policy } : {},
       settings: { baseURL: resolveModelBaseURL(preferredApi, apiBaseURL) },
       capabilities: {
         tools: params.includes("tools"),
@@ -680,9 +999,21 @@ async function loadSource(ctx, log, options, force) {
     const cached = await readCachedModels(suppress);
     if (cached && cached.models.length > 0) {
       log.info(`Loaded plexus cache with ${cached.models.length} models`);
-      return { models: cached.models, baseURL, apiKey, connection };
+      return {
+        models: cached.models,
+        baseURL,
+        apiKey,
+        connection,
+        fresh: false
+      };
     }
-    return { models: [placeholderModel()], baseURL, apiKey, connection };
+    return {
+      models: [placeholderModel()],
+      baseURL,
+      apiKey,
+      connection,
+      fresh: false
+    };
   }
   try {
     const models = await refreshModels(baseURL, log, apiKey, force, suppress);
@@ -693,17 +1024,30 @@ async function loadSource(ctx, log, options, force) {
         models: cached && cached.models.length > 0 ? cached.models : [placeholderModel()],
         baseURL,
         apiKey,
-        connection
+        connection,
+        fresh: true
       };
     }
-    return { models, baseURL, apiKey, connection };
+    return { models, baseURL, apiKey, connection, fresh: true };
   } catch (e) {
     log.warn(`Live plexus refresh failed, using cache: ${String(e)}`);
     const cached = await readCachedModels(suppress);
     if (cached && cached.models.length > 0) {
-      return { models: cached.models, baseURL, apiKey, connection };
+      return {
+        models: cached.models,
+        baseURL,
+        apiKey,
+        connection,
+        fresh: false
+      };
     }
-    return { models: [placeholderModel()], baseURL, apiKey, connection };
+    return {
+      models: [placeholderModel()],
+      baseURL,
+      apiKey,
+      connection,
+      fresh: false
+    };
   }
 }
 function providerInfo(source) {
@@ -721,6 +1065,36 @@ function providerInfo(source) {
   };
   return info;
 }
+async function resolveCommandModel(ctx, policyStore, sessionID) {
+  try {
+    const session = ctx.session;
+    if (typeof session.get === "function") {
+      const result = await session.get({ sessionID });
+      const envelope = result;
+      const info = envelope?.data ?? result;
+      const model = info?.model;
+      if (model && typeof model.providerID === "string" && typeof model.id === "string") {
+        if (model.providerID === PLEXUS_PROVIDER_ID) {
+          return {
+            kind: "plexus",
+            ref: { providerID: model.providerID, id: model.id }
+          };
+        }
+        return {
+          kind: "other",
+          providerID: model.providerID,
+          id: model.id
+        };
+      }
+    }
+  } catch {}
+  const bound = policyStore.lastBoundModel(sessionID);
+  if (bound && bound.providerID === PLEXUS_PROVIDER_ID)
+    return { kind: "plexus", ref: bound };
+  if (bound)
+    return { kind: "other", providerID: bound.providerID, id: bound.id };
+  return { kind: "unknown" };
+}
 var plugin_default = Plugin.define({
   id: PLEXUS_PLUGIN_ID,
   async setup(ctx) {
@@ -730,14 +1104,22 @@ var plugin_default = Plugin.define({
       models: [],
       baseURL: undefined,
       apiKey: undefined,
-      connection: undefined
+      connection: undefined,
+      fresh: false
     };
+    const policyStore = new SessionPolicyStore;
     const reloadSource = async (force) => {
       const next = await loadSource(ctx, log, options, force);
       source.models = next.models;
       source.baseURL = next.baseURL;
       source.apiKey = next.apiKey;
       source.connection = next.connection;
+      if (next.fresh) {
+        const changes = policyStore.setCatalog(source.models);
+        for (const change of changes) {
+          log.info(`Session policy reconciled (session ${change.sessionID} / ${change.modelID}): ${change.detail}`);
+        }
+      }
     };
     try {
       await reloadSource(false);
@@ -831,7 +1213,107 @@ var plugin_default = Plugin.define({
           });
         }
       });
+      editor.add({
+        name: PLEXUS_TIER_COMMAND,
+        description: "Select the Plexus service tier for this session (tier|default|status)",
+        execute: async ({ sessionID, prompt, delivery }) => {
+          const reply = async (text) => {
+            await ctx.session.synthetic({
+              sessionID,
+              text,
+              description: text,
+              delivery,
+              resume: false
+            });
+          };
+          const resolved = await resolveCommandModel(ctx, policyStore, sessionID);
+          if (resolved.kind !== "plexus") {
+            await reply(resolved.kind === "other" ? `/plexus-tier applies to Plexus models; this session uses ${resolved.providerID}/${resolved.id}.` : "No active Plexus model for this session yet; select a Plexus model first, then retry.");
+            return;
+          }
+          const ref = resolved.ref;
+          const command = parseTierCommand(typeof prompt?.text === "string" ? prompt.text : undefined);
+          if (command.kind === "status") {
+            const state = policyStore.status(sessionID, ref);
+            await reply(formatTierStatus(ref.id, state.selection, state.policy));
+            return;
+          }
+          if (command.kind === "clear") {
+            policyStore.select(sessionID, ref, { serviceTier: null });
+            log.info(`Session ${sessionID} cleared plexus tier for ${ref.id}`);
+            await reply(`Plexus service tier for ${ref.id} (this session): default (provider default).`);
+            return;
+          }
+          const result = policyStore.select(sessionID, ref, {
+            serviceTier: command.tier
+          });
+          if (result.ok) {
+            log.info(`Session ${sessionID} selected plexus tier ${command.tier} for ${ref.id}`);
+            await reply(`Plexus service tier for ${ref.id} (this session): ${command.tier}. Applies to subsequent requests in this session.`);
+          } else {
+            const state = policyStore.status(sessionID, ref);
+            await reply(`Plexus tier not changed: ${result.reason} ` + formatTierStatus(ref.id, state.selection, state.policy));
+          }
+        }
+      });
+      editor.add({
+        name: PLEXUS_CONTEXT_COMMAND,
+        description: "Select the Plexus context budget for this session (short|max|status)",
+        execute: async ({ sessionID, prompt, delivery }) => {
+          const reply = async (text) => {
+            await ctx.session.synthetic({
+              sessionID,
+              text,
+              description: text,
+              delivery,
+              resume: false
+            });
+          };
+          const resolved = await resolveCommandModel(ctx, policyStore, sessionID);
+          if (resolved.kind !== "plexus") {
+            await reply(resolved.kind === "other" ? `/plexus-context applies to Plexus models; this session uses ${resolved.providerID}/${resolved.id}.` : "No active Plexus model for this session yet; select a Plexus model first, then retry.");
+            return;
+          }
+          const ref = resolved.ref;
+          const command = parseContextCommand(typeof prompt?.text === "string" ? prompt.text : undefined);
+          if (command.kind === "status") {
+            const state = policyStore.status(sessionID, ref);
+            await reply(formatContextStatus(ref.id, state.selection, state.policy, state.effectiveWindow));
+            return;
+          }
+          if (command.kind === "invalid") {
+            await reply(`Unknown context selection "${command.value}". Usage: /plexus-context <short|max|status>.`);
+            return;
+          }
+          const result = policyStore.select(sessionID, ref, {
+            longContext: command.kind === "max"
+          });
+          if (result.ok) {
+            log.info(`Session ${sessionID} selected plexus context ${command.kind} for ${ref.id}`);
+            const state = policyStore.status(sessionID, ref);
+            await reply(formatContextStatus(ref.id, state.selection, state.policy, state.effectiveWindow));
+          } else {
+            const state = policyStore.status(sessionID, ref);
+            await reply(`Plexus context not changed: ${result.reason} ` + formatContextStatus(ref.id, state.selection, state.policy, state.effectiveWindow));
+          }
+        }
+      });
     });
+    const plexusScope = { providerID: PLEXUS_PROVIDER_ID };
+    await ctx.session.hook("context", (event) => {
+      policyStore.applyToOptions(event.options, event.sessionID, event.model);
+    }, plexusScope);
+    await ctx.session.hook("compaction", (event) => {
+      policyStore.applyToOptions(event.options, event.sessionID, event.model);
+    }, plexusScope);
+    await ctx.session.hook("http.request", async (event) => {
+      const tier = policyStore.tierForRequest(event.sessionID, event.model);
+      if (tier === null)
+        return;
+      const replacement = await withServiceTier(event.request, tier);
+      if (replacement)
+        event.request = replacement;
+    }, plexusScope);
     (async () => {
       let pending = null;
       for await (const event of ctx.event.subscribe()) {
@@ -863,6 +1345,7 @@ var src_default = plugin_default;
 export {
   ANTHROPIC_PKG,
   CACHE_VERSION,
+  CONTEXT_BUDGET_OPTION,
   ENV_API_KEY,
   ENV_API_URL,
   ENV_BASE_URL,
@@ -873,22 +1356,34 @@ export {
   PLACEHOLDER_MODEL_ID,
   PLEXUS_API_KEY_ENV_OPTION,
   PLEXUS_BASE_URL_OPTION,
+  PLEXUS_CONTEXT_COMMAND,
   PLEXUS_INTEGRATION_ID,
   PLEXUS_PLUGIN_ID,
   PLEXUS_PROVIDER_ID,
   PLEXUS_PROVIDER_NAME,
   PLEXUS_REFRESH_COMMAND,
   PLEXUS_SUPPRESS_MODELS_OPTION,
+  PLEXUS_TIER_COMMAND,
   REFRESH_TTL_MS,
+  SessionPolicyStore,
   apiBase,
   buildModels,
   src_default as default,
+  effectiveContextWindow,
   filterCachedModels,
+  formatContextStatus,
+  formatTierStatus,
   getDir,
   getSuppressedModels,
+  injectServiceTier,
+  injectServiceTierIntoBody,
   modelsUrl,
   orderModelsByApiBase,
+  parseContextCommand,
+  parseTierCommand,
   placeholderModel,
+  policyAdvertisementFromApiModel,
+  policyAvailability,
   providerInfo,
   readCachedModels,
   resolveConfig,
@@ -896,5 +1391,6 @@ export {
   resolveExplicitApiKey,
   rootURL,
   trimURL,
+  withServiceTier,
   writeCache
 };

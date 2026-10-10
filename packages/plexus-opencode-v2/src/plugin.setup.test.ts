@@ -183,6 +183,7 @@ function createHarness(options: Record<string, unknown>): {
 				synthetic: async (input: Record<string, unknown>) => {
 					syntheticCalls.push(input);
 				},
+				hook: async () => ({ dispose: async () => {} }),
 			},
 			event: {
 				subscribe: () => ({

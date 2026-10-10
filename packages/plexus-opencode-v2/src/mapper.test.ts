@@ -222,6 +222,89 @@ describe("buildModels (V2 Model.Info)", () => {
 	});
 });
 
+describe("policy advertisement retention", () => {
+	test("retains verbatim tiers plus short/max budgets", () => {
+		const [model] = buildModels(
+			[
+				apiModel({
+					id: "tiered",
+					context_length: 1_000_000,
+					architecture: {
+						input_modalities: ["text"],
+						output_modalities: ["text"],
+					},
+					pricing: {
+						prompt: "0.000001",
+						completion: "0.000002",
+						tiers: [{ input_tokens_above: 200_000 }],
+					},
+					service_tiers: ["standard", "flex"],
+				}),
+			],
+			API_BASE,
+		);
+		expect(model?.policy).toEqual({
+			serviceTiers: ["standard", "flex"],
+			shortContextBudgetTokens: 200_000,
+			maxContextTokens: 1_000_000,
+		});
+	});
+
+	test("omits policy when the model advertises neither tiers nor budget", () => {
+		const [model] = buildModels(
+			[
+				apiModel({
+					id: "plain",
+					context_length: 128_000,
+					architecture: {
+						input_modalities: ["text"],
+						output_modalities: ["text"],
+					},
+					pricing: { prompt: "0.000001", completion: "0.000002" },
+				}),
+			],
+			API_BASE,
+		);
+		expect(model?.policy).toBeUndefined();
+	});
+
+	test("retains tier-only and budget-only advertisements", () => {
+		const models = buildModels(
+			[
+				apiModel({
+					id: "tiers-only",
+					context_length: 64_000,
+					architecture: {
+						input_modalities: ["text"],
+						output_modalities: ["text"],
+					},
+					service_tiers: ["flex"],
+				}),
+				apiModel({
+					id: "budget-only",
+					context_length: 500_000,
+					architecture: {
+						input_modalities: ["text"],
+						output_modalities: ["text"],
+					},
+					pricing: {
+						prompt: "0.000001",
+						tiers: [{ input_tokens_above: 100_000 }],
+					},
+				}),
+			],
+			API_BASE,
+		);
+		const byId = new Map(models.map((m) => [m.id, m]));
+		expect(byId.get("tiers-only")?.policy).toEqual({ serviceTiers: ["flex"] });
+		expect(byId.get("budget-only")?.policy).toEqual({
+			serviceTiers: [],
+			shortContextBudgetTokens: 100_000,
+			maxContextTokens: 500_000,
+		});
+	});
+});
+
 describe("placeholderModel", () => {
 	test("keeps the provider alive before connect", () => {
 		const p = placeholderModel();
