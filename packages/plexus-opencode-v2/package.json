@@ -27,7 +27,7 @@
 		"build": "bun run build.ts"
 	},
 	"dependencies": {
-		"@opencode/plugin": "^2.0.19"
+		"@opencode/plugin": "^2.0.26"
 	},
 	"peerDependencies": {
 		"typescript": "^7.0.2"
