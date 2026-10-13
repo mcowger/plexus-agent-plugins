@@ -6891,18 +6891,152 @@ function enforceMinimumOutputTokens(payload) {
       changed = true;
     }
   }
-  const generationConfig = next.generationConfig;
-  if (generationConfig && typeof generationConfig === "object" && !Array.isArray(generationConfig)) {
-    const maxOutputTokens = generationConfig.maxOutputTokens;
-    if (typeof maxOutputTokens === "number" && Number.isFinite(maxOutputTokens) && maxOutputTokens < MINIMUM_OUTPUT_TOKENS) {
-      next.generationConfig = {
-        ...generationConfig,
-        maxOutputTokens: MINIMUM_OUTPUT_TOKENS
+  for (const configKey of ["generationConfig", "config"]) {
+    const generationConfig = next[configKey];
+    if (generationConfig && typeof generationConfig === "object" && !Array.isArray(generationConfig)) {
+      const maxOutputTokens = generationConfig.maxOutputTokens;
+      if (typeof maxOutputTokens === "number" && Number.isFinite(maxOutputTokens) && maxOutputTokens < MINIMUM_OUTPUT_TOKENS) {
+        next[configKey] = {
+          ...generationConfig,
+          maxOutputTokens: MINIMUM_OUTPUT_TOKENS
+        };
+        changed = true;
+      }
+    }
+  }
+  return changed ? next : payload;
+}
+var EXTENDED_THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max"
+];
+var GOOGLE_THINKING_LEVELS = {
+  minimal: "MINIMAL",
+  low: "LOW",
+  medium: "MEDIUM",
+  high: "HIGH"
+};
+function getGeminiMajorVersion(modelId) {
+  const match = modelId.toLowerCase().match(/^gemini(?:-live)?-(\d+)/);
+  if (!match?.[1])
+    return;
+  return Number.parseInt(match[1], 10);
+}
+function usesGoogleThinkingLevel(model) {
+  if (model.thinkingLevelMap && EXTENDED_THINKING_LEVELS.some((level) => level !== "off" && typeof model.thinkingLevelMap?.[level] === "string")) {
+    return true;
+  }
+  const id = model.id.toLowerCase();
+  const majorVersion = getGeminiMajorVersion(id);
+  return majorVersion !== undefined && majorVersion >= 3 || id === "gemini-flash-latest" || id === "gemini-flash-lite-latest" || /gemma-?4/.test(id);
+}
+function getSupportedThinkingLevelsForModel(model) {
+  if (!model.reasoning)
+    return ["off"];
+  return EXTENDED_THINKING_LEVELS.filter((level) => {
+    const mapped = model.thinkingLevelMap?.[level];
+    if (mapped === null)
+      return false;
+    if (level === "xhigh" || level === "max")
+      return mapped !== undefined;
+    return true;
+  });
+}
+function clampModelThinkingLevel(model, level) {
+  const availableLevels = getSupportedThinkingLevelsForModel(model);
+  if (availableLevels.includes(level))
+    return level;
+  const requestedIndex = EXTENDED_THINKING_LEVELS.indexOf(level);
+  if (requestedIndex === -1)
+    return availableLevels[0] ?? "off";
+  for (let i = requestedIndex;i < EXTENDED_THINKING_LEVELS.length; i++) {
+    const candidate = EXTENDED_THINKING_LEVELS[i];
+    if (candidate && availableLevels.includes(candidate))
+      return candidate;
+  }
+  for (let i = requestedIndex - 1;i >= 0; i--) {
+    const candidate = EXTENDED_THINKING_LEVELS[i];
+    if (candidate && availableLevels.includes(candidate))
+      return candidate;
+  }
+  return availableLevels[0] ?? "off";
+}
+function toGoogleThinkingLevel(model, level) {
+  const clamped = clampModelThinkingLevel(model, level);
+  if (clamped === "off")
+    return;
+  const mapped = model.thinkingLevelMap?.[clamped];
+  const resolved = (typeof mapped === "string" ? mapped : clamped).trim().toLowerCase();
+  return GOOGLE_THINKING_LEVELS[resolved];
+}
+function normalizeThinkingConfigObject(thinkingConfig, model, thinkingLevel) {
+  if (thinkingConfig.thinkingLevel !== undefined)
+    return thinkingConfig;
+  if (thinkingConfig.thinkingBudget === -1) {
+    const effectiveLevel = thinkingLevel && thinkingLevel !== "off" ? thinkingLevel : "high";
+    const googleLevel = toGoogleThinkingLevel(model, effectiveLevel);
+    if (!googleLevel)
+      return thinkingConfig;
+    const { thinkingBudget: _thinkingBudget, ...rest } = thinkingConfig;
+    return {
+      ...rest,
+      thinkingLevel: googleLevel
+    };
+  }
+  if (thinkingConfig.thinkingBudget === 0) {
+    const googleLevel = toGoogleThinkingLevel(model, "off");
+    if (!googleLevel)
+      return thinkingConfig;
+    const { thinkingBudget: _thinkingBudget, ...rest } = thinkingConfig;
+    return {
+      ...rest,
+      thinkingLevel: googleLevel
+    };
+  }
+  return thinkingConfig;
+}
+function normalizeGoogleThinkingConfig(payload, model, thinkingLevel) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload))
+    return payload;
+  if (!model?.reasoning)
+    return payload;
+  if (model.api !== "google-generative-ai" && model.api !== "google-vertex")
+    return payload;
+  if (!usesGoogleThinkingLevel(model))
+    return payload;
+  const next = { ...payload };
+  let changed = false;
+  for (const configKey of ["config", "generationConfig"]) {
+    const container = next[configKey];
+    if (!container || typeof container !== "object" || Array.isArray(container))
+      continue;
+    const containerRecord = container;
+    const thinkingConfig = containerRecord.thinkingConfig;
+    if (!thinkingConfig || typeof thinkingConfig !== "object" || Array.isArray(thinkingConfig)) {
+      continue;
+    }
+    const normalized = normalizeThinkingConfigObject(thinkingConfig, model, thinkingLevel);
+    if (normalized !== thinkingConfig) {
+      next[configKey] = {
+        ...containerRecord,
+        thinkingConfig: normalized
       };
       changed = true;
     }
   }
   return changed ? next : payload;
+}
+function getSessionThinkingLevel(pi) {
+  try {
+    return pi.getThinkingLevel?.();
+  } catch {
+    return;
+  }
 }
 function withAuthoritativeApiKeyEnv(provider, envName, getHeaderModels = () => []) {
   const apiKey = provider.auth.apiKey;
@@ -7083,7 +7217,8 @@ function plexusExtension(pi) {
       return;
     state.activeModel = ctx.model;
     const withTier = injectServiceTier(event.payload, state.policy?.serviceTierFor(ctx.model));
-    const next = enforceMinimumOutputTokens(withTier);
+    const withThinking = normalizeGoogleThinkingConfig(withTier, ctx.model, ctx.thinkingLevel ?? getSessionThinkingLevel(pi));
+    const next = enforceMinimumOutputTokens(withThinking);
     return next === event.payload ? undefined : next;
   });
   log("startup", {
@@ -7405,6 +7540,8 @@ export {
   createPolicyHost,
   plexusExtension as default,
   enforceMinimumOutputTokens,
+  normalizeGoogleThinkingConfig,
   serviceTierPolicyFromApiModel,
+  usesGoogleThinkingLevel,
   withAuthoritativeApiKeyEnv
 };

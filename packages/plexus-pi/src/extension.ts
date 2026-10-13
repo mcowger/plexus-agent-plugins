@@ -20,7 +20,9 @@
 import type {
 	Api,
 	Credential,
+	GoogleApiThinkingLevel,
 	Model,
+	ModelThinkingLevel,
 	OAuthCredentials,
 	OAuthLoginCallbacks,
 	Provider,
@@ -134,28 +136,229 @@ export function enforceMinimumOutputTokens(payload: unknown): unknown {
 		}
 	}
 
-	const generationConfig = next.generationConfig;
-	if (
-		generationConfig &&
-		typeof generationConfig === "object" &&
-		!Array.isArray(generationConfig)
-	) {
-		const maxOutputTokens = (generationConfig as Record<string, unknown>)
-			.maxOutputTokens;
+	for (const configKey of ["generationConfig", "config"] as const) {
+		const generationConfig = next[configKey];
 		if (
-			typeof maxOutputTokens === "number" &&
-			Number.isFinite(maxOutputTokens) &&
-			maxOutputTokens < MINIMUM_OUTPUT_TOKENS
+			generationConfig &&
+			typeof generationConfig === "object" &&
+			!Array.isArray(generationConfig)
 		) {
-			next.generationConfig = {
-				...(generationConfig as Record<string, unknown>),
-				maxOutputTokens: MINIMUM_OUTPUT_TOKENS,
+			const maxOutputTokens = (generationConfig as Record<string, unknown>)
+				.maxOutputTokens;
+			if (
+				typeof maxOutputTokens === "number" &&
+				Number.isFinite(maxOutputTokens) &&
+				maxOutputTokens < MINIMUM_OUTPUT_TOKENS
+			) {
+				next[configKey] = {
+					...(generationConfig as Record<string, unknown>),
+					maxOutputTokens: MINIMUM_OUTPUT_TOKENS,
+				};
+				changed = true;
+			}
+		}
+	}
+
+	return changed ? next : payload;
+}
+
+const EXTENDED_THINKING_LEVELS: readonly ModelThinkingLevel[] = [
+	"off",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+];
+
+const GOOGLE_THINKING_LEVELS: Record<string, GoogleApiThinkingLevel> = {
+	minimal: "MINIMAL",
+	low: "LOW",
+	medium: "MEDIUM",
+	high: "HIGH",
+};
+
+type GoogleThinkingModel = Pick<
+	Model<Api>,
+	"id" | "api" | "reasoning" | "thinkingLevelMap"
+>;
+
+function getGeminiMajorVersion(modelId: string): number | undefined {
+	const match = modelId.toLowerCase().match(/^gemini(?:-live)?-(\d+)/);
+	if (!match?.[1]) return undefined;
+	return Number.parseInt(match[1], 10);
+}
+
+/**
+ * Returns whether a Google model uses discrete `thinkingLevel` controls rather
+ * than token-based `thinkingBudget`.
+ *
+ * Pi's built-in `usesGoogleThinkingLevel` only matches `/gemini-3(?:\.\d+)?-(?:pro|flash)/`
+ * and `/gemma-?4/`, which misses Gemini 4+ models (e.g. `gemini-4-argon`) and
+ * custom model aliases that declare `thinkingLevelMap` overrides.
+ */
+export function usesGoogleThinkingLevel(model: GoogleThinkingModel): boolean {
+	if (
+		model.thinkingLevelMap &&
+		EXTENDED_THINKING_LEVELS.some(
+			(level) =>
+				level !== "off" && typeof model.thinkingLevelMap?.[level] === "string",
+		)
+	) {
+		return true;
+	}
+
+	const id = model.id.toLowerCase();
+	const majorVersion = getGeminiMajorVersion(id);
+	return (
+		(majorVersion !== undefined && majorVersion >= 3) ||
+		id === "gemini-flash-latest" ||
+		id === "gemini-flash-lite-latest" ||
+		/gemma-?4/.test(id)
+	);
+}
+
+function getSupportedThinkingLevelsForModel(
+	model: GoogleThinkingModel,
+): ModelThinkingLevel[] {
+	if (!model.reasoning) return ["off"];
+	return EXTENDED_THINKING_LEVELS.filter((level) => {
+		const mapped = model.thinkingLevelMap?.[level];
+		if (mapped === null) return false;
+		if (level === "xhigh" || level === "max") return mapped !== undefined;
+		return true;
+	});
+}
+
+function clampModelThinkingLevel(
+	model: GoogleThinkingModel,
+	level: ModelThinkingLevel,
+): ModelThinkingLevel {
+	const availableLevels = getSupportedThinkingLevelsForModel(model);
+	if (availableLevels.includes(level)) return level;
+
+	const requestedIndex = EXTENDED_THINKING_LEVELS.indexOf(level);
+	if (requestedIndex === -1) return availableLevels[0] ?? "off";
+
+	for (let i = requestedIndex; i < EXTENDED_THINKING_LEVELS.length; i++) {
+		const candidate = EXTENDED_THINKING_LEVELS[i];
+		if (candidate && availableLevels.includes(candidate)) return candidate;
+	}
+	for (let i = requestedIndex - 1; i >= 0; i--) {
+		const candidate = EXTENDED_THINKING_LEVELS[i];
+		if (candidate && availableLevels.includes(candidate)) return candidate;
+	}
+	return availableLevels[0] ?? "off";
+}
+
+function toGoogleThinkingLevel(
+	model: GoogleThinkingModel,
+	level: ModelThinkingLevel,
+): GoogleApiThinkingLevel | undefined {
+	const clamped = clampModelThinkingLevel(model, level);
+	if (clamped === "off") return undefined;
+	const mapped = model.thinkingLevelMap?.[clamped];
+	const resolved = (typeof mapped === "string" ? mapped : clamped)
+		.trim()
+		.toLowerCase();
+	return GOOGLE_THINKING_LEVELS[resolved];
+}
+
+function normalizeThinkingConfigObject(
+	thinkingConfig: Record<string, unknown>,
+	model: GoogleThinkingModel,
+	thinkingLevel: ModelThinkingLevel | undefined,
+): Record<string, unknown> {
+	if (thinkingConfig.thinkingLevel !== undefined) return thinkingConfig;
+
+	if (thinkingConfig.thinkingBudget === -1) {
+		const effectiveLevel =
+			thinkingLevel && thinkingLevel !== "off" ? thinkingLevel : "high";
+		const googleLevel = toGoogleThinkingLevel(model, effectiveLevel);
+		if (!googleLevel) return thinkingConfig;
+		const { thinkingBudget: _thinkingBudget, ...rest } = thinkingConfig;
+		return {
+			...rest,
+			thinkingLevel: googleLevel,
+		};
+	}
+
+	if (thinkingConfig.thinkingBudget === 0) {
+		const googleLevel = toGoogleThinkingLevel(model, "off");
+		if (!googleLevel) return thinkingConfig;
+		const { thinkingBudget: _thinkingBudget, ...rest } = thinkingConfig;
+		return {
+			...rest,
+			thinkingLevel: googleLevel,
+		};
+	}
+
+	return thinkingConfig;
+}
+
+/**
+ * Rewrites fallback `thinkingBudget` values (`-1` when enabled, `0` when
+ * disabled on models that cannot disable thinking) to discrete `thinkingLevel`
+ * values for level-based Google models.
+ *
+ * Handles both the `@google/genai` SDK `GenerateContentParameters` shape
+ * (`payload.config.thinkingConfig`) passed to `before_provider_request` and the
+ * raw wire shape (`payload.generationConfig.thinkingConfig`).
+ */
+export function normalizeGoogleThinkingConfig(
+	payload: unknown,
+	model: GoogleThinkingModel | undefined,
+	thinkingLevel: ModelThinkingLevel | undefined,
+): unknown {
+	if (!payload || typeof payload !== "object" || Array.isArray(payload))
+		return payload;
+	if (!model?.reasoning) return payload;
+	if (model.api !== "google-generative-ai" && model.api !== "google-vertex")
+		return payload;
+	if (!usesGoogleThinkingLevel(model)) return payload;
+
+	const next = { ...(payload as Record<string, unknown>) };
+	let changed = false;
+
+	for (const configKey of ["config", "generationConfig"] as const) {
+		const container = next[configKey];
+		if (!container || typeof container !== "object" || Array.isArray(container))
+			continue;
+		const containerRecord = container as Record<string, unknown>;
+		const thinkingConfig = containerRecord.thinkingConfig;
+		if (
+			!thinkingConfig ||
+			typeof thinkingConfig !== "object" ||
+			Array.isArray(thinkingConfig)
+		) {
+			continue;
+		}
+		const normalized = normalizeThinkingConfigObject(
+			thinkingConfig as Record<string, unknown>,
+			model,
+			thinkingLevel,
+		);
+		if (normalized !== thinkingConfig) {
+			next[configKey] = {
+				...containerRecord,
+				thinkingConfig: normalized,
 			};
 			changed = true;
 		}
 	}
 
 	return changed ? next : payload;
+}
+
+function getSessionThinkingLevel(
+	pi: ExtensionAPI,
+): ModelThinkingLevel | undefined {
+	try {
+		return pi.getThinkingLevel?.();
+	} catch {
+		return undefined;
+	}
 }
 
 /** A model carrying optional static request headers. */
@@ -414,7 +617,12 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 			event.payload,
 			state.policy?.serviceTierFor(ctx.model),
 		);
-		const next = enforceMinimumOutputTokens(withTier);
+		const withThinking = normalizeGoogleThinkingConfig(
+			withTier,
+			ctx.model,
+			ctx.thinkingLevel ?? getSessionThinkingLevel(pi),
+		);
+		const next = enforceMinimumOutputTokens(withThinking);
 		return next === event.payload ? undefined : next;
 	});
 

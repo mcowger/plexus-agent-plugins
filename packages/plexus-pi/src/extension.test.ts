@@ -13,6 +13,8 @@ import plexusExtension, {
 	contextPolicyFromApiModel,
 	createPolicyHost,
 	enforceMinimumOutputTokens,
+	normalizeGoogleThinkingConfig,
+	usesGoogleThinkingLevel,
 } from "./extension.ts";
 import { MINIMUM_OUTPUT_TOKENS } from "./mapper.ts";
 
@@ -72,6 +74,165 @@ describe("enforceMinimumOutputTokens", () => {
 		).toEqual({
 			generationConfig: { maxOutputTokens: MINIMUM_OUTPUT_TOKENS },
 		});
+		expect(
+			enforceMinimumOutputTokens({ config: { maxOutputTokens: 1 } }),
+		).toEqual({
+			config: { maxOutputTokens: MINIMUM_OUTPUT_TOKENS },
+		});
+	});
+});
+
+describe("normalizeGoogleThinkingConfig", () => {
+	const argonModel = {
+		id: "gemini-4-argon",
+		api: "google-generative-ai" as Api,
+		reasoning: true,
+		thinkingLevelMap: {
+			off: null,
+			minimal: null,
+			low: "low",
+			medium: "medium",
+			high: "high",
+			xhigh: null,
+			max: null,
+		},
+	};
+
+	test("detects level-based Gemini 3+, Gemini 4+, Gemma 4, and mapped models", () => {
+		expect(usesGoogleThinkingLevel(argonModel)).toBe(true);
+		expect(
+			usesGoogleThinkingLevel({
+				id: "gemini-4-argon",
+				api: "google-generative-ai",
+				reasoning: true,
+			}),
+		).toBe(true);
+		expect(
+			usesGoogleThinkingLevel({
+				id: "custom-google-alias",
+				api: "google-generative-ai",
+				reasoning: true,
+				thinkingLevelMap: { low: "low", high: "high" },
+			}),
+		).toBe(true);
+		expect(
+			usesGoogleThinkingLevel({
+				id: "gemini-2.5-pro",
+				api: "google-generative-ai",
+				reasoning: true,
+			}),
+		).toBe(false);
+	});
+
+	test("rewrites thinkingBudget: -1 to thinkingLevel for SDK config and wire generationConfig", () => {
+		expect(
+			normalizeGoogleThinkingConfig(
+				{
+					model: "gemini-4-argon",
+					config: {
+						maxOutputTokens: 980_005,
+						thinkingConfig: { includeThoughts: true, thinkingBudget: -1 },
+					},
+				},
+				argonModel,
+				"high",
+			),
+		).toEqual({
+			model: "gemini-4-argon",
+			config: {
+				maxOutputTokens: 980_005,
+				thinkingConfig: { includeThoughts: true, thinkingLevel: "HIGH" },
+			},
+		});
+
+		expect(
+			normalizeGoogleThinkingConfig(
+				{
+					generationConfig: {
+						maxOutputTokens: 980_005,
+						thinkingConfig: { includeThoughts: true, thinkingBudget: -1 },
+					},
+				},
+				argonModel,
+				"medium",
+			),
+		).toEqual({
+			generationConfig: {
+				maxOutputTokens: 980_005,
+				thinkingConfig: { includeThoughts: true, thinkingLevel: "MEDIUM" },
+			},
+		});
+	});
+
+	test("clamps unsupported thinking levels and rewrites disabled thinkingBudget: 0 when off is unsupported", () => {
+		expect(
+			normalizeGoogleThinkingConfig(
+				{
+					config: {
+						thinkingConfig: { includeThoughts: true, thinkingBudget: -1 },
+					},
+				},
+				argonModel,
+				"minimal",
+			),
+		).toEqual({
+			config: {
+				thinkingConfig: { includeThoughts: true, thinkingLevel: "LOW" },
+			},
+		});
+
+		expect(
+			normalizeGoogleThinkingConfig(
+				{
+					config: {
+						thinkingConfig: { thinkingBudget: 0 },
+					},
+				},
+				argonModel,
+				"off",
+			),
+		).toEqual({
+			config: {
+				thinkingConfig: { thinkingLevel: "LOW" },
+			},
+		});
+	});
+
+	test("leaves already-resolved thinkingLevel, positive budgets, and Gemini 2.5 models untouched", () => {
+		const alreadyResolved = {
+			config: {
+				thinkingConfig: { includeThoughts: true, thinkingLevel: "HIGH" },
+			},
+		};
+		expect(
+			normalizeGoogleThinkingConfig(alreadyResolved, argonModel, "high"),
+		).toBe(alreadyResolved);
+
+		const customBudget = {
+			config: {
+				thinkingConfig: { includeThoughts: true, thinkingBudget: 2048 },
+			},
+		};
+		expect(
+			normalizeGoogleThinkingConfig(customBudget, argonModel, "high"),
+		).toBe(customBudget);
+
+		const gemini25Payload = {
+			config: {
+				thinkingConfig: { includeThoughts: true, thinkingBudget: -1 },
+			},
+		};
+		expect(
+			normalizeGoogleThinkingConfig(
+				gemini25Payload,
+				{
+					id: "gemini-2.5-flash",
+					api: "google-generative-ai",
+					reasoning: true,
+				},
+				"high",
+			),
+		).toBe(gemini25Payload);
 	});
 });
 
@@ -326,5 +487,77 @@ describe("cross-session policy isolation", () => {
 			child.setModelCalls.filter((call) => call.id === "gpt-6.1-sol"),
 		).toEqual([]);
 		expect(child.setModelCalls).toEqual([]);
+	});
+
+	test("before_provider_request rewrites Gemini 4 thinkingBudget: -1 to thinkingLevel", async () => {
+		const handlers = new Map<
+			string,
+			Array<(event: unknown, ctx: unknown) => unknown>
+		>();
+		const pi = {
+			events: {
+				on: () => () => {},
+				emit: () => {},
+			},
+			on: (
+				event: string,
+				handler: (event: unknown, ctx: unknown) => unknown,
+			) => {
+				handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+			},
+			registerProvider: () => {},
+			registerCommand: () => {},
+			setModel: async () => true,
+			getThinkingLevel: () => "high",
+		} as unknown as ExtensionAPI;
+		plexusExtension(pi);
+
+		const handler = handlers.get("before_provider_request")?.[0];
+		expect(handler).toBeDefined();
+
+		const result = await handler?.(
+			{
+				type: "before_provider_request",
+				payload: {
+					model: "gemini-4-argon",
+					config: {
+						maxOutputTokens: 980_005,
+						thinkingConfig: {
+							includeThoughts: true,
+							thinkingBudget: -1,
+						},
+					},
+				},
+			},
+			{
+				model: {
+					provider: "plexus",
+					id: "gemini-4-argon",
+					api: "google-generative-ai",
+					reasoning: true,
+					thinkingLevelMap: {
+						off: null,
+						minimal: null,
+						low: "low",
+						medium: "medium",
+						high: "high",
+						xhigh: null,
+						max: null,
+					},
+				},
+				thinkingLevel: "high",
+			},
+		);
+
+		expect(result).toEqual({
+			model: "gemini-4-argon",
+			config: {
+				maxOutputTokens: 980_005,
+				thinkingConfig: {
+					includeThoughts: true,
+					thinkingLevel: "HIGH",
+				},
+			},
+		});
 	});
 });
