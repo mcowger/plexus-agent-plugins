@@ -63,6 +63,8 @@ export interface PlexusApiModel {
 	preferred_api?: string | string[];
 	/** Human-readable display name. Falls back to id when absent. */
 	name?: string;
+	/** Abbreviated display name for compact UI surfaces. Optional; absent on older servers. */
+	short_name?: string;
 	description?: string;
 	context_length?: number | null;
 	architecture?: PlexusModelArchitecture;
@@ -105,6 +107,8 @@ export interface PlexusApiResponse {
 export interface PlexusModelDescriptor {
 	id: string;
 	name: string;
+	/** Abbreviated display name, present only when short_name was set on the API model. */
+	shortName?: string;
 	/** One of the four canonical API dialect strings. */
 	preferredApi: string;
 	/** Always the literal string "plexus". */

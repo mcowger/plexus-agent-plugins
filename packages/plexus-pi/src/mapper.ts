@@ -28,6 +28,11 @@ export const MINIMUM_OUTPUT_TOKENS = 8_192;
  * Other API dialects leave compat undefined so the host auto-detects.
  *
  * thinkingLevelMap and headers are copied from pi_provider/pi_model when present.
+ *
+ * The server-advertised short name rides along as an extra `plexusShortName`
+ * prop (same pattern as the extension's `plexusContextPolicy` /
+ * `plexusServiceTiers` extras) so it survives pi's models-store.json
+ * persistence and can be published on the short-names bus channel.
  */
 export function descriptorToPiModel(descriptor: PlexusModelDescriptor) {
 	let builtinModel: ReturnType<typeof getModel> | undefined;
@@ -87,6 +92,9 @@ export function descriptorToPiModel(descriptor: PlexusModelDescriptor) {
 	return {
 		id: descriptor.id,
 		name: descriptor.name,
+		...(descriptor.shortName !== undefined
+			? { plexusShortName: descriptor.shortName }
+			: {}),
 		api: descriptor.preferredApi as Api,
 		provider: descriptor.provider,
 		baseUrl: descriptor.baseUrl,

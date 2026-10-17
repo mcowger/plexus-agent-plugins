@@ -163,6 +163,8 @@ export function convertToDescriptor(
 ): PlexusModelDescriptor {
 	const preferredApi = mapPreferredApi(raw.preferred_api);
 	const adjustedBaseUrl = adjustBaseUrl(baseUrl, preferredApi);
+	const shortName =
+		typeof raw.short_name === "string" ? raw.short_name.trim() : "";
 	const contextWindow = resolveContextWindow(raw);
 	const maxTokens = resolveMaxTokens(raw);
 	const tiers = resolvePricingTiers(raw);
@@ -186,6 +188,7 @@ export function convertToDescriptor(
 		maxTokens,
 	};
 
+	if (shortName) descriptor.shortName = shortName;
 	if (raw.pi_provider) descriptor.piProvider = raw.pi_provider;
 	if (raw.pi_model) descriptor.piModel = raw.pi_model;
 	if (raw.pi_options && Object.keys(raw.pi_options).length > 0)

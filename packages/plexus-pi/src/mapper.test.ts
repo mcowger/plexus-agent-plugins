@@ -110,4 +110,49 @@ describe("descriptorToPiModel", () => {
 			],
 		});
 	});
+
+	test("carries descriptor shortName as plexusShortName", () => {
+		const model = descriptorToPiModel({
+			id: "claude-alias",
+			name: "Claude Alias",
+			shortName: "Claude",
+			preferredApi: "anthropic-messages",
+			provider: "plexus",
+			baseUrl: "https://plexus.example.com",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 200_000,
+			maxTokens: 32_000,
+		});
+
+		expect(model).toMatchObject({ plexusShortName: "Claude" });
+	});
+
+	test("omits plexusShortName when the descriptor has no shortName", () => {
+		const model = descriptorToPiModel({
+			id: "claude-alias",
+			name: "Claude Alias",
+			preferredApi: "anthropic-messages",
+			provider: "plexus",
+			baseUrl: "https://plexus.example.com",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 200_000,
+			maxTokens: 32_000,
+		});
+
+		expect("plexusShortName" in model).toBe(false);
+	});
+
+	test("convertToPiModels carries short_name from the wire", () => {
+		const models = convertToPiModels(
+			[{ id: "m", name: "Model", short_name: "M" }],
+			"https://plexus.example.com/v1",
+		);
+
+		expect(models).toHaveLength(1);
+		expect(models[0]).toMatchObject({ plexusShortName: "M" });
+	});
 });

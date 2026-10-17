@@ -1188,12 +1188,12 @@ var plugin_default = Plugin.define({
           try {
             await reloadSource(true);
           } catch (e) {
-            const text = `Plexus refresh failed: ${errorMessage(e)}. Existing state left untouched.`;
-            log.error(text);
+            const text2 = `Plexus refresh failed: ${errorMessage(e)}. Existing state left untouched.`;
+            log.error(text2);
             await ctx.session.synthetic({
               sessionID,
-              text,
-              description: text,
+              text: text2,
+              description: text2,
               delivery,
               resume: false
             });

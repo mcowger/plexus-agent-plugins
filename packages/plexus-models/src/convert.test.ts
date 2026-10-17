@@ -137,6 +137,27 @@ describe("convertToDescriptor", () => {
 
 		expect(descriptors.map((model) => model.id)).toEqual(["claude-haiku-4-5"]);
 	});
+
+	test("carries short_name into the descriptor, trimmed", () => {
+		const descriptor = convertToDescriptor(
+			{ ...baseModel, short_name: "  Haiku  " },
+			"https://plexus.example.com/v1",
+		);
+
+		expect(descriptor.shortName).toBe("Haiku");
+	});
+
+	test("omits shortName when short_name is absent or blank", () => {
+		expect(
+			convertToDescriptor(baseModel, "https://plexus.example.com/v1").shortName,
+		).toBeUndefined();
+		expect(
+			convertToDescriptor(
+				{ ...baseModel, short_name: "   " },
+				"https://plexus.example.com/v1",
+			).shortName,
+		).toBeUndefined();
+	});
 });
 
 describe("isChatModel", () => {

@@ -13,17 +13,7 @@ var __export = (target, all) => {
       set: __exportSetter.bind(all, name)
     });
 };
-var __esm = (fn, res, err) => () => {
-  if (fn)
-    try {
-      res = fn(fn = 0);
-    } catch (e) {
-      err = [e];
-    }
-  if (err)
-    throw err[0];
-  return res;
-};
+var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 
 // ../../node_modules/.bun/@oh-my-pi+pi-catalog@18.4.3/node_modules/@oh-my-pi/pi-catalog/src/effort.ts
 var THINKING_EFFORTS;
@@ -855,12 +845,12 @@ function resolveOverIndex(index, target) {
     const upgrade = {};
     let hasEfforts = false;
     for (const { rule, rank } of ranked) {
-      const thinking = rule.compiled.thinking;
-      if (thinking === undefined)
+      const thinking2 = rule.compiled.thinking;
+      if (thinking2 === undefined)
         continue;
-      if ("upgradeNeutral" in thinking)
+      if ("upgradeNeutral" in thinking2)
         contestAxis(upgrade, "upgradeNeutral", rank, rule, target);
-      if ("efforts" in thinking)
+      if ("efforts" in thinking2)
         hasEfforts = true;
       if (rule.hasExactEffortsRule && rank[0] === 2)
         reasoning = true;
@@ -871,17 +861,17 @@ function resolveOverIndex(index, target) {
       reasoning = true;
     }
   }
-  const wire = {};
+  const wire2 = {};
   const thinking = {};
   const catalog = {};
   for (const { rule, rank } of ranked) {
-    contest(wire, rule.compiled.wire, rank, rule, target);
+    contest(wire2, rule.compiled.wire, rank, rule, target);
     contest(catalog, rule.compiled.catalog, rank, rule, target);
     if (reasoning)
       contest(thinking, rule.compiled.thinking, rank, rule, target);
   }
   return {
-    wire: collect(wire, (rule) => rule.wire),
+    wire: collect(wire2, (rule) => rule.wire),
     thinking: collect(thinking, (rule) => rule.thinking),
     catalog: collect(catalog, (rule) => rule.catalog),
     reasoning
@@ -1128,9 +1118,9 @@ function findIdentityOverride(provider, bareModel, observedAtMs, lenient) {
   const indexes = getOverrideIndexes();
   const bucket = indexes.exact.get(lowerBareModel);
   if (bucket !== undefined) {
-    const scoped = bucket.byProvider.get(lowerProvider);
-    if (scoped !== undefined && overrideIsActive(scoped, observedAtMs))
-      return scoped;
+    const scoped2 = bucket.byProvider.get(lowerProvider);
+    if (scoped2 !== undefined && overrideIsActive(scoped2, observedAtMs))
+      return scoped2;
     const agnostic = bucket.agnostic;
     if (agnostic !== undefined && overrideIsActive(agnostic, observedAtMs))
       return agnostic;
@@ -1256,20 +1246,20 @@ function classifyModelUncached(provider, modelId, opts) {
     const logical = override.logical ?? trimmed;
     const cls = override.class ?? classifyRanks(logical, lenient).class;
     const inferred = ranksInClass(cls, logical, lenient);
-    const identity = { class: cls };
+    const identity2 = { class: cls };
     const family = override.family ?? inferred.family;
     if (family !== undefined)
-      identity.family = family;
+      identity2.family = family;
     const revision = override.revision ?? inferred.revision;
     if (revision !== undefined)
-      identity.revision = revision;
+      identity2.revision = revision;
     if (override.effort !== undefined)
-      identity.effort = override.effort;
+      identity2.effort = override.effort;
     if (override.thinkingVariant)
-      identity.thinkingVariant = true;
+      identity2.thinkingVariant = true;
     if (logical !== trimmed)
-      identity.logicalId = logical;
-    return identity;
+      identity2.logicalId = logical;
+    return identity2;
   }
   const collapsed = trimmed.length === modelId.length ? collapseVariantId(provider, trimmed) : { logicalId: trimmed, thinkingVariant: false };
   const ranks = classifyRanks(collapsed.logicalId, lenient);
@@ -1379,16 +1369,16 @@ function getKeyRecords() {
   }
   return keyRecords;
 }
-function applyWireAxes(compat, wire, api) {
+function applyWireAxes(compat, wire2, api) {
   const records = API_COMPAT_RECORDS[api];
   if (!records)
     return;
   const info = getKeyRecords();
-  for (const key in wire) {
+  for (const key in wire2) {
     const meta = info[key];
     if (!meta?.records.some((record) => records.includes(record)))
       continue;
-    Reflect.set(compat, key, wire[key]);
+    Reflect.set(compat, key, wire2[key]);
   }
 }
 function overlayEffortMapAxis(compat, axes, specCompat) {
@@ -3422,7 +3412,7 @@ ${entries.map((entry) => `  \u25E6 ${entry.expected}`).join(`
 });
 
 // ../../node_modules/.bun/@oh-my-pi+omptype@18.4.3/node_modules/@oh-my-pi/omptype/src/keywords.ts
-function pattern(regex, expected, format) {
+function pattern(regex, expected, format2) {
   return {
     k: "refine",
     base: { k: "string" },
@@ -3431,7 +3421,7 @@ function pattern(regex, expected, format) {
       return regex.test(value);
     },
     expected,
-    json: format === undefined ? { pattern: regex.source } : { pattern: regex.source, format }
+    json: format2 === undefined ? { pattern: regex.source } : { pattern: regex.source, format: format2 }
   };
 }
 function morph(input, fn, out) {
@@ -3953,13 +3943,13 @@ class StrParser {
     if ((t?.t === "num" || t?.t === "date") && t1?.t === "op" && (t1.v === "<" || t1.v === "<=")) {
       const lo = t.v;
       this.#pos += 2;
-      let node = this.#eatDivisor(this.parsePostfix());
-      node = applyBound(node, flip(t1.v), lo, this.#src);
-      const t2 = this.#peek();
-      if (!(t2?.t === "op" && CMP[t2.v])) {
+      let node2 = this.#eatDivisor(this.parsePostfix());
+      node2 = applyBound(node2, flip(t1.v), lo, this.#src);
+      const t22 = this.#peek();
+      if (!(t22?.t === "op" && CMP[t22.v])) {
         throw new OmpTypeError(`left bound requires a corresponding right bound in "${this.#src}"`);
       }
-      if (t2.v === ">" || t2.v === ">=") {
+      if (t22.v === ">" || t22.v === ">=") {
         throw new OmpTypeError(`right bound must use < or <= in "${this.#src}"`);
       }
       this.#pos++;
@@ -3967,8 +3957,8 @@ class StrParser {
       if (hi.t !== "num" && hi.t !== "date") {
         throw new OmpTypeError(`expected bound after comparator in "${this.#src}"`);
       }
-      node = applyBound(node, t2.v, hi.v, this.#src);
-      return this.#eatArraySuffixes(node);
+      node2 = applyBound(node2, t22.v, hi.v, this.#src);
+      return this.#eatArraySuffixes(node2);
     }
     let node = this.#eatDivisor(this.parsePostfix());
     const t2 = this.#peek();
@@ -4315,7 +4305,7 @@ function parseStringDef(src, resolve) {
     if (parsedInput.hasDefault) {
       throw new OmpTypeError(`unexpected pipe expression after default in "${src}"`);
     }
-    const parsed = {
+    const parsed2 = {
       ir: {
         k: "morph",
         input: parsedInput.ir,
@@ -4326,8 +4316,8 @@ function parseStringDef(src, resolve) {
       optional: false
     };
     if (cacheable && stringDefCache.size < STRING_DEF_CACHE_MAX)
-      stringDefCache.set(src, parsed);
-    return parsed;
+      stringDefCache.set(src, parsed2);
+    return parsed2;
   }
   let ir = parseLiteralUnion(src) ?? parseRegexExec(src) ?? parseGeneric(src, resolve);
   if (ir === undefined && src.startsWith("`") && src.endsWith("`")) {
@@ -4819,13 +4809,13 @@ function parseObjectDefinition(def, resolve) {
       if (simple && !isSimpleIR(spread))
         simple = false;
       spreadKeys ??= new Set;
-      for (const prop of spread.props) {
-        const previous = props.findIndex((candidate) => candidate.key === prop.key);
+      for (const prop2 of spread.props) {
+        const previous = props.findIndex((candidate) => candidate.key === prop2.key);
         if (previous < 0)
-          props.push(prop);
+          props.push(prop2);
         else
-          props[previous] = prop;
-        spreadKeys.add(prop.key);
+          props[previous] = prop2;
+        spreadKeys.add(prop2.key);
       }
       if (spread.index !== undefined || spread.symbolIndex !== undefined || spread.patternIndexes !== undefined) {
         const objectIndexes = indexes ?? { patterns: [] };
@@ -4857,20 +4847,20 @@ function parseObjectDefinition(def, resolve) {
       }
       const keyDefinition = originalKey.slice(1, -1);
       const regex = /^\/((?:\\.|[^\\/])*)\/([dgimsuvy]*)$/.exec(keyDefinition);
-      let key;
+      let key2;
       if (regex === null) {
-        key = parseDef(keyDefinition, resolve);
+        key2 = parseDef(keyDefinition, resolve);
       } else {
         try {
-          key = patternIR(new RegExp(regex[1], regex[2]));
+          key2 = patternIR(new RegExp(regex[1], regex[2]));
         } catch {
           throw new OmpTypeError(`invalid index signature pattern ${keyDefinition}`);
         }
       }
       const objectIndexes = indexes ?? { patterns: [] };
       indexes = objectIndexes;
-      indexKeyKind(key, value, props, objectIndexes);
-      if (simple && (!isSimpleIR(key) || !isSimpleIR(value)))
+      indexKeyKind(key2, value, props, objectIndexes);
+      if (simple && (!isSimpleIR(key2) || !isSimpleIR(value)))
         simple = false;
       continue;
     }
@@ -5085,8 +5075,8 @@ function scanSimpleIR(ir) {
       if (ir.symbolIndex !== undefined && !scanSimpleIR(ir.symbolIndex))
         return false;
       if (ir.patternIndexes !== undefined) {
-        for (const pattern of ir.patternIndexes) {
-          if (!scanSimpleIR(pattern.key) || !scanSimpleIR(pattern.val))
+        for (const pattern2 of ir.patternIndexes) {
+          if (!scanSimpleIR(pattern2.key) || !scanSimpleIR(pattern2.val))
             return false;
         }
       }
@@ -5134,8 +5124,8 @@ function scanMorph(ir, activeAliases) {
       if (!result && ir.symbolIndex !== undefined)
         result = scanMorph(ir.symbolIndex, activeAliases);
       if (!result && ir.patternIndexes !== undefined) {
-        for (const pattern of ir.patternIndexes) {
-          if (scanMorph(pattern.val, activeAliases)) {
+        for (const pattern2 of ir.patternIndexes) {
+          if (scanMorph(pattern2.val, activeAliases)) {
             result = true;
             break;
           }
@@ -5203,8 +5193,8 @@ function scanAlias(ir) {
       if (ir.symbolIndex !== undefined && scanAlias(ir.symbolIndex))
         return true;
       if (ir.patternIndexes !== undefined) {
-        for (const pattern of ir.patternIndexes) {
-          if (scanAlias(pattern.key) || scanAlias(pattern.val))
+        for (const pattern2 of ir.patternIndexes) {
+          if (scanAlias(pattern2.key) || scanAlias(pattern2.val))
             return true;
         }
       }
@@ -5486,11 +5476,11 @@ function checkNode(ir, v) {
           return false;
         let patternMatched = false;
         if (ir.patternIndexes !== undefined) {
-          for (const pattern of ir.patternIndexes) {
-            if (!checks(pattern.key, key))
+          for (const pattern2 of ir.patternIndexes) {
+            if (!checks(pattern2.key, key))
               continue;
             patternMatched = true;
-            if (!checks(pattern.val, rec[key]))
+            if (!checks(pattern2.val, rec[key]))
               return false;
           }
         }
@@ -5634,8 +5624,8 @@ function visitNode(ir, v, path) {
         return fail(path, `at least length ${ir.min}`, v.length);
       if (ir.max !== undefined && v.length > ir.max)
         return fail(path, `at most length ${ir.max}`, v.length);
-      const morph = hasMorph(ir.el);
-      const out = morph ? new Array(v.length) : v;
+      const morph2 = hasMorph(ir.el);
+      const out = morph2 ? new Array(v.length) : v;
       let errors;
       for (let index = 0;index < v.length; index++) {
         path.push(index);
@@ -5646,7 +5636,7 @@ function visitNode(ir, v, path) {
             errors.append(element);
           else
             errors = element;
-        } else if (morph) {
+        } else if (morph2) {
           out[index] = element;
         }
       }
@@ -5667,8 +5657,8 @@ function visitNode(ir, v, path) {
       }
       const postfixStart = v.length - ir.postfix.length;
       const prefixCount = Math.min(ir.prefix.length, postfixStart);
-      const morph = hasMorph(ir);
-      const output = morph ? [...v] : v;
+      const morph2 = hasMorph(ir);
+      const output = morph2 ? [...v] : v;
       let errors;
       for (let index = 0;index < prefixCount; index++) {
         path.push(index);
@@ -5679,13 +5669,13 @@ function visitNode(ir, v, path) {
             errors.append(item);
           else
             errors = item;
-        } else if (morph) {
+        } else if (morph2) {
           output[index] = item;
         }
       }
       for (let index = prefixCount;index < ir.prefix.length; index++) {
         const item = ir.prefix[index];
-        if (item.hasDefault && morph) {
+        if (item.hasDefault && morph2) {
           const payload = item.def;
           if (item.defFactory && typeof payload === "function") {
             path.push(index);
@@ -5722,7 +5712,7 @@ function visitNode(ir, v, path) {
               errors.append(item);
             else
               errors = item;
-          } else if (morph) {
+          } else if (morph2) {
             output[index] = item;
           }
         }
@@ -5737,7 +5727,7 @@ function visitNode(ir, v, path) {
             errors.append(item);
           else
             errors = item;
-        } else if (morph) {
+        } else if (morph2) {
           output[inputIndex] = item;
         }
       }
@@ -5747,10 +5737,10 @@ function visitNode(ir, v, path) {
       if (typeof v !== "object" || v === null)
         return fail(path, "an object", v);
       const rec = v;
-      const morph = hasMorph(ir);
+      const morph2 = hasMorph(ir);
       let out;
       let errors;
-      if (morph) {
+      if (morph2) {
         if (ir.extras === "delete" && ir.index === undefined && ir.symbolIndex === undefined && ir.patternIndexes === undefined) {
           out = {};
         } else {
@@ -5820,12 +5810,12 @@ function visitNode(ir, v, path) {
           }
         }
         if (ir.patternIndexes !== undefined) {
-          for (const pattern of ir.patternIndexes) {
-            if (!checks(pattern.key, key))
+          for (const pattern2 of ir.patternIndexes) {
+            if (!checks(pattern2.key, key))
               continue;
             indexed = true;
             path.push(key);
-            const result = visit(pattern.val, rec[key], path);
+            const result = visit(pattern2.val, rec[key], path);
             path.pop();
             if (result instanceof OmpErrors) {
               if (errors)
@@ -6308,37 +6298,37 @@ class Builder {
         return out;
       }
       case "object": {
-        const checks = [`typeof ${v}==="object"`, `${v}!==null`];
+        const checks2 = [`typeof ${v}==="object"`, `${v}!==null`];
         for (const p of node.props) {
           const av = this.access(v, p.key);
           const present = `${this.lit(p.key)} in ${v}`;
           const predicate = this.predicate(p.val, av);
-          checks.push(p.opt || p.hasDefault ? rejectsUndefined(p.val) ? `((${av}!==undefined&&(${predicate}))||!(${present}))` : `(!(${present})||(${predicate}))` : rejectsUndefined(p.val) ? predicate : `((${present})&&(${predicate}))`);
+          checks2.push(p.opt || p.hasDefault ? rejectsUndefined(p.val) ? `((${av}!==undefined&&(${predicate}))||!(${present}))` : `(!(${present})||(${predicate}))` : rejectsUndefined(p.val) ? predicate : `((${present})&&(${predicate}))`);
         }
         const stringKey = this.next("k");
         if (node.index !== undefined) {
-          checks.push(`(()=>{for(const ${stringKey} in ${v})if(own.call(${v},${stringKey})&&!(${this.predicate(node.index, `${v}[${stringKey}]`)}))return false;return true})()`);
+          checks2.push(`(()=>{for(const ${stringKey} in ${v})if(own.call(${v},${stringKey})&&!(${this.predicate(node.index, `${v}[${stringKey}]`)}))return false;return true})()`);
         }
         if (node.patternIndexes !== undefined) {
-          for (const pattern of node.patternIndexes) {
-            checks.push(`(()=>{for(const ${stringKey} in ${v})if(own.call(${v},${stringKey})&&(${this.predicate(pattern.key, stringKey)})&&!(${this.predicate(pattern.val, `${v}[${stringKey}]`)}))return false;return true})()`);
+          for (const pattern2 of node.patternIndexes) {
+            checks2.push(`(()=>{for(const ${stringKey} in ${v})if(own.call(${v},${stringKey})&&(${this.predicate(pattern2.key, stringKey)})&&!(${this.predicate(pattern2.val, `${v}[${stringKey}]`)}))return false;return true})()`);
           }
         }
         if (node.symbolIndex !== undefined) {
           const symbol = this.next("s");
-          checks.push(`(()=>{for(const ${symbol} of Object.getOwnPropertySymbols(${v}))if(Object.prototype.propertyIsEnumerable.call(${v},${symbol})&&!(${this.predicate(node.symbolIndex, `${v}[${symbol}]`)}))return false;return true})()`);
+          checks2.push(`(()=>{for(const ${symbol} of Object.getOwnPropertySymbols(${v}))if(Object.prototype.propertyIsEnumerable.call(${v},${symbol})&&!(${this.predicate(node.symbolIndex, `${v}[${symbol}]`)}))return false;return true})()`);
         }
         if (node.extras === "reject") {
-          const patternMatch = node.patternIndexes?.map((pattern) => `(${this.predicate(pattern.key, stringKey)})`).join("||") ?? "false";
+          const patternMatch = node.patternIndexes?.map((pattern2) => `(${this.predicate(pattern2.key, stringKey)})`).join("||") ?? "false";
           if (node.index === undefined) {
-            checks.push(`(()=>{for(const ${stringKey} in ${v})if(own.call(${v},${stringKey})&&!(${this.declaredCheck(node.props, stringKey)})&&!(${patternMatch}))return false;return true})()`);
+            checks2.push(`(()=>{for(const ${stringKey} in ${v})if(own.call(${v},${stringKey})&&!(${this.declaredCheck(node.props, stringKey)})&&!(${patternMatch}))return false;return true})()`);
           }
           if (node.symbolIndex === undefined) {
             const symbol = this.next("s");
-            checks.push(`(()=>{for(const ${symbol} of Object.getOwnPropertySymbols(${v}))if(Object.prototype.propertyIsEnumerable.call(${v},${symbol})&&!(${this.declaredCheck(node.props, symbol)}))return false;return true})()`);
+            checks2.push(`(()=>{for(const ${symbol} of Object.getOwnPropertySymbols(${v}))if(Object.prototype.propertyIsEnumerable.call(${v},${symbol})&&!(${this.declaredCheck(node.props, symbol)}))return false;return true})()`);
           }
         }
-        return `(${checks.join("&&")})`;
+        return `(${checks2.join("&&")})`;
       }
       case "sub":
         return `!(${this.ref(node.schema.run)}(${v}) instanceof AE)`;
@@ -6876,8 +6866,8 @@ class Builder {
           this.push("}");
         }
         if (node.patternIndexes !== undefined) {
-          for (const pattern of node.patternIndexes) {
-            this.push(`for(const ${stringKey} in ${object})if(own.call(${object},${stringKey})&&(${this.predicate(pattern.key, stringKey)})&&!(${this.predicate(pattern.val, `${object}[${stringKey}]`)}))return false;`);
+          for (const pattern2 of node.patternIndexes) {
+            this.push(`for(const ${stringKey} in ${object})if(own.call(${object},${stringKey})&&(${this.predicate(pattern2.key, stringKey)})&&!(${this.predicate(pattern2.val, `${object}[${stringKey}]`)}))return false;`);
           }
         }
         if (node.symbolIndex !== undefined) {
@@ -6887,7 +6877,7 @@ class Builder {
           this.push("}");
         }
         if (node.extras === "reject") {
-          const patternMatch = node.patternIndexes?.map((pattern) => `(${this.predicate(pattern.key, stringKey)})`).join("||") ?? "false";
+          const patternMatch = node.patternIndexes?.map((pattern2) => `(${this.predicate(pattern2.key, stringKey)})`).join("||") ?? "false";
           if (node.index === undefined) {
             this.push(`for(const ${stringKey} in ${object})if(own.call(${object},${stringKey})&&!(${this.declaredCheck(node.props, stringKey)})&&!(${patternMatch}))return false;`);
           }
@@ -7511,11 +7501,11 @@ function normalizeDefaults(ir, seen = new WeakSet) {
   }
 }
 function makeType(ir, steps, meta) {
-  let morph = false;
+  let morph2 = false;
   if (!isSimpleIR(ir)) {
     ir = normalizeIR(ir);
-    morph = hasMorph(ir);
-    if (morph) {
+    morph2 = hasMorph(ir);
+    if (morph2) {
       normalizeDefaults(ir);
       assertDeterminateMorphUnions(ir);
     }
@@ -7583,7 +7573,7 @@ function makeType(ir, steps, meta) {
     }
     return out;
   };
-  const needsClone = morph || steps.some((step) => step.kind === "pipe");
+  const needsClone = morph2 || steps.some((step) => step.kind === "pipe");
   const clone = meta.clone;
   let callable = validate;
   if (needsClone && clone !== undefined) {
@@ -8126,7 +8116,7 @@ function dateRefinement(schema, timestamp, relation, predicate) {
 function selectNodes(root, kind) {
   const selected = [];
   const seen = new Set;
-  const visit = (node) => {
+  const visit2 = (node) => {
     if (seen.has(node))
       return;
     seen.add(node);
@@ -8136,50 +8126,50 @@ function selectNodes(root, kind) {
     }
     switch (node.k) {
       case "alias":
-        visit(node.resolve());
+        visit2(node.resolve());
         break;
       case "array":
-        visit(node.el);
+        visit2(node.el);
         break;
       case "tuple":
         for (const item of node.prefix)
-          visit(item.val);
+          visit2(item.val);
         if (node.variadic !== undefined)
-          visit(node.variadic);
+          visit2(node.variadic);
         for (const item of node.postfix)
-          visit(item);
+          visit2(item);
         break;
       case "object":
         for (const prop of node.props)
-          visit(prop.val);
+          visit2(prop.val);
         if (node.index !== undefined)
-          visit(node.index);
+          visit2(node.index);
         if (node.symbolIndex !== undefined)
-          visit(node.symbolIndex);
+          visit2(node.symbolIndex);
         for (const index of node.patternIndexes ?? []) {
-          visit(index.key);
-          visit(index.val);
+          visit2(index.key);
+          visit2(index.val);
         }
         break;
       case "union":
       case "intersection":
         for (const member of node.members)
-          visit(member);
+          visit2(member);
         break;
       case "refine":
-        visit(node.base);
+        visit2(node.base);
         break;
       case "morph":
-        visit(node.input);
+        visit2(node.input);
         if (node.out !== undefined)
-          visit(node.out);
+          visit2(node.out);
         break;
       case "sub":
-        visit(node.schema.ir);
+        visit2(node.schema.ir);
         break;
     }
   };
-  visit(root);
+  visit2(root);
   return selected;
 }
 function mergeObjects(left, right) {
@@ -8346,18 +8336,18 @@ function intersectResolved(a, b) {
       throw new OmpTypeError("union intersection invariant failed");
     const branches = union.members;
     const other = a.k === "union" ? b : a;
-    const members = [];
+    const members2 = [];
     for (const branch of branches) {
       try {
-        members.push(intersect(branch, other));
+        members2.push(intersect(branch, other));
       } catch (error) {
         if (!(error instanceof OmpTypeError))
           throw error;
       }
     }
-    if (members.length === 0)
+    if (members2.length === 0)
       throw new OmpTypeError("intersection has no satisfiable branches");
-    return members.length === 1 ? members[0] : { k: "union", members };
+    return members2.length === 1 ? members2[0] : { k: "union", members: members2 };
   }
   if (a.k === "lit") {
     if (walk(b, a.v) instanceof OmpErrors)
@@ -8369,17 +8359,17 @@ function intersectResolved(a, b) {
   if (a.k === "object" && b.k === "object") {
     const props = [...a.props];
     for (const bp of b.props) {
-      const index = props.findIndex((prop) => prop.key === bp.key);
-      if (index < 0)
+      const index2 = props.findIndex((prop) => prop.key === bp.key);
+      if (index2 < 0)
         props.push(bp);
       else {
-        const ap = props[index];
+        const ap = props[index2];
         const required = !ap.opt && !ap.hasDefault || !bp.opt && !bp.hasDefault;
         if (ap.hasDefault && bp.hasDefault && !Object.is(ap.def, bp.def)) {
           throw new OmpTypeError(`ParseError: Invalid intersection of default values ${String(ap.def)} & ${String(bp.def)}`);
         }
         const defaulted = required ? undefined : ap.hasDefault ? ap : bp.hasDefault ? bp : undefined;
-        props[index] = {
+        props[index2] = {
           key: ap.key,
           opt: ap.opt && bp.opt,
           val: intersect(ap.val, bp.val),
@@ -8490,22 +8480,22 @@ function normalizeIR(ir) {
         }
       }
       if (members.every((member) => member.k === "lit" && (member.v === null || typeof member.v !== "object" && typeof member.v !== "function"))) {
-        const pruned = [];
+        const pruned2 = [];
         for (const member of members) {
-          if (member.k === "lit" && pruned.some((candidate) => candidate.k === "lit" && candidate.v === member.v)) {
+          if (member.k === "lit" && pruned2.some((candidate) => candidate.k === "lit" && candidate.v === member.v)) {
             changed = true;
           } else {
-            pruned.push(member);
+            pruned2.push(member);
           }
         }
-        if (pruned.length === 0)
+        if (pruned2.length === 0)
           return { k: "never" };
-        if (pruned.length === 1)
-          return pruned[0];
-        if (pruned.length === 2 && pruned.every((member) => member.k === "lit" && typeof member.v === "boolean")) {
+        if (pruned2.length === 1)
+          return pruned2[0];
+        if (pruned2.length === 2 && pruned2.every((member) => member.k === "lit" && typeof member.v === "boolean")) {
           return { k: "boolean" };
         }
-        return changed ? { ...ir, members: pruned } : ir;
+        return changed ? { ...ir, members: pruned2 } : ir;
       }
       const pruned = members.filter((member, index) => !members.some((candidate, candidateIndex) => candidateIndex !== index && !hasMorph(member) && !hasMorph(candidate) && isSubtype(member, candidate) && (!isSubtype(candidate, member) || candidateIndex < index)));
       if (pruned.length === 0)
@@ -8538,22 +8528,22 @@ function normalizeIR(ir) {
     }
     case "object": {
       let props;
-      for (let index = 0;index < ir.props.length; index++) {
-        const prop = ir.props[index];
+      for (let index2 = 0;index2 < ir.props.length; index2++) {
+        const prop = ir.props[index2];
         const value = normalizeIR(prop.val);
         if (value === prop.val)
           continue;
         props ??= [...ir.props];
-        props[index] = { ...prop, val: value };
+        props[index2] = { ...prop, val: value };
       }
       const index = ir.index === undefined ? undefined : normalizeIR(ir.index);
       const symbolIndex = ir.symbolIndex === undefined ? undefined : normalizeIR(ir.symbolIndex);
-      const patternIndexes = ir.patternIndexes?.map((pattern) => {
-        const key = normalizeIR(pattern.key);
-        const val = normalizeIR(pattern.val);
-        return key === pattern.key && val === pattern.val ? pattern : { key, val };
+      const patternIndexes = ir.patternIndexes?.map((pattern2) => {
+        const key = normalizeIR(pattern2.key);
+        const val = normalizeIR(pattern2.val);
+        return key === pattern2.key && val === pattern2.val ? pattern2 : { key, val };
       });
-      if (props === undefined && !ir.props.some((prop) => prop.val.k === "alias") && ir.index?.k !== "alias" && ir.symbolIndex?.k !== "alias" && !ir.patternIndexes?.some((pattern) => pattern.key.k === "alias" || pattern.val.k === "alias") && index === ir.index && symbolIndex === ir.symbolIndex && patternIndexes?.every((pattern, patternIndex) => pattern === ir.patternIndexes?.[patternIndex]) !== false) {
+      if (props === undefined && !ir.props.some((prop) => prop.val.k === "alias") && ir.index?.k !== "alias" && ir.symbolIndex?.k !== "alias" && !ir.patternIndexes?.some((pattern2) => pattern2.key.k === "alias" || pattern2.val.k === "alias") && index === ir.index && symbolIndex === ir.symbolIndex && patternIndexes?.every((pattern2, patternIndex) => pattern2 === ir.patternIndexes?.[patternIndex]) !== false) {
         return ir;
       }
       return { ...ir, props: props ?? ir.props, index, symbolIndex, patternIndexes };
@@ -8937,8 +8927,8 @@ function unionIR(branches) {
     return members[0];
   return { k: "union", members };
 }
-function publicMatcher(state, fallback) {
-  const fallbackResolver = typeof fallback === "function" ? caseResolver(fallback) : undefined;
+function publicMatcher(state, fallback2) {
+  const fallbackResolver = typeof fallback2 === "function" ? caseResolver(fallback2) : undefined;
   const casesIR = unionIR(state.branches);
   let casesSchema;
   if (state.key === undefined || state.branches.length === 0) {
@@ -8983,7 +8973,7 @@ function publicMatcher(state, fallback) {
   const schema = makeType({ k: "unknown" }, [{ kind: "pipe", fn: (input) => execute(input, []) }], EMPTY_META);
   const callable = (value, ...args) => {
     const result = execute(value, args);
-    if ((fallback === "assert" || fallback === "never") && result instanceof OmpErrors) {
+    if ((fallback2 === "assert" || fallback2 === "never") && result instanceof OmpErrors) {
       throw new TraversalError(result);
     }
     return result;
@@ -8994,14 +8984,14 @@ function publicMatcher(state, fallback) {
 }
 function addMatchCases(state, cases) {
   const branches = [...state.branches];
-  let fallback;
+  let fallback2;
   for (const rawDefinition of Reflect.ownKeys(cases)) {
     const value = Reflect.get(cases, rawDefinition);
     if (rawDefinition === "default") {
       if (value !== "assert" && value !== "never" && value !== "reject" && typeof value !== "function") {
         throw new OmpTypeError('match default must be "assert", "never", "reject" or a function');
       }
-      fallback = value;
+      fallback2 = value;
       continue;
     }
     const definition = typeof rawDefinition === "symbol" ? rawDefinition : String(rawDefinition);
@@ -9013,7 +9003,7 @@ function addMatchCases(state, cases) {
     });
   }
   const next = { ...state, branches };
-  return fallback === undefined ? createMatchParser(next) : publicMatcher(next, fallback);
+  return fallback2 === undefined ? createMatchParser(next) : publicMatcher(next, fallback2);
 }
 function createMatchParser(state) {
   const parser = (cases) => addMatchCases(state, cases);
@@ -9032,7 +9022,7 @@ function createMatchParser(state) {
     });
   };
   parser.match = (cases) => addMatchCases(state, cases);
-  parser.default = (fallback) => publicMatcher(state, fallback);
+  parser.default = (fallback2) => publicMatcher(state, fallback2);
   function at(key, cases) {
     if (state.key !== undefined)
       throw new OmpTypeError("match.at may only be specified once");
@@ -9501,7 +9491,7 @@ var init_type = __esm(() => {
   init_ir();
   init_keywords();
   useAssignability(isSubtype);
-  Type = Object.defineProperty(function Type() {}, Symbol.hasInstance, {
+  Type = Object.defineProperty(function Type2() {}, Symbol.hasInstance, {
     value: (value) => (typeof value === "function" || typeof value === "object" && value !== null) && (IR_BRAND in value)
   });
   kBase = Symbol("omptype.base");
@@ -9633,8 +9623,8 @@ var init_type = __esm(() => {
     nonPositive() {
       return makeType(withNumericBound(this.ir, "max", 0), this[kSteps], metaOf(this));
     },
-    matching(pattern) {
-      return makeType(intersect(this.ir, patternIR(pattern)), this[kSteps], metaOf(this));
+    matching(pattern2) {
+      return makeType(intersect(this.ir, patternIR(pattern2)), this[kSteps], metaOf(this));
     },
     atOrAfter(bound) {
       const timestamp = bound instanceof Date ? bound.valueOf() : bound;
@@ -9888,41 +9878,41 @@ Right: ${rightExpression}`);
     parse: (definition) => type.raw(definition),
     branches: []
   });
-  ((type2) => {
-    type2.errors = OmpErrors;
+  ((type) => {
+    type.errors = OmpErrors;
     function or(...definitions) {
       return buildOr(definitions);
     }
-    type2.or = or;
+    type.or = or;
     function array(definition) {
       return type(definition).array();
     }
-    type2.array = array;
+    type.array = array;
     function union(definitions) {
       return buildOr(definitions);
     }
-    type2.union = union;
+    type.union = union;
     function tuple(definitions) {
       return type(definitions);
     }
-    type2.tuple = tuple;
+    type.tuple = tuple;
     function record(key, value) {
-      return type2.keywords.Record(key, value);
+      return type.keywords.Record(key, value);
     }
-    type2.record = record;
+    type.record = record;
     function and(...definitions) {
       return buildAnd(definitions);
     }
-    type2.and = and;
+    type.and = and;
     function merge(...definitions) {
       return buildMerge(definitions);
     }
-    type2.merge = merge;
+    type.merge = merge;
     function pipe(...definitions) {
       return buildPipe(definitions);
     }
-    type2.pipe = pipe;
-    const normalize = Object.assign(keywordSchema("string.normalize"), {
+    type.pipe = pipe;
+    const normalize2 = Object.assign(keywordSchema("string.normalize"), {
       preformatted: keywordSchema("string.normalize.NFC.preformatted"),
       NFC: preformattedKeyword("string.normalize.NFC"),
       NFD: preformattedKeyword("string.normalize.NFD"),
@@ -9950,7 +9940,7 @@ Right: ${rightExpression}`);
       v7: keywordSchema("string.uuid.v7"),
       v8: keywordSchema("string.uuid.v8")
     });
-    type2.string = Object.defineProperties(makeType({ k: "string" }, [], {}), Object.getOwnPropertyDescriptors({
+    type.string = Object.defineProperties(makeType({ k: "string" }, [], {}), Object.getOwnPropertyDescriptors({
       alpha: keywordSchema("string.alpha"),
       alphanumeric: keywordSchema("string.alphanumeric"),
       base64,
@@ -9964,7 +9954,7 @@ Right: ${rightExpression}`);
       ip,
       json: parsedKeyword("string.json"),
       lower: preformattedKeyword("string.lower"),
-      normalize,
+      normalize: normalize2,
       numeric: parsedKeyword("string.numeric"),
       regex: keywordSchema("string.regex"),
       semver: keywordSchema("string.semver"),
@@ -9973,7 +9963,7 @@ Right: ${rightExpression}`);
       url: parsedKeyword("string.url"),
       uuid
     }));
-    type2.parse = {
+    type.parse = {
       number: keywordSchema("parse.number"),
       integer: keywordSchema("parse.integer"),
       json: keywordSchema("parse.json"),
@@ -9982,24 +9972,24 @@ Right: ${rightExpression}`);
       boolean: keywordSchema("parse.boolean"),
       bigint: keywordSchema("parse.bigint")
     };
-    type2.number = Object.assign(makeType({ k: "number" }, [], {}), {
+    type.number = Object.assign(makeType({ k: "number" }, [], {}), {
       integer: makeType({ k: "number", int: true }, [], {})
     });
-    type2.arrayIndex = makeType({
+    type.arrayIndex = makeType({
       k: "refine",
       base: { k: "string" },
       pred: (value) => typeof value === "string" && /^(?:0|[1-9]\d*)$/.test(value),
       expected: "a non-negative integer string"
     }, [], {});
-    type2.boolean = makeType({ k: "boolean" }, [], {});
-    type2.bigint = makeType({ k: "bigint" }, [], {});
-    type2.symbol = makeType({ k: "symbol" }, [], {});
-    type2.object = makeType({ k: "anyobject" }, [], {});
-    type2.unknown = makeType({ k: "unknown" }, [], {});
-    type2.any = type2.unknown;
-    type2.never = makeType({ k: "never" }, [], {});
-    type2.keywords = {
-      number: { integer: type2.number.integer },
+    type.boolean = makeType({ k: "boolean" }, [], {});
+    type.bigint = makeType({ k: "bigint" }, [], {});
+    type.symbol = makeType({ k: "symbol" }, [], {});
+    type.object = makeType({ k: "anyobject" }, [], {});
+    type.unknown = makeType({ k: "unknown" }, [], {});
+    type.any = type.unknown;
+    type.never = makeType({ k: "never" }, [], {});
+    type.keywords = {
+      number: { integer: type.number.integer },
       Map: keywordSchema("Map"),
       Set: keywordSchema("Set"),
       RegExp: keywordSchema("RegExp"),
@@ -10009,12 +9999,12 @@ Right: ${rightExpression}`);
       Array: {
         liftFrom(definition) {
           const element = parseDef(definition);
-          const array = { k: "array", el: element, desc: "an object" };
+          const array2 = { k: "array", el: element, desc: "an object" };
           return makeType({
             k: "morph",
-            input: { k: "union", members: [element, array] },
+            input: { k: "union", members: [element, array2] },
             fn: (value) => globalThis.Array.isArray(value) ? value : [value],
-            out: array
+            out: array2
           }, [], {});
         }
       },
@@ -10052,7 +10042,7 @@ Right: ${rightExpression}`);
       },
       unknown: { any: keywordSchema("unknown.any") }
     };
-    type2.Date = makeType({ k: "instance", ctor: globalThis.Date, expected: "a Date" }, [], {});
+    type.Date = makeType({ k: "instance", ctor: globalThis.Date, expected: "a Date" }, [], {});
     function instanceOf(ctor) {
       if (typeof ctor !== "function" || ctor.prototype === undefined) {
         throw new OmpTypeError("instanceof operands must be constructors");
@@ -10061,21 +10051,21 @@ Right: ${rightExpression}`);
       const expected = ctor.prototype === Error.prototype ? "an Error" : typeof name === "string" && name.length > 0 ? `an instance of ${name}` : "an instance";
       return makeType({ k: "instance", ctor, expected }, [], {});
     }
-    type2.instanceOf = instanceOf;
+    type.instanceOf = instanceOf;
     function unit(value) {
       return makeType({ k: "lit", v: value }, [], {});
     }
-    type2.unit = unit;
+    type.unit = unit;
     function enumerated(...values) {
       const members = values.map((value) => ({ k: "lit", v: value }));
       const ir = members.length === 0 ? { k: "never" } : members.length === 1 ? members[0] : { k: "union", members };
       return makeType(ir, [], {});
     }
-    type2.enumerated = enumerated;
+    type.enumerated = enumerated;
     function enumeration(values) {
       return enumerated(...values);
     }
-    type2.enumeration = enumeration;
+    type.enumeration = enumeration;
     function valueOf(values) {
       const members = [];
       for (const key in values) {
@@ -10086,24 +10076,24 @@ Right: ${rightExpression}`);
       const ir = members.length === 0 ? { k: "never" } : members.length === 1 ? members[0] : { k: "union", members };
       return makeType(ir, [], {});
     }
-    type2.valueOf = valueOf;
-    type2.match = matchBuilder;
+    type.valueOf = valueOf;
+    type.match = matchBuilder;
     function define(definition) {
       return definition;
     }
-    type2.define = define;
-    type2.fn = makeFn();
-    type2.declare = () => ({
+    type.define = define;
+    type.fn = makeFn();
+    type.declare = () => ({
       type: (definition) => type(definition)
     });
     function scope(aliases, options) {
       return buildScope(aliases, options);
     }
-    type2.scope = scope;
+    type.scope = scope;
     function module(definitions, options) {
       return scope(definitions, options).export();
     }
-    type2.module = module;
+    type.module = module;
     function generic(...arguments_) {
       if (arguments_.length === 2 && typeof arguments_[0] === "string" && arguments_[0].trimStart().startsWith("<")) {
         return createRuntimeGeneric(parseGenericParameters(arguments_[0]), arguments_[1]);
@@ -10119,11 +10109,11 @@ Right: ${rightExpression}`);
       validateGenericParameters(parameters);
       return (definition) => createRuntimeGeneric(parameters, definition);
     }
-    type2.generic = generic;
+    type.generic = generic;
     function raw(def) {
       return makeType(parseDef(def), [], {});
     }
-    type2.raw = raw;
+    type.raw = raw;
     function withJsonSchema(schema, json) {
       const internal = schema;
       if (internal.hasDefault || hasMorph(internal.ir) || internal[kSteps].some((step) => step.kind === "pipe")) {
@@ -10140,7 +10130,7 @@ Right: ${rightExpression}`);
         json: { ...json }
       }, [], {});
     }
-    type2.withJsonSchema = withJsonSchema;
+    type.withJsonSchema = withJsonSchema;
   })(type ||= {});
   Object.assign(type, {
     null: makeType({ k: "null" }, [], {}),
@@ -10300,7 +10290,7 @@ function matchesList(match, model, modelLower) {
     if (match.token.some((token) => parts.includes(token)))
       return true;
   }
-  if (match.glob?.some((pattern) => globMatch(pattern, modelLower)))
+  if (match.glob?.some((pattern2) => globMatch(pattern2, modelLower)))
     return true;
   return false;
 }
@@ -14723,15 +14713,15 @@ function buildRequestHeaders(options) {
   };
 }
 async function fetchViaHttp2(baseUrl, body, options, timeoutMs) {
-  const { promise, resolve } = Promise.withResolvers();
+  const { promise, resolve: resolve2 } = Promise.withResolvers();
   const client = http2.connect(baseUrl);
   const timer = setTimeout(() => {
     client.destroy();
-    resolve(null);
+    resolve2(null);
   }, timeoutMs);
   client.on("error", () => {
     clearTimeout(timer);
-    resolve(null);
+    resolve2(null);
   });
   const req = client.request({
     ":method": "POST",
@@ -14743,19 +14733,19 @@ async function fetchViaHttp2(baseUrl, body, options, timeoutMs) {
   req.on("end", () => {
     clearTimeout(timer);
     client.close();
-    resolve(new Uint8Array(Buffer.concat(chunks)));
+    resolve2(new Uint8Array(Buffer.concat(chunks)));
   });
   req.on("error", () => {
     clearTimeout(timer);
     client.close();
-    resolve(null);
+    resolve2(null);
   });
   req.on("response", (headers) => {
     const status = Number(headers[":status"] ?? 0);
     if (status < 200 || status >= 300) {
       clearTimeout(timer);
       client.close();
-      resolve(null);
+      resolve2(null);
     }
   });
   if (body.length > 0) {
@@ -14832,27 +14822,27 @@ function decodeConnectUnaryBody(payload) {
   }
   return null;
 }
-function isCursorKimiK3(id) {
-  const identity = classifyModel("cursor", id, { lenient: true });
+function isCursorKimiK3(id2) {
+  const identity = classifyModel("cursor", id2, { lenient: true });
   return identity.class === "kimi" && identity.family === "k3";
 }
-function isCursorVersionedGrok(id) {
-  const identity = classifyModel("cursor", id, { lenient: true });
+function isCursorVersionedGrok(id2) {
+  const identity = classifyModel("cursor", id2, { lenient: true });
   if (identity.class !== "xai" || identity.revision === undefined)
     return false;
-  const revision = parseRevision(identity.revision);
+  const revision2 = parseRevision(identity.revision);
   const floor = parseRevision("4");
-  return revision !== undefined && floor !== undefined && compareRevision(revision, floor) >= 0;
+  return revision2 !== undefined && floor !== undefined && compareRevision(revision2, floor) >= 0;
 }
-function isCursorGlm52CodingModel(id) {
-  const identity = classifyModel("cursor", id, { lenient: true });
+function isCursorGlm52CodingModel(id2) {
+  const identity = classifyModel("cursor", id2, { lenient: true });
   if (identity.class !== "glm" || identity.revision === undefined)
     return false;
   if (identity.family !== undefined && identity.family !== "air" && identity.family !== "turbo")
     return false;
-  const revision = parseRevision(identity.revision);
+  const revision2 = parseRevision(identity.revision);
   const floor = parseRevision("5.2");
-  return revision !== undefined && floor !== undefined && compareRevision(revision, floor) >= 0;
+  return revision2 !== undefined && floor !== undefined && compareRevision(revision2, floor) >= 0;
 }
 function normalizeCursorModels(models, baseUrlOverride, references) {
   if (!models || models.length === 0) {
@@ -14874,50 +14864,50 @@ function normalizeCursorModel(model, baseUrlOverride, references) {
     return null;
   }
   const details = parsedModel;
-  const id = details.modelId.trim();
-  if (!id) {
+  const id2 = details.modelId.trim();
+  if (!id2) {
     return null;
   }
-  const name = pickModelDisplayName(details, id);
-  const reference = references.get(id);
-  const reasoning = isCursorKimiK3(id) || isCursorVersionedGrok(id) || Boolean(details.thinkingDetails) || reference?.reasoning === true;
-  if (reference) {
+  const name = pickModelDisplayName(details, id2);
+  const reference2 = references.get(id2);
+  const reasoning = isCursorKimiK3(id2) || isCursorVersionedGrok(id2) || Boolean(details.thinkingDetails) || reference2?.reasoning === true;
+  if (reference2) {
     return {
-      ...reference,
-      id,
+      ...reference2,
+      id: id2,
       name,
-      baseUrl: baseUrlOverride ?? reference.baseUrl,
+      baseUrl: baseUrlOverride ?? reference2.baseUrl,
       reasoning,
-      input: resolveCursorInput(id, reference.input),
-      contextWindow: resolveCursorContextWindow(details, id, reference.contextWindow),
+      input: resolveCursorInput(id2, reference2.input),
+      contextWindow: resolveCursorContextWindow(details, id2, reference2.contextWindow),
       cursorMaxMode: details.maxMode
     };
   }
   return {
-    id,
+    id: id2,
     name,
     api: "cursor-agent",
     provider: "cursor",
     baseUrl: baseUrlOverride ?? CURSOR_DEFAULT_BASE_URL,
     reasoning,
-    input: resolveCursorInput(id),
+    input: resolveCursorInput(id2),
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: resolveCursorContextWindow(details, id, DEFAULT_CONTEXT_WINDOW),
+    contextWindow: resolveCursorContextWindow(details, id2, DEFAULT_CONTEXT_WINDOW),
     maxTokens: DEFAULT_MAX_TOKENS,
     cursorMaxMode: details.maxMode
   };
 }
-function resolveCursorContextWindow(model, id, fallback) {
-  const labeled1M = CURSOR_1M_NAME_PATTERN.test(id) || [model.displayName, model.displayNameShort, model.displayModelId, ...model.aliases].some((candidate) => typeof candidate === "string" && CURSOR_1M_NAME_PATTERN.test(candidate));
-  const identity = classifyModel("cursor", id, { lenient: true });
+function resolveCursorContextWindow(model, id2, fallback2) {
+  const labeled1M = CURSOR_1M_NAME_PATTERN.test(id2) || [model.displayName, model.displayNameShort, model.displayModelId, ...model.aliases].some((candidate) => typeof candidate === "string" && CURSOR_1M_NAME_PATTERN.test(candidate));
+  const identity = classifyModel("cursor", id2, { lenient: true });
   const maxMode1M = model.maxMode && (identity.class === "anthropic" || identity.class === "gemini");
-  if (labeled1M || isCursorNative1MModelId(id) || maxMode1M) {
-    return Math.max(fallback ?? 0, CURSOR_1M_CONTEXT_WINDOW);
+  if (labeled1M || isCursorNative1MModelId(id2) || maxMode1M) {
+    return Math.max(fallback2 ?? 0, CURSOR_1M_CONTEXT_WINDOW);
   }
-  return fallback;
+  return fallback2;
 }
-function isCursorNative1MModelId(id) {
-  return isCursorGlm52CodingModel(id);
+function isCursorNative1MModelId(id2) {
+  return isCursorGlm52CodingModel(id2);
 }
 function pickModelDisplayName(model, fallbackId) {
   const candidates = [model.displayName, model.displayNameShort, model.displayModelId, ...model.aliases, fallbackId];
@@ -14932,11 +14922,11 @@ function pickModelDisplayName(model, fallbackId) {
   }
   return fallbackId;
 }
-function resolveCursorInput(id, referenceInput) {
+function resolveCursorInput(id2, referenceInput) {
   if (referenceInput) {
     return referenceInput;
   }
-  const identity = classifyModel("cursor", id, { lenient: true });
+  const identity = classifyModel("cursor", id2, { lenient: true });
   if (identity.class === "anthropic" || identity.class === "gemini" || identity.class === "openai") {
     return ["text", "image"];
   }
@@ -16118,6 +16108,7 @@ function resolvePricingTiers(model) {
 function convertToDescriptor(raw, baseUrl) {
   const preferredApi = mapPreferredApi(raw.preferred_api);
   const adjustedBaseUrl = adjustBaseUrl(baseUrl, preferredApi);
+  const shortName = typeof raw.short_name === "string" ? raw.short_name.trim() : "";
   const contextWindow = resolveContextWindow(raw);
   const maxTokens = resolveMaxTokens(raw);
   const tiers = resolvePricingTiers(raw);
@@ -16139,6 +16130,8 @@ function convertToDescriptor(raw, baseUrl) {
     contextWindow,
     maxTokens
   };
+  if (shortName)
+    descriptor.shortName = shortName;
   if (raw.pi_provider)
     descriptor.piProvider = raw.pi_provider;
   if (raw.pi_model)
@@ -16760,12 +16753,12 @@ function normalizeBaseUrl(baseUrl) {
   }
   return value.replace(/\/+$/, "");
 }
-function normalizePositiveInt(value, fallback) {
+function normalizePositiveInt(value, fallback2) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    return fallback;
+    return fallback2;
   }
   const normalized = Math.floor(value);
-  return normalized > 0 ? normalized : fallback;
+  return normalized > 0 ? normalized : fallback2;
 }
 function normalizePageToken(value) {
   if (typeof value !== "string") {
@@ -17966,15 +17959,15 @@ function resolveModelCacheProviderId(providerId, options = {}) {
     }
     case "muse-code": {
       const baseUrl = options.baseUrl ?? getDefaultModelDiscoveryBaseUrl(providerId);
-      const scope = `${options.apiKey ?? ""}\x00${baseUrl}`;
-      return `muse-code:models-v1:${Bun.hash(scope).toString(36)}`;
+      const scope2 = `${options.apiKey ?? ""}\x00${baseUrl}`;
+      return `muse-code:models-v1:${Bun.hash(scope2).toString(36)}`;
     }
     case "singularityapi-dev":
     case "singularityapi-tech": {
       const canonical = providerId === "singularityapi-tech" ? SINGULARITYAPI_TECH_API_BASE_URL : SINGULARITYAPI_DEV_API_BASE_URL;
       const baseUrl = normalizeSingularityApiBaseUrl(options.baseUrl, canonical);
-      const scope = `${options.apiKey ?? ""}\x00${baseUrl}`;
-      return `${providerId}:models-v1:${Bun.hash(scope).toString(36)}`;
+      const scope2 = `${options.apiKey ?? ""}\x00${baseUrl}`;
+      return `${providerId}:models-v1:${Bun.hash(scope2).toString(36)}`;
     }
     case "litellm": {
       const baseUrl = options.baseUrl ?? getDefaultModelDiscoveryBaseUrl(providerId);
@@ -17989,13 +17982,13 @@ function resolveModelCacheProviderId(providerId, options = {}) {
       const configuredBaseUrl = options.baseUrl ?? getDefaultModelDiscoveryBaseUrl(providerId);
       const trimmedBaseUrl = configuredBaseUrl.endsWith("/") ? configuredBaseUrl.slice(0, -1) : configuredBaseUrl;
       const discoveryBaseUrl = trimmedBaseUrl.endsWith("/v1") ? trimmedBaseUrl : `${trimmedBaseUrl}/v1`;
-      const scope = `${options.apiKey ?? ""}\x00${discoveryBaseUrl}`;
-      return `${providerId}:models-v3:${Bun.hash(scope).toString(36)}`;
+      const scope2 = `${options.apiKey ?? ""}\x00${discoveryBaseUrl}`;
+      return `${providerId}:models-v3:${Bun.hash(scope2).toString(36)}`;
     }
     case "github-copilot": {
       const baseUrl = options.baseUrl ?? PERSONAL_GITHUB_COPILOT_BASE_URL;
-      const scope = `${options.apiKey ?? ""}\x00${baseUrl}`;
-      return `github-copilot:models-v2:${Bun.hash(scope).toString(36)}`;
+      const scope2 = `${options.apiKey ?? ""}\x00${baseUrl}`;
+      return `github-copilot:models-v2:${Bun.hash(scope2).toString(36)}`;
     }
     case "openrouter":
       return "openrouter:pseudo-api";
@@ -18044,9 +18037,9 @@ var OLLAMA_CLOUD_OUTPUT_CAPPED_BASE_IDS = {
   "deepseek-v4-flash": true,
   "deepseek-v4-pro": true
 };
-function isOllamaCloudOutputCapped(id) {
-  const separator = id.indexOf(":");
-  const baseId = separator > 0 ? id.slice(0, separator) : id;
+function isOllamaCloudOutputCapped(id2) {
+  const separator = id2.indexOf(":");
+  const baseId = separator > 0 ? id2.slice(0, separator) : id2;
   return OLLAMA_CLOUD_OUTPUT_CAPPED_BASE_IDS[baseId] === true;
 }
 function trimTrailingSlash(value) {
@@ -18117,27 +18110,27 @@ function ollamaCloudModelManagerOptions(config) {
       const payload = await response.json();
       const entries = payload.models ?? [];
       const models = await Promise.all(entries.map(async (entry) => {
-        const id = entry.model ?? entry.name;
-        if (!id) {
+        const id2 = entry.model ?? entry.name;
+        if (!id2) {
           return;
         }
-        const reference = resolveReference(id);
-        const providerReference = getProviderReferences().get(id);
+        const reference2 = resolveReference(id2);
+        const providerReference = getProviderReferences().get(id2);
         let metadata;
         try {
-          metadata = await fetchShowMetadata(baseUrl, apiKey, id, config?.fetch);
+          metadata = await fetchShowMetadata(baseUrl, apiKey, id2, config?.fetch);
         } catch {
           metadata = undefined;
         }
         const capabilities = metadata?.capabilities;
         const discoveredContextWindow = getContextWindow(metadata?.model_info);
         const contextWindow = discoveredContextWindow ?? 128000;
-        const reasoning = capabilities ? capabilities.includes("thinking") : reference?.reasoning ?? false;
-        const thinking = capabilities ? undefined : reference?.thinking;
-        const input = capabilities ? capabilities.includes("vision") ? ["text", "image"] : ["text"] : reference?.input ?? ["text"];
-        const resolvedName = entry.name && entry.name !== id ? entry.name : reference?.name ?? id;
+        const reasoning = capabilities ? capabilities.includes("thinking") : reference2?.reasoning ?? false;
+        const thinking = capabilities ? undefined : reference2?.thinking;
+        const input = capabilities ? capabilities.includes("vision") ? ["text", "image"] : ["text"] : reference2?.input ?? ["text"];
+        const resolvedName = entry.name && entry.name !== id2 ? entry.name : reference2?.name ?? id2;
         return {
-          id,
+          id: id2,
           name: resolvedName,
           api: "ollama-chat",
           provider: "ollama-cloud",
@@ -18145,9 +18138,9 @@ function ollamaCloudModelManagerOptions(config) {
           reasoning,
           thinking,
           input,
-          cost: reference?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          cost: reference2?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow,
-          maxTokens: isOllamaCloudOutputCapped(id) ? Math.min(contextWindow, OLLAMA_CLOUD_MAX_OUTPUT_TOKENS) : discoveredContextWindow !== null && discoveredContextWindow !== undefined ? providerReference?.maxTokens ?? Math.min(contextWindow, 8192) : Math.min(contextWindow, 8192),
+          maxTokens: isOllamaCloudOutputCapped(id2) ? Math.min(contextWindow, OLLAMA_CLOUD_MAX_OUTPUT_TOKENS) : discoveredContextWindow !== null && discoveredContextWindow !== undefined ? providerReference?.maxTokens ?? Math.min(contextWindow, 8192) : Math.min(contextWindow, 8192),
           omitMaxOutputTokens: true
         };
       }));
@@ -18455,18 +18448,18 @@ var CLINE_PASS_MODEL_METADATA = {
     tier: "free"
   }
 };
-function getClinePassModelMetadata(id) {
-  return CLINE_PASS_MODEL_METADATA[id];
+function getClinePassModelMetadata(id2) {
+  return CLINE_PASS_MODEL_METADATA[id2];
 }
 
 // ../../node_modules/.bun/@oh-my-pi+pi-catalog@18.4.3/node_modules/@oh-my-pi/pi-catalog/src/provider-models/models-dev-policies.ts
 init_behavior();
 
 // ../../node_modules/.bun/@oh-my-pi+pi-catalog@18.4.3/node_modules/@oh-my-pi/pi-catalog/src/provider-models/openai-compat.ts
-function revisionAtLeast(revision, floor) {
-  if (revision === undefined)
+function revisionAtLeast(revision2, floor) {
+  if (revision2 === undefined)
     return false;
-  const parsedRevision = parseRevision(revision);
+  const parsedRevision = parseRevision(revision2);
   const parsedFloor = parseRevision(floor);
   return parsedRevision !== undefined && parsedFloor !== undefined && compareRevision(parsedRevision, parsedFloor) >= 0;
 }
@@ -18491,12 +18484,12 @@ async function withCatalogDiscoveryTimeout(timeoutMs, run) {
 }
 var ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1";
 var ANTHROPIC_OAUTH_BETA = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,advanced-tool-use-2025-11-20,effort-2025-11-24,extended-cache-ttl-2025-04-11";
-function toModelName(value, fallback) {
+function toModelName(value, fallback2) {
   if (typeof value !== "string") {
-    return fallback;
+    return fallback2;
   }
   const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : fallback;
+  return trimmed.length > 0 ? trimmed : fallback2;
 }
 function toInputCapabilities(value) {
   if (!Array.isArray(value)) {
@@ -18614,7 +18607,7 @@ function indexPublishedEffortLadders(payload) {
       const shared = byId.get(modelId);
       if (shared === undefined) {
         byId.set(modelId, ladder);
-      } else if (shared.length !== ladder.length || shared.some((effort, index) => effort !== ladder[index])) {
+      } else if (shared.length !== ladder.length || shared.some((effort, index2) => effort !== ladder[index2])) {
         byId.delete(modelId);
         unshareable.add(modelId);
       }
@@ -18737,21 +18730,21 @@ function buildAnthropicReferenceMap(modelsDevModels) {
   for (const model of modelsDevModels) {
     merged.set(model.id, model);
   }
-  const bundledModels = getBundledModels("anthropic").filter((model) => model.api === "anthropic-messages");
-  for (const model of bundledModels) {
+  const bundledModels2 = getBundledModels("anthropic").filter((model) => model.api === "anthropic-messages");
+  for (const model of bundledModels2) {
     merged.set(model.id, toModelSpec(model));
   }
   return merged;
 }
-function mapWithBundledReference(entry, defaults, reference) {
-  const name = toModelName(entry.name, reference?.name ?? defaults.name);
-  if (!reference) {
+function mapWithBundledReference(entry, defaults, reference2) {
+  const name = toModelName(entry.name, reference2?.name ?? defaults.name);
+  if (!reference2) {
     return {
       ...defaults,
       name
     };
   }
-  const { kind: _inheritedKind, ...chatReference } = reference;
+  const { kind: _inheritedKind, ...chatReference } = reference2;
   return {
     ...chatReference,
     id: defaults.id,
@@ -18759,14 +18752,14 @@ function mapWithBundledReference(entry, defaults, reference) {
     api: defaults.api,
     provider: defaults.provider,
     baseUrl: defaults.baseUrl,
-    contextWindow: toPositiveNumber(entry.context_length, reference.contextWindow),
-    maxTokens: toPositiveNumber(entry.max_completion_tokens, reference.maxTokens)
+    contextWindow: toPositiveNumber(entry.context_length, reference2.contextWindow),
+    maxTokens: toPositiveNumber(entry.max_completion_tokens, reference2.maxTokens)
   };
 }
-function normalizeAnthropicBaseUrl(baseUrl, fallback) {
+function normalizeAnthropicBaseUrl(baseUrl, fallback2) {
   const value = baseUrl?.trim();
   if (!value) {
-    return fallback;
+    return fallback2;
   }
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
@@ -18801,13 +18794,13 @@ async function fetchOllamaNativeModels(baseUrl, resolveMetadata, fetchImpl = dis
   const payload = await response.json();
   const entries = payload.models ?? [];
   const resolved = await Promise.all(entries.map(async (entry) => {
-    const id = entry.model ?? entry.name;
-    if (!id)
+    const id2 = entry.model ?? entry.name;
+    if (!id2)
       return null;
-    const metadata = await resolveMetadata(id);
+    const metadata = await resolveMetadata(id2);
     return {
-      id,
-      name: entry.name ?? id,
+      id: id2,
+      name: entry.name ?? id2,
       api: "openai-responses",
       provider: "ollama",
       baseUrl,
@@ -18888,8 +18881,8 @@ function createOllamaMetadataResolver(nativeBaseUrl, fetchImpl) {
     return pending;
   };
 }
-function isLikelyOpenAIResponsesModelId(id, references) {
-  const trimmed = id.trim();
+function isLikelyOpenAIResponsesModelId(id2, references) {
+  const trimmed = id2.trim();
   if (!trimmed) {
     return false;
   }
@@ -18899,8 +18892,8 @@ function isLikelyOpenAIResponsesModelId(id, references) {
   return isLikelyOpenAIResponsesId(trimmed);
 }
 var NANO_GPT_THINKING_SUFFIX_RE = /:thinking(:[^:]+)?$/;
-function isLikelyNanoGptTextModelId(id) {
-  const normalized = id.trim().toLowerCase();
+function isLikelyNanoGptTextModelId(id2) {
+  const normalized = id2.trim().toLowerCase();
   if (!normalized) {
     return false;
   }
@@ -18965,8 +18958,8 @@ function createSimpleAnthropicProviderOptions(providerId, defaultBaseUrlFallback
         baseUrl: discoveryBaseUrl,
         headers: buildAnthropicDiscoveryHeaders(apiKey),
         mapModel: (entry, defaults) => {
-          const reference = references.get(defaults.id);
-          const model = mapWithBundledReference(entry, defaults, reference);
+          const reference2 = references.get(defaults.id);
+          const model = mapWithBundledReference(entry, defaults, reference2);
           return {
             ...model,
             name: toModelName(entry.display_name, model.name),
@@ -19039,27 +19032,27 @@ function mapUmansThinkingConfig(value) {
   }
   return thinking;
 }
-function mapUmansModelInfo(modelId, raw, baseUrl, reference) {
+function mapUmansModelInfo(modelId, raw, baseUrl, reference2) {
   if (!modelId)
     return null;
   const capabilities = isRecord2(raw.capabilities) ? raw.capabilities : {};
   const supportsTools = capabilities.supports_tools;
   const thinking = mapUmansThinkingConfig(capabilities.reasoning);
   return {
-    ...reference,
+    ...reference2,
     id: modelId,
     name: toModelName(raw.display_name, toModelName(raw.name, modelId)),
     api: "anthropic-messages",
     provider: "umans",
     baseUrl,
-    compat: { ...reference?.compat, escapeBuiltinToolNames: true },
+    compat: { ...reference2?.compat, escapeBuiltinToolNames: true },
     reasoning: thinking !== undefined,
     ...thinking ? { thinking } : {},
     input: umansSupportsVision(capabilities.supports_vision) ? ["text", "image"] : ["text"],
     ...supportsTools === false ? { supportsTools: false } : {},
-    cost: reference?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: toPositiveNumber(capabilities.context_window, reference?.contextWindow ?? null),
-    maxTokens: toPositiveNumber(capabilities.recommended_max_tokens, toPositiveNumber(capabilities.max_completion_tokens, reference?.maxTokens ?? null))
+    cost: reference2?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: toPositiveNumber(capabilities.context_window, reference2?.contextWindow ?? null),
+    maxTokens: toPositiveNumber(capabilities.recommended_max_tokens, toPositiveNumber(capabilities.max_completion_tokens, reference2?.maxTokens ?? null))
   };
 }
 async function fetchUmansModelsInfo(options) {
@@ -19120,9 +19113,9 @@ function openaiModelManagerOptions(config) {
   });
 }
 var GMI_CLOUD_BASE_URL = "https://api.gmi-serving.com/v1";
-function mapGmiCloudModel(entry, defaults, reference) {
-  if (reference) {
-    return mapWithBundledReference(entry, defaults, reference);
+function mapGmiCloudModel(entry, defaults, reference2) {
+  if (reference2) {
+    return mapWithBundledReference(entry, defaults, reference2);
   }
   const canonical = resolveModelReference(defaults.id, getBundledModelReferenceIndex());
   if (!canonical) {
@@ -19161,7 +19154,7 @@ function cerebrasModelManagerOptions(config) {
     defaultBaseUrl: "https://api.cerebras.ai/v1",
     config,
     requireApiKey: true,
-    mapModel: (entry, defaults, reference) => mapWithBundledReference(entry, defaults, reference)
+    mapModel: (entry, defaults, reference2) => mapWithBundledReference(entry, defaults, reference2)
   });
 }
 function huggingfaceModelManagerOptions(config) {
@@ -19173,8 +19166,8 @@ function nvidiaModelManagerOptions(config) {
 function novitaArrayIncludes(value, expected) {
   return Array.isArray(value) && value.some((item) => item === expected);
 }
-function isPublicNovitaModelId(id) {
-  return !id.toLowerCase().startsWith("ai_infer_test");
+function isPublicNovitaModelId(id2) {
+  return !id2.toLowerCase().startsWith("ai_infer_test");
 }
 function toNovitaCostPerMillion(value) {
   return toPositiveNumber(value, 0) / 1e4;
@@ -19190,11 +19183,11 @@ function getNovitaCacheReadPricePerMillion(entry) {
   }
   return toNovitaCostPerMillion(cacheRead.price_per_m);
 }
-function mapNovitaModel(entry, defaults, reference) {
+function mapNovitaModel(entry, defaults, reference2) {
   const model = mapWithBundledReference({
     ...entry,
     name: entry.display_name ?? entry.title ?? entry.name
-  }, defaults, reference);
+  }, defaults, reference2);
   return {
     ...model,
     reasoning: novitaArrayIncludes(entry.features, "reasoning"),
@@ -19231,9 +19224,9 @@ function deepinfraTags(metadata) {
   const tags = metadata.tags;
   return Array.isArray(tags) ? tags.filter((tag) => typeof tag === "string") : [];
 }
-function mapDeepinfraModel(entry, baseUrl, reference) {
-  const id = typeof entry.id === "string" ? entry.id.trim() : "";
-  if (!id) {
+function mapDeepinfraModel(entry, baseUrl, reference2) {
+  const id2 = typeof entry.id === "string" ? entry.id.trim() : "";
+  if (!id2) {
     return null;
   }
   const metadata = isRecord2(entry.metadata) ? entry.metadata : {};
@@ -19245,16 +19238,16 @@ function mapDeepinfraModel(entry, baseUrl, reference) {
   const discount = toNumber(metadata.discount);
   const discountMultiplier = discount !== undefined && discount > 0 && discount < 1 ? 1 - discount : 1;
   const thinking = tags.includes("reasoning_effort") ? { mode: "effort", efforts: [...DEEPINFRA_EFFORTS] } : undefined;
-  const contextWindow = toPositiveNumber(metadata.context_length, reference?.contextWindow ?? null);
+  const contextWindow = toPositiveNumber(metadata.context_length, reference2?.contextWindow ?? null);
   const liveMaxTokens = toPositiveNumber(metadata.max_tokens, 0);
   const hasLiveOutputCap = contextWindow !== null && liveMaxTokens > 0 && liveMaxTokens < contextWindow;
-  const referenceMaxTokens = reference?.maxTokens ?? null;
+  const referenceMaxTokens = reference2?.maxTokens ?? null;
   const maxTokens = hasLiveOutputCap ? liveMaxTokens : referenceMaxTokens !== null && contextWindow !== null ? Math.min(referenceMaxTokens, contextWindow) : referenceMaxTokens;
-  const { kind: _inheritedKind, ...chatReference } = reference ?? {};
+  const { kind: _inheritedKind, ...chatReference } = reference2 ?? {};
   return {
     ...chatReference,
-    id,
-    name: reference?.name ?? id,
+    id: id2,
+    name: reference2?.name ?? id2,
     api: "openai-completions",
     provider: "deepinfra",
     baseUrl,
@@ -19296,8 +19289,8 @@ async function fetchDeepinfraModels(options) {
     if (!isRecord2(entry)) {
       continue;
     }
-    const reference = typeof entry.id === "string" ? options.references.get(entry.id) : undefined;
-    const mapped = mapDeepinfraModel(entry, options.baseUrl, reference);
+    const reference2 = typeof entry.id === "string" ? options.references.get(entry.id) : undefined;
+    const mapped = mapDeepinfraModel(entry, options.baseUrl, reference2);
     if (mapped && !seen.has(mapped.id)) {
       seen.add(mapped.id);
       models.push(mapped);
@@ -19450,8 +19443,8 @@ function xaiOAuthModelManagerOptions(config) {
     }
   };
 }
-function isLikelyAimlApiChatModelId(id) {
-  const normalized = id.trim().toLowerCase();
+function isLikelyAimlApiChatModelId(id2) {
+  const normalized = id2.trim().toLowerCase();
   if (!normalized)
     return false;
   return !isExcludedModel("aimlapi", normalized);
@@ -19471,8 +19464,8 @@ function aimlApiModelManagerOptions(config) {
 function deepseekModelManagerOptions(config) {
   return createSimpleOpenAICompletionsOptions("deepseek", "https://api.deepseek.com", config);
 }
-function isLikelySiliconFlowChatModelId(id) {
-  const normalized = id.trim().toLowerCase();
+function isLikelySiliconFlowChatModelId(id2) {
+  const normalized = id2.trim().toLowerCase();
   if (!normalized) {
     return false;
   }
@@ -19561,11 +19554,11 @@ function zhipuCodingPlanModelManagerOptions(config) {
         baseUrl,
         apiKey,
         mapModel: (_entry, defaults, _context) => {
-          const id = defaults.id;
-          const identity = classifyModel("zhipu-coding-plan", id, { lenient: true });
+          const id2 = defaults.id;
+          const identity = classifyModel("zhipu-coding-plan", id2, { lenient: true });
           return {
             ...defaults,
-            reasoning: isGlmReasoningIdentity("zhipu-coding-plan", id, "4.5") || identity.thinkingVariant === true,
+            reasoning: isGlmReasoningIdentity("zhipu-coding-plan", id2, "4.5") || identity.thinkingVariant === true,
             input: ["text"],
             compat: {
               thinkingFormat: "zai",
@@ -19628,14 +19621,14 @@ function toFireworksControlPlaneModelsUrl(baseUrl, account) {
     return null;
   }
 }
-function mapFireworksControlPlaneModel(record, publicModelId, reference, baseUrl) {
-  const name = toModelName(record.displayName, reference?.name ?? publicModelId);
+function mapFireworksControlPlaneModel(record, publicModelId, reference2, baseUrl) {
+  const name = toModelName(record.displayName, reference2?.name ?? publicModelId);
   const supportsImage = toBoolean(record.supportsImageInput) === true;
   const supportsTools = toBoolean(record.supportsTools);
-  const contextWindow = toPositiveNumber(record.contextLength, reference?.contextWindow ?? null);
+  const contextWindow = toPositiveNumber(record.contextLength, reference2?.contextWindow ?? null);
   const fallbackMaxTokens = isKimiK27CodeModelId(publicModelId) ? FIREWORKS_KIMI_K27_CODE_MAX_TOKENS : isFireworksKimiK2ModelId(publicModelId) ? FIREWORKS_KIMI_MAX_TOKENS : null;
-  const maxTokens = clampFireworksKimiMaxTokens(publicModelId, reference?.maxTokens ?? fallbackMaxTokens);
-  const base = reference ?? {
+  const maxTokens = clampFireworksKimiMaxTokens(publicModelId, reference2?.maxTokens ?? fallbackMaxTokens);
+  const base = reference2 ?? {
     id: publicModelId,
     name,
     api: "openai-completions",
@@ -19654,8 +19647,8 @@ function mapFireworksControlPlaneModel(record, publicModelId, reference, baseUrl
     provider: "fireworks",
     baseUrl,
     name,
-    reasoning: reference?.reasoning ?? true,
-    input: supportsImage ? ["text", "image"] : reference?.input ?? ["text"],
+    reasoning: reference2?.reasoning ?? true,
+    input: supportsImage ? ["text", "image"] : reference2?.input ?? ["text"],
     contextWindow,
     maxTokens,
     ...supportsTools === false ? { supportsTools: false } : {}
@@ -19775,10 +19768,10 @@ function firepassModelManagerOptions(_config) {
 var CLINEPASS_MODELS_URL = `${CLINEPASS_API_BASE_URL}/ai/cline/recommended-models`;
 var CLINEPASS_FALLBACK_CONTEXT_WINDOW = 128000;
 var CLINEPASS_FALLBACK_MAX_TOKENS = 8192;
-function buildClinePassFallbackModel(id) {
+function buildClinePassFallbackModel(id2) {
   return {
-    id,
-    name: id,
+    id: id2,
+    name: id2,
     api: "openai-completions",
     provider: "cline-pass",
     baseUrl: CLINEPASS_API_BASE_URL,
@@ -19838,12 +19831,12 @@ async function fetchClinePassLiveCatalog(fetchImpl) {
 function hasClinePassBillableCost(cost) {
   return cost !== undefined && (cost.input > 0 || cost.output > 0);
 }
-function buildCuratedClinePassModel(id, tier) {
-  const metadata = getClinePassModelMetadata(id);
+function buildCuratedClinePassModel(id2, tier) {
+  const metadata = getClinePassModelMetadata(id2);
   if (!metadata || metadata.tier !== tier)
     return;
   return {
-    ...buildClinePassFallbackModel(id),
+    ...buildClinePassFallbackModel(id2),
     name: metadata.name,
     contextWindow: metadata.contextWindow,
     maxTokens: metadata.maxTokens,
@@ -19857,18 +19850,18 @@ function buildCuratedClinePassModel(id, tier) {
     }
   };
 }
-function buildClinePassSubscriptionModel(id, references, liveCatalog) {
-  const curated = buildCuratedClinePassModel(id, "subscription");
+function buildClinePassSubscriptionModel(id2, references, liveCatalog) {
+  const curated = buildCuratedClinePassModel(id2, "subscription");
   if (curated)
     return curated;
-  const base = references.get(id) ?? buildClinePassFallbackModel(id);
-  const reference = resolveModelReference(id, getBundledModelReferenceIndex());
-  const upstream = reference && reference.provider !== "cline-pass" ? reference : undefined;
+  const base = references.get(id2) ?? buildClinePassFallbackModel(id2);
+  const reference2 = resolveModelReference(id2, getBundledModelReferenceIndex());
+  const upstream = reference2 && reference2.provider !== "cline-pass" ? reference2 : undefined;
   const baseLimitsAreFallback = base.contextWindow === CLINEPASS_FALLBACK_CONTEXT_WINDOW && base.maxTokens === CLINEPASS_FALLBACK_MAX_TOKENS;
   if (upstream) {
-    return references.has(id) && !baseLimitsAreFallback ? { ...base, cost: upstream.cost } : {
+    return references.has(id2) && !baseLimitsAreFallback ? { ...base, cost: upstream.cost } : {
       ...base,
-      name: references.has(id) ? base.name : upstream.name,
+      name: references.has(id2) ? base.name : upstream.name,
       reasoning: upstream.reasoning,
       input: upstream.input,
       cost: upstream.cost,
@@ -19877,7 +19870,7 @@ function buildClinePassSubscriptionModel(id, references, liveCatalog) {
       ...upstream.reasoning ? {} : { thinking: undefined }
     };
   }
-  const live = liveCatalog?.bySlug.get(id);
+  const live = liveCatalog?.bySlug.get(id2);
   if (!live)
     return base;
   return {
@@ -19891,23 +19884,23 @@ function buildClinePassSubscriptionModel(id, references, liveCatalog) {
     ...live.reasoning === false ? { thinking: undefined } : {}
   };
 }
-function buildClinePassFreeModel(id, liveCatalog) {
-  const curated = buildCuratedClinePassModel(id, "free");
+function buildClinePassFreeModel(id2, liveCatalog) {
+  const curated = buildCuratedClinePassModel(id2, "free");
   if (curated)
     return curated;
-  const reference = resolveModelReference(id, getBundledModelReferenceIndex());
-  const upstream = reference && reference.provider !== "cline-pass" ? reference : undefined;
-  const live = liveCatalog?.byId.get(id) ?? liveCatalog?.bySlug.get(id.split("/").at(-1) ?? id);
-  const baseName = (upstream?.name ?? live?.name ?? id.split("/").at(-1) ?? id).replace(/\s*\(free\)\s*$/i, "").replace(/:free$/i, "").trim();
-  const fallback = buildClinePassFallbackModel(id);
-  const reasoning = upstream?.reasoning ?? live?.reasoning ?? fallback.reasoning;
+  const reference2 = resolveModelReference(id2, getBundledModelReferenceIndex());
+  const upstream = reference2 && reference2.provider !== "cline-pass" ? reference2 : undefined;
+  const live = liveCatalog?.byId.get(id2) ?? liveCatalog?.bySlug.get(id2.split("/").at(-1) ?? id2);
+  const baseName = (upstream?.name ?? live?.name ?? id2.split("/").at(-1) ?? id2).replace(/\s*\(free\)\s*$/i, "").replace(/:free$/i, "").trim();
+  const fallback2 = buildClinePassFallbackModel(id2);
+  const reasoning = upstream?.reasoning ?? live?.reasoning ?? fallback2.reasoning;
   return {
-    ...fallback,
-    name: `${baseName || id} (free)`,
+    ...fallback2,
+    name: `${baseName || id2} (free)`,
     reasoning,
-    input: upstream?.input ?? live?.input ?? fallback.input,
-    contextWindow: upstream?.contextWindow ?? live?.contextWindow ?? fallback.contextWindow,
-    maxTokens: upstream?.maxTokens ?? live?.maxTokens ?? fallback.maxTokens,
+    input: upstream?.input ?? live?.input ?? fallback2.input,
+    contextWindow: upstream?.contextWindow ?? live?.contextWindow ?? fallback2.contextWindow,
+    maxTokens: upstream?.maxTokens ?? live?.maxTokens ?? fallback2.maxTokens,
     ...reasoning ? {} : { thinking: undefined },
     compat: { supportsReasoningEffort: false, wireModelIdMode: "raw" }
   };
@@ -19933,11 +19926,11 @@ async function fetchClinePassModels(fetchImpl, references) {
     if (!wireId.startsWith("cline-pass/")) {
       continue;
     }
-    const id = toClinePassPublicModelId(wireId).trim();
-    if (!id) {
+    const id2 = toClinePassPublicModelId(wireId).trim();
+    if (!id2) {
       continue;
     }
-    models.set(id, buildClinePassSubscriptionModel(id, references, liveCatalog));
+    models.set(id2, buildClinePassSubscriptionModel(id2, references, liveCatalog));
   }
   if (models.size === 0) {
     throw new Error("ClinePass model catalog contains no valid model IDs");
@@ -19947,11 +19940,11 @@ async function fetchClinePassModels(fetchImpl, references) {
     if (!isRecord2(entry) || typeof entry.id !== "string") {
       continue;
     }
-    const id = entry.id.trim();
-    if (!id || id.startsWith("cline-pass/") || models.has(id)) {
+    const id2 = entry.id.trim();
+    if (!id2 || id2.startsWith("cline-pass/") || models.has(id2)) {
       continue;
     }
-    models.set(id, buildClinePassFreeModel(id, liveCatalog));
+    models.set(id2, buildClinePassFreeModel(id2, liveCatalog));
   }
   return [...models.values()];
 }
@@ -20061,10 +20054,10 @@ function openCodeBaseUrlForApi(api, basePath) {
 var OPENCODE_CACHE_MIGRATION_MODEL_IDS = ["glm-5.3-flash"];
 var OPENCODE_ZEN_CACHE_MIGRATION_MODEL_IDS = ["gemini-3.7-flash", "gemini-3.8-flash"];
 var OPENCODE_VARIANT_SUFFIXES = ["-contributor", "-free"];
-function openCodeBaseModelId(id) {
+function openCodeBaseModelId(id2) {
   for (const suffix of OPENCODE_VARIANT_SUFFIXES) {
-    if (id.endsWith(suffix) && id.length > suffix.length)
-      return id.slice(0, -suffix.length);
+    if (id2.endsWith(suffix) && id2.length > suffix.length)
+      return id2.slice(0, -suffix.length);
   }
   return null;
 }
@@ -20076,21 +20069,21 @@ function openCodeModelManagerOptions(providerId, config) {
   const discoveryBaseUrl = openCodeBaseUrlForApi("openai-completions", basePath);
   const references = createBundledReferenceMap(providerId);
   const siblingReferences = createBundledReferenceMap(providerId === "opencode-go" ? "opencode-zen" : "opencode-go");
-  const apiOverrides = (id) => {
-    const route = apiRouteFor(providerId, id)?.api;
+  const apiOverrides = (id2) => {
+    const route = apiRouteFor(providerId, id2)?.api;
     return route === "openai-completions" || route === "openai-responses" || route === "anthropic-messages" ? route : undefined;
   };
-  const fallbackApi = (id, base) => {
+  const fallbackApi = (id2, base) => {
     const hints = [
-      siblingReferences.get(id)?.api,
+      siblingReferences.get(id2)?.api,
       base ? references.get(base)?.api : undefined,
       base ? siblingReferences.get(base)?.api : undefined
     ];
     return hints.includes("openai-responses") ? "openai-responses" : undefined;
   };
-  const resolveApi = (id, defaultApi) => {
-    const base = openCodeBaseModelId(id);
-    return apiOverrides(id) ?? (base ? apiOverrides(base) : undefined) ?? references.get(id)?.api ?? fallbackApi(id, base) ?? defaultApi;
+  const resolveApi = (id2, defaultApi) => {
+    const base = openCodeBaseModelId(id2);
+    return apiOverrides(id2) ?? (base ? apiOverrides(base) : undefined) ?? references.get(id2)?.api ?? fallbackApi(id2, base) ?? defaultApi;
   };
   return {
     providerId,
@@ -20120,37 +20113,37 @@ function openCodeModelManagerOptions(providerId, config) {
         apiKey,
         headers: { "User-Agent": USER_AGENT, "x-opencode-session": getInstallId() },
         mapModel: (entry, defaults) => {
-          const reference = references.get(defaults.id);
-          const name = toModelName(entry.name, reference?.name ?? defaults.name);
+          const reference2 = references.get(defaults.id);
+          const name = toModelName(entry.name, reference2?.name ?? defaults.name);
           const api = resolveApi(defaults.id, defaults.api);
           const baseUrl = openCodeBaseUrlForApi(api, basePath);
           const lineage = museSparkLineageSpec(defaults.id);
           if (lineage) {
             return {
-              ...reference ?? defaults,
+              ...reference2 ?? defaults,
               id: defaults.id,
               name,
               api,
               provider: providerId,
               baseUrl,
               reasoning: true,
-              input: reference?.input ?? lineage.input,
-              thinking: reference?.thinking ?? lineage.thinking,
-              contextWindow: toPositiveNumber(entry.context_length, reference?.contextWindow ?? lineage.contextWindow),
-              maxTokens: toPositiveNumber(entry.max_completion_tokens, reference?.maxTokens ?? lineage.maxTokens)
+              input: reference2?.input ?? lineage.input,
+              thinking: reference2?.thinking ?? lineage.thinking,
+              contextWindow: toPositiveNumber(entry.context_length, reference2?.contextWindow ?? lineage.contextWindow),
+              maxTokens: toPositiveNumber(entry.max_completion_tokens, reference2?.maxTokens ?? lineage.maxTokens)
             };
           }
-          if (!reference) {
+          if (!reference2) {
             return { ...defaults, name, api, baseUrl };
           }
           return {
-            ...reference,
+            ...reference2,
             id: defaults.id,
             name,
             api,
             baseUrl,
-            contextWindow: toPositiveNumber(entry.context_length, reference.contextWindow),
-            maxTokens: toPositiveNumber(entry.max_completion_tokens, reference.maxTokens)
+            contextWindow: toPositiveNumber(entry.context_length, reference2.contextWindow),
+            maxTokens: toPositiveNumber(entry.max_completion_tokens, reference2.maxTokens)
           };
         },
         fetch: config?.fetch
@@ -20180,8 +20173,8 @@ function ollamaModelManagerOptions(config) {
         baseUrl,
         apiKey,
         mapModel: (entry, defaults) => {
-          const reference = references.get(defaults.id);
-          if (!reference) {
+          const reference2 = references.get(defaults.id);
+          if (!reference2) {
             return {
               ...defaults,
               name: toModelName(entry.name, defaults.name),
@@ -20189,7 +20182,7 @@ function ollamaModelManagerOptions(config) {
               maxTokens: OLLAMA_DEFAULT_MAX_TOKENS
             };
           }
-          return mapWithBundledReference(entry, defaults, reference);
+          return mapWithBundledReference(entry, defaults, reference2);
         },
         fetch: config?.fetch
       });
@@ -20256,8 +20249,8 @@ function openrouterModelManagerOptions(config) {
             return Array.isArray(params) && params.includes("tools");
           },
           mapModel: (entry, defaults, _context) => {
-            const reference = references.get(defaults.id);
-            const baseModel = mapWithBundledReference(entry, defaults, reference);
+            const reference2 = references.get(defaults.id);
+            const baseModel = mapWithBundledReference(entry, defaults, reference2);
             const pricing = isRecord2(entry.pricing) ? entry.pricing : undefined;
             const params = Array.isArray(entry.supported_parameters) ? entry.supported_parameters.filter((value) => typeof value === "string") : [];
             const thinking = mapOpenRouterThinking(entry);
@@ -20571,8 +20564,8 @@ function alibabaCodingPlanModelManagerOptions(config) {
     mapModel: mapWithBundledReference
   });
 }
-function isAlibabaTokenPlanChatModelId(id) {
-  const normalized = id.trim().toLowerCase();
+function isAlibabaTokenPlanChatModelId(id2) {
+  const normalized = id2.trim().toLowerCase();
   return normalized.length > 0 && !isExcludedModel("alibaba-token-plan", normalized);
 }
 function alibabaTokenPlanModelManagerOptions(config) {
@@ -20592,10 +20585,10 @@ function alibabaTokenPlanModelManagerOptions(config) {
         apiKey,
         filterModel: (_entry, model) => isAlibabaTokenPlanChatModelId(model.id),
         mapModel: (_entry, defaults) => {
-          const reference = staticModels.find((model) => model.id === defaults.id);
-          if (reference) {
+          const reference2 = staticModels.find((model) => model.id === defaults.id);
+          if (reference2) {
             return {
-              ...reference,
+              ...reference2,
               id: defaults.id,
               api: defaults.api,
               provider: defaults.provider,
@@ -20714,8 +20707,8 @@ function mapKimiApiFormat(protocol) {
   return;
 }
 var KIMI_CODE_DEFAULT_MAX_TOKENS = 32000;
-function kimiCodeMaxTokens(modelId, fallback = KIMI_CODE_DEFAULT_MAX_TOKENS) {
-  return modelLimitsFor("kimi-code", modelId.trim().toLowerCase())?.maxTokens ?? fallback;
+function kimiCodeMaxTokens(modelId, fallback2 = KIMI_CODE_DEFAULT_MAX_TOKENS) {
+  return modelLimitsFor("kimi-code", modelId.trim().toLowerCase())?.maxTokens ?? fallback2;
 }
 function kimiCodeModelManagerOptions(config) {
   const apiKey = config?.apiKey;
@@ -20733,8 +20726,8 @@ function kimiCodeModelManagerOptions(config) {
           "X-Msh-Platform": "kimi_cli"
         },
         mapModel: (entry, defaults, _context) => {
-          const id = defaults.id;
-          const reasoning = kimiSupportsReasoning(entry, id);
+          const id2 = defaults.id;
+          const reasoning = kimiSupportsReasoning(entry, id2);
           const thinking = reasoning ? mapKimiThinking(entry) : undefined;
           return {
             ...defaults,
@@ -20742,7 +20735,7 @@ function kimiCodeModelManagerOptions(config) {
             reasoning,
             input: entry.supports_image_in === true ? ["text", "image"] : ["text"],
             contextWindow: typeof entry.context_length === "number" ? entry.context_length : 262144,
-            maxTokens: kimiCodeMaxTokens(id),
+            maxTokens: kimiCodeMaxTokens(id2),
             thinking,
             compat: {
               thinkingFormat: thinking ? "kimi" : "zai",
@@ -20832,8 +20825,8 @@ function lmStudioModelManagerOptions(config) {
         baseUrl,
         apiKey,
         mapModel: (entry, defaults) => {
-          const reference = references.get(defaults.id);
-          return mapWithBundledReference(entry, defaults, reference);
+          const reference2 = references.get(defaults.id);
+          return mapWithBundledReference(entry, defaults, reference2);
         },
         fetch: config?.fetch
       });
@@ -20885,20 +20878,20 @@ function toSyntheticCostPerMillion(value) {
   }
   return Math.round(parsed * 1000000000000) / 1e6;
 }
-function resolveSyntheticCost(pricing, fallback) {
+function resolveSyntheticCost(pricing, fallback2) {
   if (!isRecord2(pricing)) {
-    return fallback;
+    return fallback2;
   }
   const input = toSyntheticCostPerMillion(pricing.prompt);
   const output = toSyntheticCostPerMillion(pricing.completion);
   if (input === undefined || output === undefined) {
-    return fallback;
+    return fallback2;
   }
   return {
     input,
     output,
-    cacheRead: toSyntheticCostPerMillion(pricing.input_cache_reads) ?? fallback.cacheRead,
-    cacheWrite: toSyntheticCostPerMillion(pricing.input_cache_writes) ?? fallback.cacheWrite
+    cacheRead: toSyntheticCostPerMillion(pricing.input_cache_reads) ?? fallback2.cacheRead,
+    cacheWrite: toSyntheticCostPerMillion(pricing.input_cache_writes) ?? fallback2.cacheWrite
   };
 }
 function syntheticModelManagerOptions(config) {
@@ -20916,26 +20909,26 @@ function syntheticModelManagerOptions(config) {
         apiKey,
         mapModel: (entry, defaults, _context) => {
           const record = entry;
-          const reference = references.get(defaults.id);
-          const referenceSupportsImage = reference?.input.includes("image") ?? false;
+          const reference2 = references.get(defaults.id);
+          const referenceSupportsImage = reference2?.input.includes("image") ?? false;
           const features = toSyntheticStringList(record.supported_features);
           const modalities = toSyntheticStringList(record.input_modalities);
           const wireEfforts = isRecord2(record.reasoning_parameters) ? toSyntheticStringList(record.reasoning_parameters.efforts) : [];
           const wireReasoning = features.includes("reasoning") || wireEfforts.length > 0;
           const thinking = resolveSyntheticThinking(wireEfforts);
           const namedTierCount = (thinking?.efforts.length ?? 0) - (wireEfforts.includes(SYNTHETIC_WIRE_EFFORT_NONE) ? 1 : 0);
-          const reasoning = wireReasoning && namedTierCount > 0 ? true : wireEfforts.length > 0 ? false : entry.supports_reasoning === true || (reference?.reasoning ?? false);
-          const base = reference ? { ...reference, id: defaults.id, baseUrl } : defaults;
+          const reasoning = wireReasoning && namedTierCount > 0 ? true : wireEfforts.length > 0 ? false : entry.supports_reasoning === true || (reference2?.reasoning ?? false);
+          const base = reference2 ? { ...reference2, id: defaults.id, baseUrl } : defaults;
           return {
             ...base,
-            name: toModelName(entry.name, reference?.name ?? defaults.name),
+            name: toModelName(entry.name, reference2?.name ?? defaults.name),
             reasoning,
             ...thinking ? { thinking } : {},
             input: modalities.length > 0 ? modalities.includes("image") ? ["text", "image"] : ["text"] : entry.supports_vision === true || referenceSupportsImage ? ["text", "image"] : ["text"],
-            ...record.supported_features !== undefined && !features.includes("tools") && reference?.supportsTools !== true ? { supportsTools: false } : reference?.supportsTools === false ? { supportsTools: false } : {},
+            ...record.supported_features !== undefined && !features.includes("tools") && reference2?.supportsTools !== true ? { supportsTools: false } : reference2?.supportsTools === false ? { supportsTools: false } : {},
             cost: resolveSyntheticCost(record.pricing, base.cost),
-            contextWindow: toPositiveNumber(entry.context_length, reference?.contextWindow ?? defaults.contextWindow),
-            maxTokens: toPositiveNumber(record.max_output_length ?? entry.max_tokens, reference?.maxTokens ?? SYNTHETIC_FALLBACK_MAX_TOKENS)
+            contextWindow: toPositiveNumber(entry.context_length, reference2?.contextWindow ?? defaults.contextWindow),
+            maxTokens: toPositiveNumber(record.max_output_length ?? entry.max_tokens, reference2?.maxTokens ?? SYNTHETIC_FALLBACK_MAX_TOKENS)
           };
         },
         fetch: config?.fetch
@@ -20949,8 +20942,8 @@ function veniceModelManagerOptions(config) {
     providerId: "venice",
     defaultBaseUrl: "https://api.venice.ai/api/v1",
     config,
-    mapModel: (entry, defaults, reference) => {
-      const model = mapWithBundledReference(entry, defaults, reference);
+    mapModel: (entry, defaults, reference2) => {
+      const model = mapWithBundledReference(entry, defaults, reference2);
       return {
         ...model,
         maxTokens: clampKimiK27CodeMaxTokens(defaults.id, model.maxTokens),
@@ -20975,7 +20968,7 @@ function basetenModelManagerOptions(config) {
     dynamicModelsAuthoritative: true,
     requireApiKey: true,
     dropCachedModelIdsOnStaticMismatch: BASETEN_CACHE_MIGRATION_MODEL_IDS,
-    mapModel: (entry, defaults, reference) => {
+    mapModel: (entry, defaults, reference2) => {
       const raw = entry;
       const features = Array.isArray(raw.supported_features) ? raw.supported_features : [];
       const modalities = Array.isArray(raw.input_modalities) ? raw.input_modalities : [];
@@ -20983,7 +20976,7 @@ function basetenModelManagerOptions(config) {
       const isSupportedBasetenReasoningModel = identity.class === "kimi" && identity.family === "k3" || isGlmReasoningIdentity("baseten", defaults.id, "5.2") || defaults.id === "openai/gpt-oss-120b" || isDeepseekV4Generation("baseten", defaults.id);
       const reasoning = isSupportedBasetenReasoningModel && (features.includes("reasoning") || features.includes("reasoning_effort"));
       const supportsTools = features.includes("tools") ? undefined : false;
-      const vision = modalities.includes("image") || (reference?.input.includes("image") ?? false);
+      const vision = modalities.includes("image") || (reference2?.input.includes("image") ?? false);
       const pricing = raw.pricing ?? {};
       const cost = {
         input: toPositiveNumber(pricing.prompt, 0) * 1e6,
@@ -20991,9 +20984,9 @@ function basetenModelManagerOptions(config) {
         cacheRead: toPositiveNumber(pricing.input_cache_read, 0) * 1e6,
         cacheWrite: 0
       };
-      const contextWindow = toPositiveNumber(raw.context_length, reference?.contextWindow ?? defaults.contextWindow);
-      const maxTokens = toPositiveNumber(raw.max_completion_tokens, reference?.maxTokens ?? defaults.maxTokens);
-      const baseModel = mapWithBundledReference(entry, defaults, reference);
+      const contextWindow = toPositiveNumber(raw.context_length, reference2?.contextWindow ?? defaults.contextWindow);
+      const maxTokens = toPositiveNumber(raw.max_completion_tokens, reference2?.maxTokens ?? defaults.maxTokens);
+      const baseModel = mapWithBundledReference(entry, defaults, reference2);
       return {
         ...baseModel,
         reasoning,
@@ -21017,13 +21010,13 @@ function coreWeaveModelManagerOptions(config) {
 }
 var META_MODEL_API_BASE_URL = getDefaultModelDiscoveryBaseUrl("meta");
 var META_MUSE_MODEL_BY_ID = Object.fromEntries(seedModels("meta").map((model) => [model.id, model]));
-function museSparkLineageSpec(id) {
-  const identity = classifyModel("meta", id, { lenient: true });
+function museSparkLineageSpec(id2) {
+  const identity = classifyModel("meta", id2, { lenient: true });
   if (identity.family !== "muse-spark" || identity.revision === undefined)
     return;
   const [major, minor, patch] = parseRevision(identity.revision) ?? [0, 0, 0];
-  const revision = patch === 0 ? `${major}.${minor}` : identity.revision;
-  const contributor = billingVariantPlain(id) !== undefined;
+  const revision2 = patch === 0 ? `${major}.${minor}` : identity.revision;
+  const contributor = billingVariantPlain(id2) !== undefined;
   let template;
   let templateRevision;
   for (const model of seedModels("meta")) {
@@ -21040,7 +21033,7 @@ function museSparkLineageSpec(id) {
   if (template === undefined)
     return;
   const { thinking: _reviewedLadder, ...lineage } = template;
-  return { ...lineage, id, name: contributor ? `Muse Spark ${revision} (C)` : `Muse Spark ${revision}` };
+  return { ...lineage, id: id2, name: contributor ? `Muse Spark ${revision2} (C)` : `Muse Spark ${revision2}` };
 }
 var BEDROCK_MANTLE_BASE_URL = "https://bedrock-mantle.{region}.api.aws/openai/v1";
 var BEDROCK_MANTLE_MODEL_BY_ID = Object.fromEntries(seedModels("bedrock-mantle").map((model) => [model.id, model]));
@@ -21071,14 +21064,14 @@ function metaModelManagerOptions(config) {
       config,
       requireApiKey: true,
       filterModel: (_entry, model) => !isExcludedModel("meta", model.id),
-      mapModel: (entry, defaults, reference) => mapWithBundledReference(entry, defaults, reference ?? META_MUSE_MODEL_BY_ID[defaults.id] ?? museSparkLineageSpec(defaults.id))
+      mapModel: (entry, defaults, reference2) => mapWithBundledReference(entry, defaults, reference2 ?? META_MUSE_MODEL_BY_ID[defaults.id] ?? museSparkLineageSpec(defaults.id))
     }),
     staticModels: seedModels("meta")
   };
 }
 var MUSE_CODE_MODEL_BY_ID = Object.fromEntries(seedModels("muse-code").map((model) => [model.id, model]));
-function museCodeLineageSpec(id) {
-  const model = museSparkLineageSpec(id);
+function museCodeLineageSpec(id2) {
+  const model = museSparkLineageSpec(id2);
   return model ? { ...model, provider: "muse-code" } : undefined;
 }
 function museCodeModelManagerOptions(config) {
@@ -21092,7 +21085,7 @@ function museCodeModelManagerOptions(config) {
       dynamicModelsAuthoritative: true,
       requireApiKey: true,
       filterModel: (_entry, model) => !isExcludedModel("muse-code", model.id),
-      mapModel: (entry, defaults, reference) => mapWithBundledReference(entry, defaults, reference ?? MUSE_CODE_MODEL_BY_ID[defaults.id] ?? museCodeLineageSpec(defaults.id))
+      mapModel: (entry, defaults, reference2) => mapWithBundledReference(entry, defaults, reference2 ?? MUSE_CODE_MODEL_BY_ID[defaults.id] ?? museCodeLineageSpec(defaults.id))
     }),
     cacheProviderId: resolveModelCacheProviderId("muse-code", {
       apiKey: config?.apiKey,
@@ -21109,13 +21102,13 @@ function moonshotModelManagerOptions(config) {
     defaultBaseUrl: Bun.env.MOONSHOT_BASE_URL ?? "https://api.moonshot.ai/v1",
     config,
     requireApiKey: true,
-    mapModel: (entry, defaults, reference) => {
-      const model = mapWithBundledReference(entry, defaults, reference);
-      const id = model.id.toLowerCase();
-      const identity = classifyModel("moonshot", id, { lenient: true });
-      if (!reference && identity.class === "kimi" && identity.family === "k3") {
+    mapModel: (entry, defaults, reference2) => {
+      const model = mapWithBundledReference(entry, defaults, reference2);
+      const id2 = model.id.toLowerCase();
+      const identity = classifyModel("moonshot", id2, { lenient: true });
+      if (!reference2 && identity.class === "kimi" && identity.family === "k3") {
         const isZeroCost = model.cost.input === 0 && model.cost.output === 0 && model.cost.cacheRead === 0;
-        const limits = modelLimitsFor("moonshot", id) ?? modelLimitsFor("moonshot", "kimi-k3");
+        const limits = modelLimitsFor("moonshot", id2) ?? modelLimitsFor("moonshot", "kimi-k3");
         return {
           ...model,
           reasoning: true,
@@ -21166,9 +21159,9 @@ function sakanaModelManagerOptions(config) {
         baseUrl,
         apiKey,
         mapModel: (entry, defaults) => {
-          const reference = references.get(defaults.id) ?? SAKANA_FUGU_STATIC_MODEL_BY_ID.get(defaults.id);
-          const model = mapWithBundledReference(entry, defaults, reference);
-          if (!reference && isSakanaFuguModelId(model.id)) {
+          const reference2 = references.get(defaults.id) ?? SAKANA_FUGU_STATIC_MODEL_BY_ID.get(defaults.id);
+          const model = mapWithBundledReference(entry, defaults, reference2);
+          if (!reference2 && isSakanaFuguModelId(model.id)) {
             return {
               ...model,
               reasoning: true,
@@ -21281,9 +21274,9 @@ function abliterationModelManagerOptions(config) {
         baseUrl,
         apiKey,
         mapModel: (entry, defaults) => {
-          const reference = references.get(defaults.id) ?? ABLITERATION_STATIC_MODEL_BY_ID.get(defaults.id);
-          const model = mapWithBundledReference(entry, defaults, reference);
-          return reference ? model : { ...model, reasoning: true };
+          const reference2 = references.get(defaults.id) ?? ABLITERATION_STATIC_MODEL_BY_ID.get(defaults.id);
+          const model = mapWithBundledReference(entry, defaults, reference2);
+          return reference2 ? model : { ...model, reasoning: true };
         },
         fetch: config?.fetch
       })
@@ -21291,8 +21284,8 @@ function abliterationModelManagerOptions(config) {
   };
 }
 var YOLO_AUTO_BASE_URL = "https://yolo-auto.com/v1";
-function mapYoloAutoModel(entry, defaults, reference) {
-  const model = mapWithBundledReference(entry, defaults, reference);
+function mapYoloAutoModel(entry, defaults, reference2) {
+  const model = mapWithBundledReference(entry, defaults, reference2);
   const efforts = parseWireEfforts(entry.thinking);
   const thinking = efforts.length > 0 ? {
     ...model.thinking,
@@ -21314,8 +21307,8 @@ function mapYoloAutoModel(entry, defaults, reference) {
 }
 function yoloAutoModelManagerOptions(config) {
   const references = new Map;
-  const bundled = createBundledReferenceMap("yolo-auto");
-  for (const model of bundled.values()) {
+  const bundled2 = createBundledReferenceMap("yolo-auto");
+  for (const model of bundled2.values()) {
     references.set(model.id, model);
   }
   for (const model of seedModels("yolo-auto")) {
@@ -21335,7 +21328,7 @@ function yoloAutoModelManagerOptions(config) {
       defaultBaseUrl: YOLO_AUTO_BASE_URL,
       config,
       requireApiKey: true,
-      mapModel: (entry, defaults, reference) => mapYoloAutoModel(entry, defaults, resolveReference(defaults.id) ?? reference),
+      mapModel: (entry, defaults, reference2) => mapYoloAutoModel(entry, defaults, resolveReference(defaults.id) ?? reference2),
       dynamicModelsAuthoritative: true
     })
   };
@@ -21345,8 +21338,8 @@ function mapStepfunThinking(entry) {
   const efforts = THINKING_EFFORTS.filter((effort) => advertised.includes(effort));
   return efforts.length === 0 ? undefined : { mode: "effort", efforts };
 }
-function isStepfunChatModelId(id) {
-  const normalized = id.trim().toLowerCase();
+function isStepfunChatModelId(id2) {
+  const normalized = id2.trim().toLowerCase();
   if (!normalized)
     return false;
   return !isExcludedModel("stepfun", normalized);
@@ -21359,9 +21352,9 @@ function stepfunModelManagerOptions(config) {
     config,
     requireApiKey: true,
     filterModel: (_entry, model) => isStepfunChatModelId(model.id),
-    mapModel: (entry, model, reference) => {
-      const mapped = mapWithBundledReference(entry, model, reference);
-      if (reference)
+    mapModel: (entry, model, reference2) => {
+      const mapped = mapWithBundledReference(entry, model, reference2);
+      if (reference2)
         return mapped;
       const thinking = mapStepfunThinking(entry);
       return thinking === undefined ? mapped : { ...mapped, reasoning: true, thinking };
@@ -21407,8 +21400,8 @@ function xiaomiModelManagerOptions(config) {
     apiKey,
     filterModel: (_entry, model) => !isExcludedModel(providerId, model.id),
     mapModel: (entry, defaults) => {
-      const reference = references.get(defaults.id);
-      const model = mapWithBundledReference(entry, defaults, reference);
+      const reference2 = references.get(defaults.id);
+      const model = mapWithBundledReference(entry, defaults, reference2);
       return {
         ...model,
         api: "openai-completions",
@@ -21469,8 +21462,8 @@ function normalizeLiteLLMManagementBaseUrl(baseUrl) {
   }
   try {
     const parsed = new URL(trimmed);
-    const path = parsed.pathname.replace(/\/+$/g, "");
-    parsed.pathname = path.endsWith("/v1") ? path.slice(0, -3) || "/" : path || "/";
+    const path2 = parsed.pathname.replace(/\/+$/g, "");
+    parsed.pathname = path2.endsWith("/v1") ? path2.slice(0, -3) || "/" : path2 || "/";
     const normalized = `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
     return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
   } catch {
@@ -21486,18 +21479,18 @@ function stripLiteLLMResellerUsageSuffix(name) {
   const cleaned = name.replace(LITELLM_RESELLER_USAGE_SUFFIX, "").trim();
   return cleaned.length > 0 ? cleaned : name;
 }
-function toLiteLLMDisplayName(modelName, referenceName, id) {
+function toLiteLLMDisplayName(modelName, referenceName, id2) {
   const cleanedModelName = modelName ? stripLiteLLMResellerUsageSuffix(modelName) : undefined;
-  if (cleanedModelName && cleanedModelName !== id) {
+  if (cleanedModelName && cleanedModelName !== id2) {
     return cleanedModelName;
   }
-  return referenceName ? stripLiteLLMResellerUsageSuffix(referenceName) : id;
+  return referenceName ? stripLiteLLMResellerUsageSuffix(referenceName) : id2;
 }
-function mapLiteLLMOpenAICompatibleModel(entry, defaults, reference) {
+function mapLiteLLMOpenAICompatibleModel(entry, defaults, reference2) {
   if (!isSelectableLiteLLMModelMode(entry.mode)) {
     return null;
   }
-  const model = mapWithBundledReference(entry, defaults, reference);
+  const model = mapWithBundledReference(entry, defaults, reference2);
   return {
     ...model,
     api: resolveLiteLLMApi(undefined, model.id),
@@ -21586,7 +21579,7 @@ function getLiteLLMProviders(entry) {
   });
   return providers.length > 0 ? providers : undefined;
 }
-function classifyLiteLLMApiRoute(entry, id) {
+function classifyLiteLLMApiRoute(entry, id2) {
   if (entry) {
     const providers = getLiteLLMProviders(entry);
     if (providers) {
@@ -21608,16 +21601,16 @@ function classifyLiteLLMApiRoute(entry, id) {
       return baseModel.slice(0, baseSeparator).toLowerCase() === "openai" ? "openai" : "other";
     }
   }
-  const modelId = id.toLowerCase().startsWith("openai/") ? id.slice("openai/".length) : id;
+  const modelId = id2.toLowerCase().startsWith("openai/") ? id2.slice("openai/".length) : id2;
   return isLikelyOpenAIResponsesModelId(modelId) ? "openai" : "unknown";
 }
-function resolveLiteLLMApi(entry, id, fallbackApi = "openai-completions") {
-  return classifyLiteLLMApiRoute(entry, id) === "openai" ? "openai-responses" : fallbackApi;
+function resolveLiteLLMApi(entry, id2, fallbackApi = "openai-completions") {
+  return classifyLiteLLMApiRoute(entry, id2) === "openai" ? "openai-responses" : fallbackApi;
 }
 function isLiteLLMUnusableSentinelPlaceholder(entry) {
   const modelGroup = toNonEmptyString(entry.model_group);
-  const id = toNonEmptyString(entry.id);
-  if ((modelGroup === undefined || LITELLM_UNUSABLE_SENTINEL_IDS[modelGroup] !== true) && (id === undefined || LITELLM_UNUSABLE_SENTINEL_IDS[id] !== true)) {
+  const id2 = toNonEmptyString(entry.id);
+  if ((modelGroup === undefined || LITELLM_UNUSABLE_SENTINEL_IDS[modelGroup] !== true) && (id2 === undefined || LITELLM_UNUSABLE_SENTINEL_IDS[id2] !== true)) {
     return false;
   }
   const providers = entry.providers;
@@ -21628,7 +21621,7 @@ function isLiteLLMUnusableSentinelPlaceholder(entry) {
   if (modelName && LITELLM_UNUSABLE_SENTINEL_IDS[modelName] !== true) {
     return false;
   }
-  if (id && LITELLM_UNUSABLE_SENTINEL_IDS[id] !== true) {
+  if (id2 && LITELLM_UNUSABLE_SENTINEL_IDS[id2] !== true) {
     return false;
   }
   const backendModel = toNonEmptyString(getLiteLLMParams(entry)?.model);
@@ -21651,20 +21644,20 @@ function mapLiteLLMRichEntry(entry, options, runtimeBaseUrl) {
   if (!isSelectableLiteLLMModelMode(getLiteLLMMetadataValue(entry, "mode")) || isLiteLLMUnusableSentinelPlaceholder(entry)) {
     return null;
   }
-  const id = getLiteLLMRichModelId(entry);
-  if (!id) {
+  const id2 = getLiteLLMRichModelId(entry);
+  if (!id2) {
     return null;
   }
-  const reference = options.referenceResolver?.(id);
+  const reference2 = options.referenceResolver?.(id2);
   const modelName = toNonEmptyString(entry.model_name);
-  const contextWindow = toPositiveNumber(getLiteLLMMetadataValue(entry, "max_input_tokens"), reference?.contextWindow ?? OPENAI_COMPAT_DISCOVERY_DEFAULT_CONTEXT_WINDOW);
-  const maxTokens = toPositiveNumber(getLiteLLMMetadataValue(entry, "max_output_tokens"), reference?.maxTokens ?? Math.min(contextWindow, OPENAI_COMPAT_DISCOVERY_DEFAULT_MAX_TOKENS));
+  const contextWindow = toPositiveNumber(getLiteLLMMetadataValue(entry, "max_input_tokens"), reference2?.contextWindow ?? OPENAI_COMPAT_DISCOVERY_DEFAULT_CONTEXT_WINDOW);
+  const maxTokens = toPositiveNumber(getLiteLLMMetadataValue(entry, "max_output_tokens"), reference2?.maxTokens ?? Math.min(contextWindow, OPENAI_COMPAT_DISCOVERY_DEFAULT_MAX_TOKENS));
   const supportsVision = getLiteLLMMetadataValue(entry, "supports_vision");
   const supportsReasoning = getLiteLLMMetadataValue(entry, "supports_reasoning");
   const supportedOpenAIParams = getSupportedOpenAIParams(entry);
   const supportsFunctionCalling = getLiteLLMMetadataValue(entry, "supports_function_calling");
-  const supportsTools = supportsFunctionCalling === true ? true : supportsFunctionCalling === false ? false : supportedOpenAIParams !== undefined ? supportedOpenAIParams.some((param) => ["tools", "tool_choice", "functions", "function_call"].includes(param)) : reference?.supportsTools;
-  const referenceCompat = reference?.compat;
+  const supportsTools = supportsFunctionCalling === true ? true : supportsFunctionCalling === false ? false : supportedOpenAIParams !== undefined ? supportedOpenAIParams.some((param) => ["tools", "tool_choice", "functions", "function_call"].includes(param)) : reference2?.supportsTools;
+  const referenceCompat = reference2?.compat;
   const compat = {
     supportsStore: false,
     supportsDeveloperRole: false,
@@ -21674,17 +21667,17 @@ function mapLiteLLMRichEntry(entry, options, runtimeBaseUrl) {
     ...supportsVision === true ? { stripImageInput: false } : {}
   };
   return {
-    id,
-    name: toLiteLLMDisplayName(modelName, reference?.name, id),
-    api: options.resolveApi?.(entry, id) ?? options.api,
+    id: id2,
+    name: toLiteLLMDisplayName(modelName, reference2?.name, id2),
+    api: options.resolveApi?.(entry, id2) ?? options.api,
     provider: options.provider,
     baseUrl: runtimeBaseUrl,
     contextWindow,
     maxTokens,
-    input: supportsVision === true ? ["text", "image"] : supportsVision === false ? ["text"] : reference?.input ?? ["text"],
-    reasoning: typeof supportsReasoning === "boolean" ? supportsReasoning : reference?.reasoning ?? false,
-    thinking: reference?.thinking,
-    cost: getLiteLLMCost(entry) ?? reference?.cost ?? UNKNOWN_PROXY_COST,
+    input: supportsVision === true ? ["text", "image"] : supportsVision === false ? ["text"] : reference2?.input ?? ["text"],
+    reasoning: typeof supportsReasoning === "boolean" ? supportsReasoning : reference2?.reasoning ?? false,
+    thinking: reference2?.thinking,
+    cost: getLiteLLMCost(entry) ?? reference2?.cost ?? UNKNOWN_PROXY_COST,
     ...supportsTools !== undefined ? { supportsTools } : {},
     compat
   };
@@ -21969,8 +21962,8 @@ function nanoGptModelManagerOptions(config) {
           baseUrl,
           apiKey,
           mapModel: (entry, defaults) => {
-            const reference = resolveReference(defaults.id);
-            const mapped = mapWithBundledReference(entry, defaults, reference);
+            const reference2 = resolveReference(defaults.id);
+            const mapped = mapWithBundledReference(entry, defaults, reference2);
             return { ...mapped, api: "openai-completions", provider: "nanogpt" };
           },
           filterModel: (_entry, model) => {
@@ -22067,8 +22060,8 @@ function isCopilotChatModel(entry) {
   if (!isRecord2(entry.capabilities)) {
     return true;
   }
-  const type = entry.capabilities.type;
-  return typeof type !== "string" || type === "chat";
+  const type3 = entry.capabilities.type;
+  return typeof type3 !== "string" || type3 === "chat";
 }
 function copilotTierCost(tier) {
   if (tier?.inputPrice === undefined || tier.outputPrice === undefined) {
@@ -22129,20 +22122,20 @@ function githubCopilotModelManagerOptions(config) {
             if (!isCopilotChatModel(entry)) {
               return null;
             }
-            const reference = resolveReference(defaults.id);
+            const reference2 = resolveReference(defaults.id);
             const copilotLimits = extractCopilotLimits(entry);
-            const contextWindow = toPositiveNumber(copilotLimits.maxContextWindowTokens, toPositiveNumber(entry.context_length, toPositiveNumber(copilotLimits.maxPromptTokens, reference?.contextWindow ?? defaults.contextWindow)));
-            const maxTokens = toPositiveNumber(copilotLimits.maxOutputTokens, toPositiveNumber(entry.max_completion_tokens, toPositiveNumber(copilotLimits.maxNonStreamingOutputTokens, reference?.maxTokens ?? defaults.maxTokens)));
-            const name = typeof entry.name === "string" && entry.name.trim().length > 0 ? entry.name : reference?.name ?? defaults.name;
+            const contextWindow = toPositiveNumber(copilotLimits.maxContextWindowTokens, toPositiveNumber(entry.context_length, toPositiveNumber(copilotLimits.maxPromptTokens, reference2?.contextWindow ?? defaults.contextWindow)));
+            const maxTokens = toPositiveNumber(copilotLimits.maxOutputTokens, toPositiveNumber(entry.max_completion_tokens, toPositiveNumber(copilotLimits.maxNonStreamingOutputTokens, reference2?.maxTokens ?? defaults.maxTokens)));
+            const name = typeof entry.name === "string" && entry.name.trim().length > 0 ? entry.name : reference2?.name ?? defaults.name;
             const api = inferCopilotApi(defaults.id);
             const supportsVision = extractCopilotSupportsVision(entry);
-            const input = supportsVision === true ? ["text", "image"] : supportsVision === false || !isPersonalGitHubCopilotBaseUrl(requestBaseUrl) ? ["text"] : reference?.input ?? defaults.input;
+            const input = supportsVision === true ? ["text", "image"] : supportsVision === false || !isPersonalGitHubCopilotBaseUrl(requestBaseUrl) ? ["text"] : reference2?.input ?? defaults.input;
             const tokenPrices = extractCopilotTokenPrices(entry);
             const defaultContextMax = tokenPrices.defaultTier?.contextMax;
             const defaultTierWindow = defaultContextMax !== undefined && defaultContextMax > 0 && contextWindow !== null && maxTokens !== null ? Math.min(contextWindow, defaultContextMax + maxTokens) : contextWindow;
-            const unreferencedIdentity = reference === undefined && api === "anthropic-messages" ? classifyModel("github-copilot", defaults.id, { lenient: true }) : undefined;
-            const base = reference ? {
-              ...reference,
+            const unreferencedIdentity = reference2 === undefined && api === "anthropic-messages" ? classifyModel("github-copilot", defaults.id, { lenient: true }) : undefined;
+            const base = reference2 ? {
+              ...reference2,
               api,
               provider: "github-copilot",
               baseUrl: requestBaseUrl,
@@ -22176,7 +22169,7 @@ function githubCopilotModelManagerOptions(config) {
                 }
               } : {}
             };
-            if (reference && reference.provider !== "github-copilot") {
+            if (reference2 && reference2.provider !== "github-copilot") {
               delete base.requestModelId;
               if (base.thinking) {
                 base.thinking = { ...base.thinking };
@@ -22233,8 +22226,8 @@ function anthropicModelManagerOptions(config) {
           headers: buildAnthropicDiscoveryHeaders(apiKey),
           mapModel: (entry, defaults, _context) => {
             const discoveredName = typeof entry.display_name === "string" ? entry.display_name : defaults.name;
-            const reference = references.get(defaults.id);
-            if (!reference) {
+            const reference2 = references.get(defaults.id);
+            if (!reference2) {
               return {
                 ...defaults,
                 name: discoveredName,
@@ -22242,7 +22235,7 @@ function anthropicModelManagerOptions(config) {
               };
             }
             return {
-              ...reference,
+              ...reference2,
               id: defaults.id,
               name: discoveredName,
               api: "anthropic-messages",
@@ -22379,19 +22372,19 @@ var BEDROCK_US_PREFIXES = [
   "meta.llama3-3",
   "meta.llama4"
 ];
-function bedrockCrossRegionId(id) {
-  if (BEDROCK_GLOBAL_PREFIXES.some((p) => id.startsWith(p)))
-    return `global.${id}`;
-  if (BEDROCK_US_PREFIXES.some((p) => id.startsWith(p)))
-    return `us.${id}`;
-  return id;
+function bedrockCrossRegionId(id2) {
+  if (BEDROCK_GLOBAL_PREFIXES.some((p) => id2.startsWith(p)))
+    return `global.${id2}`;
+  if (BEDROCK_US_PREFIXES.some((p) => id2.startsWith(p)))
+    return `us.${id2}`;
+  return id2;
 }
-function resolveApiByRules(modelId, raw, rules, fallback) {
+function resolveApiByRules(modelId, raw, rules, fallback2) {
   for (const rule of rules) {
     if (rule.matches(modelId, raw))
       return rule.resolved;
   }
-  return fallback;
+  return fallback2;
 }
 function createOpenCodeApiResolution(basePath, providerId) {
   const completionsBaseUrl = `${basePath}/v1`;
@@ -22488,8 +22481,8 @@ var MODELS_DEV_PROVIDER_DESCRIPTORS_BEDROCK = [
     providerId: "amazon-bedrock",
     api: "bedrock-converse-stream",
     baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
-    filterModel: (id, m) => {
-      return m.tool_call === true && !isExcludedModel("amazon-bedrock", id);
+    filterModel: (id2, m) => {
+      return m.tool_call === true && !isExcludedModel("amazon-bedrock", id2);
     },
     transformModel: (model, modelId, m) => {
       const crossRegionId = bedrockCrossRegionId(modelId);
@@ -22556,10 +22549,10 @@ function isDeepseekV4Generation(providerId, modelId) {
 }
 var MODELS_DEV_PROVIDER_DESCRIPTORS_CORE = [
   anthropicMessagesDescriptor("anthropic", "anthropic", "https://api.anthropic.com", {
-    filterModel: (id, m) => {
+    filterModel: (id2, m) => {
       if (m.tool_call !== true)
         return false;
-      return !isExcludedModel("anthropic", id);
+      return !isExcludedModel("anthropic", id2);
     }
   }),
   simpleModelsDevDescriptor("google", "google", "google-generative-ai", "https://generativelanguage.googleapis.com/v1beta"),
@@ -22568,12 +22561,12 @@ var MODELS_DEV_PROVIDER_DESCRIPTORS_CORE = [
   openAiCompletionsDescriptor("cerebras", "cerebras", "https://api.cerebras.ai/v1"),
   openAiCompletionsDescriptor("cline-pass", "cline-pass", "https://api.cline.bot/api/v1", {
     transformModel: (model, modelId, raw) => {
-      const id = toClinePassPublicModelId(modelId);
-      const metadata = getClinePassModelMetadata(id);
+      const id2 = toClinePassPublicModelId(modelId);
+      const metadata = getClinePassModelMetadata(id2);
       if (metadata) {
         return {
           ...model,
-          id,
+          id: id2,
           name: metadata.name,
           contextWindow: metadata.contextWindow,
           maxTokens: metadata.maxTokens,
@@ -22586,8 +22579,8 @@ var MODELS_DEV_PROVIDER_DESCRIPTORS_CORE = [
       }
       return {
         ...model,
-        id,
-        name: id,
+        id: id2,
+        name: id2,
         thinking: model.reasoning ? buildClinePassThinking(raw, model) : undefined
       };
     }
@@ -22608,7 +22601,7 @@ var MODELS_DEV_PROVIDER_DESCRIPTORS_CORE = [
     transformModel: (model) => applyXaiResponsesThinkingPolicy(model)
   }),
   openAiCompletionsDescriptor("deepseek", "deepseek", "https://api.deepseek.com", {
-    filterModel: (id, m) => m.tool_call === true && isDeepseekV4Generation("deepseek", id),
+    filterModel: (id2, m) => m.tool_call === true && isDeepseekV4Generation("deepseek", id2),
     compat: {
       supportsDeveloperRole: false,
       supportsReasoningEffort: true,
@@ -22971,8 +22964,8 @@ function cursorModelManagerOptions(config = {}) {
     cacheProviderId: resolveModelCacheProviderId("cursor"),
     ...apiKey ? {
       fetchDynamicModels: async () => {
-        const { fetchCursorUsableModels } = await cursorDiscovery();
-        return fetchCursorUsableModels({ apiKey, baseUrl, clientVersion });
+        const { fetchCursorUsableModels: fetchCursorUsableModels2 } = await cursorDiscovery();
+        return fetchCursorUsableModels2({ apiKey, baseUrl, clientVersion });
       }
     } : undefined
   };
@@ -23001,8 +22994,8 @@ function gitLabDuoWorkflowModelCacheProviderId(apiKey, config) {
   const namespaceId = config.namespaceId ?? Bun.env.GITLAB_DUO_NAMESPACE_ID ?? "";
   const projectId = config.projectId ?? Bun.env.GITLAB_DUO_PROJECT_ID ?? Bun.env.GITLAB_DUO_PROJECT_PATH ?? "";
   const cwd = config.cwd ?? process.cwd();
-  const scope = [config.baseUrl ?? "", namespaceId, projectId, cwd].join("\x00");
-  return `gitlab-duo-agent:${Bun.hash(`${apiKey}\x00${scope}`).toString(36)}`;
+  const scope2 = [config.baseUrl ?? "", namespaceId, projectId, cwd].join("\x00");
+  return `gitlab-duo-agent:${Bun.hash(`${apiKey}\x00${scope2}`).toString(36)}`;
 }
 function devinModelManagerOptions(config = {}) {
   const { apiKey, baseUrl, fetch: fetch2 } = config;
@@ -23014,8 +23007,8 @@ function devinModelManagerOptions(config = {}) {
     ...apiKey ? { dynamicModelsAuthoritative: true } : undefined,
     ...apiKey ? {
       fetchDynamicModels: async () => {
-        const { fetchDevinModels } = await devinDiscovery();
-        return fetchDevinModels({ apiKey, baseUrl, fetch: fetch2 });
+        const { fetchDevinModels: fetchDevinModels2 } = await devinDiscovery();
+        return fetchDevinModels2({ apiKey, baseUrl, fetch: fetch2 });
       }
     } : undefined
   };
@@ -23133,8 +23126,8 @@ var MODEL_MANAGER_FACTORIES = {
   zenmux: (config) => zenmuxModelManagerOptions(config),
   "zhipu-coding-plan": (config) => zhipuCodingPlanModelManagerOptions(config)
 };
-function isKnownProvider(id) {
-  return providerEntry(id) !== undefined;
+function isKnownProvider(id2) {
+  return providerEntry(id2) !== undefined;
 }
 var PROVIDER_DESCRIPTORS = Object.values(providerEntries()).flatMap((entry) => {
   const createModelManagerOptions = isKnownProvider(entry.id) ? MODEL_MANAGER_FACTORIES[entry.id] : undefined;
@@ -23364,11 +23357,11 @@ async function fetchPlexusModelConfigs(apiKey) {
   if (!key || !modelsUrl || !baseUrl)
     return [];
   const { models: apiModels } = await fetchPlexusModels(key, modelsUrl);
-  const descriptors = convertDescriptors(apiModels, baseUrl, getSuppressedModels());
-  const models = descriptors.map(descriptorToOhMyPiModel);
-  currentModels = [...models];
+  const descriptors2 = convertDescriptors(apiModels, baseUrl, getSuppressedModels());
+  const models2 = descriptors2.map(descriptorToOhMyPiModel);
+  currentModels = [...models2];
   catalogSource = "live refresh";
-  return models;
+  return models2;
 }
 async function doRefresh(pi, apiKey, ctx) {
   const modelsUrl = getModelsUrl();
@@ -23389,8 +23382,8 @@ async function doRefresh(pi, apiKey, ctx) {
     }
     const { models: apiModels } = await fetchPlexusModels(resolvedApiKey, modelsUrl);
     const suppressPatterns = getSuppressedModels();
-    const descriptors = convertDescriptors(apiModels, baseUrl, suppressPatterns);
-    const ohMyPiModels = descriptors.map(descriptorToOhMyPiModel);
+    const descriptors2 = convertDescriptors(apiModels, baseUrl, suppressPatterns);
+    const ohMyPiModels = descriptors2.map(descriptorToOhMyPiModel);
     currentModels = ohMyPiModels;
     catalogSource = "live refresh";
     pi.registerProvider(PROVIDER_NAME, {

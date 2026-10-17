@@ -78,6 +78,11 @@ import {
 	ServiceTierPolicySchema,
 	ServiceTiersPublisher,
 } from "./service-tiers.ts";
+import {
+	type ShortNameEntry,
+	ShortNameEntrySchema,
+	ShortNamesPublisher,
+} from "./short-names.ts";
 
 const PROVIDER_NAME = "plexus";
 const PLEXUS_CREDENTIAL_EXPIRES_AT = 253_402_300_799_000;
@@ -96,6 +101,9 @@ type StoredServiceTiersMetadata = {
 type ServiceTierBearingModel = ProviderModelConfig & {
 	plexusServiceTiers?: StoredServiceTiersMetadata;
 };
+type ShortNameBearingModel = ProviderModelConfig & {
+	plexusShortName?: string;
+};
 
 /**
  * Mutable state of one extension instance (one pi session). Created inside
@@ -108,6 +116,7 @@ interface PlexusInstanceState {
 	refreshSequence: number;
 	contextPolicies: ContextPolicyPublisher | undefined;
 	serviceTiers: ServiceTiersPublisher | undefined;
+	shortNames: ShortNamesPublisher | undefined;
 	policy: PolicyController | undefined;
 	/** This session's active model, from its own session/model events only. */
 	activeModel: Model<Api> | undefined;
@@ -496,12 +505,14 @@ export function createPolicyHost(deps: {
 export default function plexusExtension(pi: ExtensionAPI): void {
 	const contextPolicies = new ContextPolicyPublisher(pi.events);
 	const serviceTiers = new ServiceTiersPublisher(pi.events);
+	const shortNames = new ShortNamesPublisher(pi.events);
 	const state: PlexusInstanceState = {
 		models: [],
 		catalogSource: "none",
 		refreshSequence: 0,
 		contextPolicies,
 		serviceTiers,
+		shortNames,
 		policy: undefined,
 		activeModel: undefined,
 		registry: undefined,
@@ -544,11 +555,13 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", () => {
 		contextPolicies.dispose();
 		serviceTiers.dispose();
+		shortNames.dispose();
 		policy.dispose();
 		modelsControl.dispose();
 		if (state.contextPolicies === contextPolicies)
 			state.contextPolicies = undefined;
 		if (state.serviceTiers === serviceTiers) state.serviceTiers = undefined;
+		if (state.shortNames === shortNames) state.shortNames = undefined;
 		if (state.policy === policy) state.policy = undefined;
 	});
 
@@ -593,6 +606,12 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 					}
 				: { cached: true, reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON },
 		);
+		shortNames.setCatalog("ready", collectStoredShortNames(startupModels), {
+			cached: true,
+			...(storedCatalog.checkedAt
+				? { fetchedAt: storedCatalog.checkedAt }
+				: {}),
+		});
 	}
 	void policy.reconcile();
 
@@ -764,6 +783,11 @@ async function refreshPlexusModels(
 									reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON,
 								},
 					);
+					state.shortNames?.setCatalog(
+						"ready",
+						collectStoredShortNames(filteredCurrent),
+						{ cached: true },
+					);
 					void state.policy?.reconcile();
 				},
 			});
@@ -776,6 +800,14 @@ async function refreshPlexusModels(
 			state.serviceTiers?.getSnapshot().status === "loading"
 		) {
 			state.serviceTiers.setCatalog("unavailable", [], {
+				reason: "Plexus model metadata is not configured.",
+			});
+		}
+		if (
+			refreshId === state.refreshSequence &&
+			state.shortNames?.getSnapshot().status === "loading"
+		) {
+			state.shortNames.setCatalog("unavailable", [], {
 				reason: "Plexus model metadata is not configured.",
 			});
 		}
@@ -798,7 +830,9 @@ async function refreshPlexusModels(
 
 		const descriptors = convertDescriptors(apiModels, baseUrl, suppress);
 		const piModels = descriptors.map(descriptorToPiModel) as Array<
-			ContextPolicyBearingModel & ServiceTierBearingModel
+			ContextPolicyBearingModel &
+				ServiceTierBearingModel &
+				ShortNameBearingModel
 		>;
 		const eligibleIds = new Set(piModels.map((model) => model.id));
 		for (const model of apiModels) {
@@ -811,9 +845,16 @@ async function refreshPlexusModels(
 				policy: serviceTierPolicyFromApiModel(model),
 				fetchedAt,
 			};
+			// Reconcile against the raw wire value so the persisted prop is
+			// always schema-valid, even if the descriptor path carried something
+			// the snapshot schema rejects.
+			const shortName = shortNameEntryFromApiModel(model);
+			if (shortName) piModel.plexusShortName = shortName.shortName;
+			else delete piModel.plexusShortName;
 		}
 		const committedPolicies = collectStoredContextPolicies(piModels);
 		const committedServiceTiers = collectStoredServiceTiers(piModels).policies;
+		const committedShortNames = collectStoredShortNames(piModels);
 
 		// pi publishes the returned list in memory but does not persist it —
 		// persistence is provider-owned via generation-checked publish().
@@ -826,6 +867,9 @@ async function refreshPlexusModels(
 				state.models = piModels;
 				state.catalogSource = "live refresh";
 				state.serviceTiers?.setCatalog("ready", committedServiceTiers, {
+					fetchedAt,
+				});
+				state.shortNames?.setCatalog("ready", committedShortNames, {
 					fetchedAt,
 				});
 				state.contextPolicies?.setCatalog(
@@ -858,6 +902,14 @@ async function refreshPlexusModels(
 			state.serviceTiers?.getSnapshot().status === "loading"
 		) {
 			state.serviceTiers.setCatalog("unavailable", [], {
+				reason: "Plexus model metadata could not be loaded.",
+			});
+		}
+		if (
+			refreshId === state.refreshSequence &&
+			state.shortNames?.getSnapshot().status === "loading"
+		) {
+			state.shortNames.setCatalog("unavailable", [], {
 				reason: "Plexus model metadata could not be loaded.",
 			});
 		}
@@ -906,6 +958,9 @@ async function restoreStoredModels(
 							reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON,
 						},
 			);
+			state.shortNames?.setCatalog("ready", collectStoredShortNames(models), {
+				cached: true,
+			});
 			void state.policy?.reconcile();
 		},
 	});
@@ -961,6 +1016,35 @@ export function serviceTierPolicyFromApiModel(
 	};
 	const parsed = ServiceTierPolicySchema.safeParse(candidate);
 	return parsed.success ? parsed.data : undefined;
+}
+
+export function shortNameEntryFromApiModel(
+	model: PlexusApiModel,
+): ShortNameEntry | undefined {
+	const shortName =
+		typeof model.short_name === "string" ? model.short_name.trim() : "";
+	if (!shortName) return undefined;
+	const parsed = ShortNameEntrySchema.safeParse({
+		provider: PROVIDER_NAME,
+		modelId: model.id,
+		shortName,
+	});
+	return parsed.success ? parsed.data : undefined;
+}
+
+function collectStoredShortNames(
+	models: readonly ProviderModelConfig[],
+): ShortNameEntry[] {
+	return models.flatMap((model) => {
+		const shortName = (model as ShortNameBearingModel).plexusShortName;
+		if (typeof shortName !== "string" || !shortName.trim()) return [];
+		const parsed = ShortNameEntrySchema.safeParse({
+			provider: PROVIDER_NAME,
+			modelId: model.id,
+			shortName: shortName.trim(),
+		});
+		return parsed.success ? [parsed.data] : [];
+	});
 }
 
 function collectStoredServiceTiers(models: readonly ProviderModelConfig[]): {
