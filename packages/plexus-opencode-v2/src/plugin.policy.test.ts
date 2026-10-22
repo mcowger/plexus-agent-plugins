@@ -208,7 +208,9 @@ function createHarness(opts: {
 
 /** Fresh plugin module per test: isolates module-level refresh state. */
 let importCounter = 0;
-async function loadPlugin(): Promise<typeof import("./plugin.ts")["default"]> {
+async function loadPlugin(): Promise<
+	(typeof import("./plugin.ts"))["default"]
+> {
 	importCounter++;
 	return (await import(`./plugin.ts?policy-test=${importCounter}`)).default;
 }

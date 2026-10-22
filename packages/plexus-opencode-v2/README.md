@@ -8,8 +8,8 @@ Add the plugin to `~/.config/opencode/opencode.jsonc` (or a project-level `openc
 
 ```jsonc
 {
-  "plugins": ["@mcowger/opencode-plexus"]
-  // or: ["file:///home/you/code/plexus-agent-plugins/packages/plexus-opencode-v2"]
+	"plugins": ["@mcowger/opencode-plexus"],
+	// or: ["file:///home/you/code/plexus-agent-plugins/packages/plexus-opencode-v2"]
 }
 ```
 
@@ -31,15 +31,15 @@ Set `apiKeyEnv` in the plugin's `options` block to select a differently named en
 
 ```jsonc
 {
-  "plugins": [
-    {
-      "package": "@mcowger/opencode-plexus",
-      "options": {
-        "plexusBaseURL": "https://plexus.example.com",
-        "apiKeyEnv": "AIHOME_OPENCODE_API_KEY"
-      }
-    }
-  ]
+	"plugins": [
+		{
+			"package": "@mcowger/opencode-plexus",
+			"options": {
+				"plexusBaseURL": "https://plexus.example.com",
+				"apiKeyEnv": "AIHOME_OPENCODE_API_KEY",
+			},
+		},
+	],
 }
 ```
 
@@ -51,8 +51,8 @@ export AIHOME_OPENCODE_API_KEY=...
 
 ### API key precedence
 
-| `apiKeyEnv` omitted (default) | `apiKeyEnv` set |
-|---|---|
+| `apiKeyEnv` omitted (default)                                           | `apiKeyEnv` set                                                                                                                    |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `PLEXUS_API_KEY` → saved `/connect` credential → plugin `apiKey` option | only the named environment variable; authoritative over `PLEXUS_API_KEY`, the saved `/connect` credential, and the `apiKey` option |
 
 An explicit `apiKeyEnv` is authoritative even if it names `PLEXUS_API_KEY`. To restore the default chain, remove the option.

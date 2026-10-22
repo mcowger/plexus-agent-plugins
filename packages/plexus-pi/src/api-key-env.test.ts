@@ -237,7 +237,7 @@ describe("apiKeyEnv precedence", () => {
 describe("apiKeyEnv provider registration", () => {
 	test("registers the default PLEXUS_API_KEY template when omitted", () => {
 		process.env.PLEXUS_API_KEY = "default-key";
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: intentional ${VAR} template literal under test
+		// intentional ${VAR} template literal under test
 		expect(captureProvider().apiKey).toBe("${PLEXUS_API_KEY}");
 	});
 

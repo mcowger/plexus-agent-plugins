@@ -299,9 +299,7 @@ export function formatContextStatus(
 // ---------------------------------------------------------------------------
 
 export type TierCommand =
-	| { kind: "status" }
-	| { kind: "clear" }
-	| { kind: "select"; tier: string };
+	{ kind: "status" } | { kind: "clear" } | { kind: "select"; tier: string };
 
 export type ContextCommand =
 	| { kind: "status" }
@@ -349,9 +347,7 @@ interface SessionEntry {
 }
 
 export type ReconcileChangeKind =
-	| "tier-cleared"
-	| "context-reset-max"
-	| "short-lowered";
+	"tier-cleared" | "context-reset-max" | "short-lowered";
 
 export interface SessionReconcileChange {
 	sessionID: string;

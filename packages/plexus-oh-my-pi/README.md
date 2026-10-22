@@ -37,8 +37,8 @@ By default the extension registers `PLEXUS_API_KEY` as a native config-key overr
 
 ```json
 {
-  "baseUrl": "https://plexus.example.com",
-  "apiKeyEnv": "AIHOME_OMP_API_KEY"
+	"baseUrl": "https://plexus.example.com",
+	"apiKeyEnv": "AIHOME_OMP_API_KEY"
 }
 ```
 
@@ -51,8 +51,8 @@ omp
 
 ### API key precedence
 
-| `apiKeyEnv` omitted (default) | `apiKeyEnv` set |
-|---|---|
+| `apiKeyEnv` omitted (default)                               | `apiKeyEnv` set                                                                                    |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | registered `PLEXUS_API_KEY` env override → host credentials | only the named environment variable; authoritative over the stored credential and `PLEXUS_API_KEY` |
 
 An explicit `apiKeyEnv` is authoritative even when it names `PLEXUS_API_KEY`. Saved credentials remain stored; remove `apiKeyEnv` to restore the default precedence.

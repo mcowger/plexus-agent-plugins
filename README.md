@@ -4,10 +4,10 @@ Exposes models from a self-hosted [Plexus](https://github.com/mcowger/plexus) AI
 
 ## Supported agents
 
-| Package | Agent | npm |
-|---|---|---|
-| `plexus-pi` | [pi](https://github.com/earendil-works/pi) | `@mcowger/pi-plexus` |
-| `plexus-oh-my-pi` | [Oh My Pi](https://github.com/can1357/oh-my-pi) | `@mcowger/oh-my-pi-plexus` |
+| Package              | Agent                                                | npm                        |
+| -------------------- | ---------------------------------------------------- | -------------------------- |
+| `plexus-pi`          | [pi](https://github.com/earendil-works/pi)           | `@mcowger/pi-plexus`       |
+| `plexus-oh-my-pi`    | [Oh My Pi](https://github.com/can1357/oh-my-pi)      | `@mcowger/oh-my-pi-plexus` |
 | `plexus-opencode-v2` | [OpenCode](https://github.com/anomalyco/opencode) V2 | `@mcowger/opencode-plexus` |
 
 ## Prerequisites
@@ -47,9 +47,7 @@ Then register the path in `~/.pi/agent/settings.json`:
 
 ```json
 {
-  "extensions": [
-    "~/code/plexus-agent-plugins/packages/plexus-pi"
-  ]
+	"extensions": ["~/code/plexus-agent-plugins/packages/plexus-pi"]
 }
 ```
 
@@ -82,9 +80,7 @@ Then register the path in `~/.omp/agent/settings.json`:
 
 ```json
 {
-  "extensions": [
-    "~/code/plexus-agent-plugins/packages/plexus-oh-my-pi"
-  ]
+	"extensions": ["~/code/plexus-agent-plugins/packages/plexus-oh-my-pi"]
 }
 ```
 
@@ -94,8 +90,8 @@ Add the plugin to `~/.config/opencode/opencode.jsonc`, either from npm or from a
 
 ```jsonc
 {
-  "plugins": ["@mcowger/opencode-plexus"]
-  // or: ["file:///home/you/code/plexus-agent-plugins/packages/plexus-opencode-v2"]
+	"plugins": ["@mcowger/opencode-plexus"],
+	// or: ["file:///home/you/code/plexus-agent-plugins/packages/plexus-opencode-v2"]
 }
 ```
 
@@ -200,8 +196,8 @@ For Pi, edit `~/.pi/agent/extensions/plexus/config.json` (or `<agent-dir>/extens
 
 ```json
 {
-  "baseUrl": "https://plexus.example.com",
-  "apiKeyEnv": "AIHOME_PI_API_KEY"
+	"baseUrl": "https://plexus.example.com",
+	"apiKeyEnv": "AIHOME_PI_API_KEY"
 }
 ```
 
@@ -209,8 +205,8 @@ For OMP, edit `~/.omp/agent/extensions/plexus/config.json` (under the active pro
 
 ```json
 {
-  "baseUrl": "https://plexus.example.com",
-  "apiKeyEnv": "AIHOME_OMP_API_KEY"
+	"baseUrl": "https://plexus.example.com",
+	"apiKeyEnv": "AIHOME_OMP_API_KEY"
 }
 ```
 
@@ -218,15 +214,15 @@ For OpenCode V2, put `apiKeyEnv` in the plugin's `options` in `~/.config/opencod
 
 ```jsonc
 {
-  "plugins": [
-    {
-      "package": "@mcowger/opencode-plexus",
-      "options": {
-        "plexusBaseURL": "https://plexus.example.com",
-        "apiKeyEnv": "AIHOME_OPENCODE_API_KEY"
-      }
-    }
-  ]
+	"plugins": [
+		{
+			"package": "@mcowger/opencode-plexus",
+			"options": {
+				"plexusBaseURL": "https://plexus.example.com",
+				"apiKeyEnv": "AIHOME_OPENCODE_API_KEY",
+			},
+		},
+	],
 }
 ```
 
@@ -234,10 +230,10 @@ Set the named variable in the process environment that launches the client. Rest
 
 Credential precedence:
 
-| Client | `apiKeyEnv` omitted | `apiKeyEnv` explicitly set |
-|---|---|---|
-| Pi | Saved host credential, then `PLEXUS_API_KEY` fallback | Only the named environment variable, ahead of saved credentials |
-| OMP | Registered `PLEXUS_API_KEY` env override, then host credentials | Only the named environment variable, ahead of saved credentials |
+| Client      | `apiKeyEnv` omitted                                                             | `apiKeyEnv` explicitly set                                                        |
+| ----------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Pi          | Saved host credential, then `PLEXUS_API_KEY` fallback                           | Only the named environment variable, ahead of saved credentials                   |
+| OMP         | Registered `PLEXUS_API_KEY` env override, then host credentials                 | Only the named environment variable, ahead of saved credentials                   |
 | OpenCode V2 | `PLEXUS_API_KEY`, then saved `/connect` credential, then plugin `apiKey` option | Only the named environment variable, ahead of both saved credentials and `apiKey` |
 
 An explicit setting is authoritative even when it names `PLEXUS_API_KEY`. If the selected variable is missing, empty, or whitespace-only, the plugin reports an error naming the variable without showing its value. It does not fall back to a saved key, OpenCode's `apiKey` option, or the shared `PLEXUS_API_KEY`. Saved credentials remain stored; remove `apiKeyEnv` to restore the default precedence.
@@ -268,16 +264,18 @@ All plugin packages support suppressing models by name or pattern so undesired m
 ### Configuration methods
 
 - **Environment variables**:
+
   ```sh
   export PLEXUS_SUPPRESS_MODELS="gpt-3.5*, *deprecated*, whisper"
   ```
+
   `PLEXUS_EXCLUDE_MODELS` is also accepted. Values can be comma-, semicolon-, or newline-separated.
 
 - **pi / Oh My Pi config**: Add `suppressModels` (or `suppress`) to `config.json`:
   ```json
   {
-    "baseUrl": "https://plexus.example.com",
-    "suppressModels": ["gpt-3.5*", "*deprecated*"]
+  	"baseUrl": "https://plexus.example.com",
+  	"suppressModels": ["gpt-3.5*", "*deprecated*"]
   }
   ```
 
@@ -324,16 +322,16 @@ packages/
 
 The `/v1/models` endpoint returns an OpenRouter-style list. These fields drive host behavior:
 
-| Field | Effect |
-|---|---|
-| `preferred_api` | String or array. First recognized value selects the host API dialect. |
-| `supported_parameters` | `reasoning`, `include_reasoning`, or `reasoning_effort` enables reasoning support. |
-| `architecture.input_modalities` | Enables text/image/audio/video/pdf support where the host supports it. |
-| `pricing` | Converted into host per-million-token cost metadata. Plexus returns per-token prices. |
-| `pricing.tiers` | Alternate rates above `input_tokens_above`; mapped to native pi context pricing tiers. |
-| `top_provider` | Supplies context and output token limits when present. |
-| `pi_provider` / `pi_model` | Lets the pi adapter reuse built-in pi compat, headers, and thinking-level metadata. |
-| `pi_options` | pi compat overrides. These win over heuristic and built-in metadata. |
+| Field                           | Effect                                                                                 |
+| ------------------------------- | -------------------------------------------------------------------------------------- |
+| `preferred_api`                 | String or array. First recognized value selects the host API dialect.                  |
+| `supported_parameters`          | `reasoning`, `include_reasoning`, or `reasoning_effort` enables reasoning support.     |
+| `architecture.input_modalities` | Enables text/image/audio/video/pdf support where the host supports it.                 |
+| `pricing`                       | Converted into host per-million-token cost metadata. Plexus returns per-token prices.  |
+| `pricing.tiers`                 | Alternate rates above `input_tokens_above`; mapped to native pi context pricing tiers. |
+| `top_provider`                  | Supplies context and output token limits when present.                                 |
+| `pi_provider` / `pi_model`      | Lets the pi adapter reuse built-in pi compat, headers, and thinking-level metadata.    |
+| `pi_options`                    | pi compat overrides. These win over heuristic and built-in metadata.                   |
 
 Models with a falsy `id` are skipped. Missing metadata falls back to safe defaults.
 

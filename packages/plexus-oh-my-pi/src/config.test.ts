@@ -68,12 +68,12 @@ test("builds Plexus endpoints once before model dialect adjustment", () => {
 });
 
 describe("oh-my-pi config template resolution", () => {
-	// biome-ignore lint/suspicious/noTemplateCurlyInString: intentional ${VAR} template literal under test
+	// intentional ${VAR} template literal under test
 	test("matches pi-style $VAR and ${VAR} interpolation", () => {
 		process.env.PLEXUS_TEST_HOST = "https://plexus.example.com";
 		process.env.PLEXUS_TEST_KEY = "secret";
 
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: intentional ${VAR} template literal under test
+		// intentional ${VAR} template literal under test
 		expect(resolveConfigTemplate("${PLEXUS_TEST_HOST}/v1")).toBe(
 			"https://plexus.example.com/v1",
 		);
@@ -84,7 +84,7 @@ describe("oh-my-pi config template resolution", () => {
 	test("returns undefined when a referenced env var is missing", () => {
 		delete process.env.PLEXUS_MISSING_VAR;
 
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: intentional ${VAR} template literal under test
+		// intentional ${VAR} template literal under test
 		expect(resolveConfigTemplate("${PLEXUS_MISSING_VAR}")).toBeUndefined();
 	});
 

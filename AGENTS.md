@@ -25,10 +25,10 @@ packages/
 
 Current host packages:
 
-| Package | Agent | Published as |
-|---|---|---|
-| `plexus-pi` | [pi](https://github.com/earendil-works/pi) | `@mcowger/pi-plexus` |
-| `plexus-oh-my-pi` | [Oh My Pi](https://github.com/can1357/oh-my-pi) | `@mcowger/oh-my-pi-plexus` |
+| Package              | Agent                                                | Published as               |
+| -------------------- | ---------------------------------------------------- | -------------------------- |
+| `plexus-pi`          | [pi](https://github.com/earendil-works/pi)           | `@mcowger/pi-plexus`       |
+| `plexus-oh-my-pi`    | [Oh My Pi](https://github.com/can1357/oh-my-pi)      | `@mcowger/oh-my-pi-plexus` |
 | `plexus-opencode-v2` | [OpenCode](https://github.com/anomalyco/opencode) V2 | `@mcowger/opencode-plexus` |
 
 `plexus-oh-my-pi` is a fork-specific adapter, not a variant of `plexus-pi`. Oh My Pi is a fork of pi and ships a legacy-extension compat shim, but its native extension surface has diverged enough that a shared package would be fragile long-term:
@@ -51,6 +51,25 @@ Keep `plexus-pi` and `plexus-oh-my-pi` as separate packages so a change in eithe
 - Both adapters recognize `PLEXUS_API_URL` and `PLEXUS_BASE_URL` for the Plexus URL; `PLEXUS_API_URL` wins when both are set. Both recognize `PLEXUS_API_KEY` for the API key.
 - Configured string values may use pi-style `$VAR` or `${VAR}` interpolation. Missing referenced env vars make that config value unavailable rather than treating the template literally.
 
+## Toolchain
+
+Bun 1.4.4 is the only toolchain: package manager, bundler, test runner, and
+formatter. Do not add Node-based or Biome-based tooling.
+
+```sh
+bun install          # also installs the lefthook pre-commit hook
+bun test             # bun:test, all host packages
+bun run format       # bun fmt (writes)
+bun run format:check # bun fmt --check (CI-safe, exits 1 on drift)
+bun run build        # bundles all host packages
+```
+
+Formatter options live in `bunfig.toml` (`[fmt]`): tabs, 80 columns,
+semicolons, Prettier output style. `dist/` and `packages/deprecated/` are
+excluded there. Node appears in exactly one place — the publish workflow's
+`actions/setup-node` step, which is required for npm OIDC trusted publishing and
+provenance (bun cannot do either yet).
+
 ## Build
 
 ```sh
@@ -59,7 +78,7 @@ bun run build
 
 This bundles both host packages. Each `build.ts` produces a single output file that inlines `plexus-models` and keeps the host framework and `node:*` external.
 
-`dist/` artifacts are committed. A lefthook pre-commit hook runs the build automatically whenever source files under any `packages/*/src/` are staged. Run `bun install` once after cloning to install the hook.
+`dist/` artifacts are committed. A lefthook pre-commit hook runs `bun fmt --staged` and the build automatically whenever matching files are staged. Run `bun install` once after cloning to install the hook.
 
 ## Release and publishing
 
@@ -135,12 +154,12 @@ pi's `ModelRuntime` (v0.84.0+, the adapter's minimum) runs discovery through the
 
 The `/v1/models` endpoint returns an OpenRouter-style list. Key fields that drive behavior:
 
-| Field | Effect |
-|---|---|
-| `preferred_api` | String or array. First recognized value maps to the canonical API dialect (`openai-completions`, `anthropic-messages`, `google-generative-ai`, `openai-responses`) |
-| `supported_parameters` | Presence of `reasoning`, `include_reasoning`, or `reasoning_effort` sets `reasoning: true` |
-| `pricing.tiers` | Alternate per-token rates above `input_tokens_above`; mapped to pi `cost.tiers` |
-| `pi_provider` / `pi_model` | Stored as `piProvider` / `piModel`; pi uses them for built-in model metadata lookup and better compat heuristics |
-| `pi_options` | Compat overrides that take precedence over heuristic and built-in detection (pi adapter only) |
+| Field                      | Effect                                                                                                                                                             |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `preferred_api`            | String or array. First recognized value maps to the canonical API dialect (`openai-completions`, `anthropic-messages`, `google-generative-ai`, `openai-responses`) |
+| `supported_parameters`     | Presence of `reasoning`, `include_reasoning`, or `reasoning_effort` sets `reasoning: true`                                                                         |
+| `pricing.tiers`            | Alternate per-token rates above `input_tokens_above`; mapped to pi `cost.tiers`                                                                                    |
+| `pi_provider` / `pi_model` | Stored as `piProvider` / `piModel`; pi uses them for built-in model metadata lookup and better compat heuristics                                                   |
+| `pi_options`               | Compat overrides that take precedence over heuristic and built-in detection (pi adapter only)                                                                      |
 
 Models with a falsy `id` are silently skipped. Missing `architecture` or `pricing` fields fall back to safe defaults.

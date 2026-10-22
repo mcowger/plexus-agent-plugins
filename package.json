@@ -2,6 +2,7 @@
 	"name": "plexus-agent-plugins",
 	"version": "1.14.0",
 	"type": "module",
+	"packageManager": "bun@1.4.4",
 	"private": true,
 	"workspaces": [
 		"packages/plexus-models",
@@ -12,6 +13,8 @@
 	"scripts": {
 		"build": "bun run --cwd packages/plexus-pi build.ts && bun run --cwd packages/plexus-oh-my-pi build.ts && bun run --cwd packages/plexus-opencode-v2 build.ts",
 		"test": "bun test --isolate packages/plexus-models/src packages/plexus-pi/src packages/plexus-oh-my-pi/src packages/plexus-opencode-v2/src",
+		"format": "bun fmt",
+		"format:check": "bun fmt --check",
 		"postinstall": "command -v lefthook >/dev/null 2>&1 && lefthook install || true",
 		"sync-versions": "bun scripts/sync-versions.ts",
 		"release": "bun scripts/release.ts",
@@ -21,7 +24,6 @@
 		"code:review:commit": "cora review --commit HEAD --severity major"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.5.15",
 		"@types/bun": "latest",
 		"lefthook": "latest"
 	},

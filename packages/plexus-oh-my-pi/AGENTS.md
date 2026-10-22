@@ -6,7 +6,7 @@
 the install. The validator (`packages/coding-agent/src/extensibility/plugins/legacy-pi-compat.ts`
 in the `oh-my-pi` repo, see `collectExtensionModules`) statically walks the
 extension's import graph to install hot-reload hooks. Bare imports from the
-extension's *own* entry file are followed one hop into the target package's
+extension's _own_ entry file are followed one hop into the target package's
 source tree, and — critically — relative imports inside that target package
 keep being walked indefinitely (bare imports inside it are not followed
 further, but relative ones are).
@@ -45,7 +45,7 @@ runtime.
   built-in model metadata enrichment) — this one has no equivalent on the
   `ExtensionAPI` surface exposed to `pi`, so it's a genuine build-time-only
   dependency. **Do not list it in `build.ts`'s `external` array.** Let `bun
-  build` inline it (and its `arktype`/`zod` dependency chain) directly into
+build` inline it (and its `arktype`/`zod` dependency chain) directly into
   `dist/extension.js`, so no `@oh-my-pi/pi-catalog` or `arktype` bare
   specifier survives in the bundle for the OMP loader to trip over. It stays
   a `devDependency` only (no `peerDependencies` entry) since it's never

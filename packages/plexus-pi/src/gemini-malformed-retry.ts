@@ -160,7 +160,7 @@ export function normalizeMalformedFunctionCall<T extends AssistantMessageLike>(
 	const via = hasLeakedFunctionCall(message.content)
 		? "leak"
 		: typeof message.errorMessage === "string" &&
-				MALFORMED_DIAGNOSTIC_PATTERN.test(message.errorMessage)
+			  MALFORMED_DIAGNOSTIC_PATTERN.test(message.errorMessage)
 			? "diagnostic"
 			: undefined;
 	if (!via) return undefined;

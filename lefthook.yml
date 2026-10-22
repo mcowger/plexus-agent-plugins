@@ -1,5 +1,11 @@
 pre-commit:
   commands:
+    format:
+      glob: "*.{ts,tsx,js,jsx,json,md,yaml,yml,toml}"
+      exclude:
+        - "packages/*/dist/*"
+        - "packages/deprecated/*"
+      run: bun fmt --staged
     build:
       glob: "packages/{plexus-models,plexus-pi,plexus-oh-my-pi,plexus-opencode-v2}/src/*.ts"
       run: bun run build && git add packages/plexus-pi/dist/extension.js packages/plexus-oh-my-pi/dist/extension.js packages/plexus-opencode-v2/dist/index.js

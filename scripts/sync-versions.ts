@@ -19,7 +19,8 @@ const PACKAGES = [
 	"packages/plexus-opencode-v2",
 ];
 
-const readJson = async (path: string) => JSON.parse(await Bun.file(path).text());
+const readJson = async (path: string) =>
+	JSON.parse(await Bun.file(path).text());
 const writeJson = async (path: string, obj: unknown) =>
 	Bun.write(path, JSON.stringify(obj, null, "\t") + "\n");
 

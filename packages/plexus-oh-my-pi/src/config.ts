@@ -192,10 +192,7 @@ export async function saveBaseUrl(baseUrl: string): Promise<void> {
 }
 
 export type BaseUrlSource =
-	| "PLEXUS_API_URL"
-	| "PLEXUS_BASE_URL"
-	| "saved"
-	| "none";
+	"PLEXUS_API_URL" | "PLEXUS_BASE_URL" | "saved" | "none";
 
 export function getBaseUrlResolution(): {
 	baseUrl: string | null;

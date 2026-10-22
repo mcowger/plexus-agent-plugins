@@ -81,11 +81,9 @@ async function resolveConnectionCredential(
 			credential: {
 				key: resolved.key,
 				metadata: (resolved.metadata ?? undefined) as
-					| Record<string, unknown>
-					| undefined,
+					Record<string, unknown> | undefined,
 				configuration: (resolved.configuration ?? undefined) as
-					| Record<string, string | number | boolean | string[]>
-					| undefined,
+					Record<string, string | number | boolean | string[]> | undefined,
 			},
 		};
 	} catch (e) {

@@ -17,13 +17,13 @@ afterEach(() => {
 });
 
 describe("resolveConfigTemplate", () => {
-	// biome-ignore lint/suspicious/noTemplateCurlyInString: intentional ${VAR} template literal under test
+	// intentional ${VAR} template literal under test
 	test("expands $VAR and ${VAR}, missing vars void the value", () => {
 		process.env.PLEXUS_V2_TEST_URL = "https://plexus.example.com";
 		expect(resolveConfigTemplate("$PLEXUS_V2_TEST_URL/v1")).toBe(
 			"https://plexus.example.com/v1",
 		);
-		// biome-ignore lint/suspicious/noTemplateCurlyInString: intentional ${VAR} template literal under test
+		// intentional ${VAR} template literal under test
 		expect(resolveConfigTemplate("${PLEXUS_V2_TEST_URL}")).toBe(
 			"https://plexus.example.com",
 		);

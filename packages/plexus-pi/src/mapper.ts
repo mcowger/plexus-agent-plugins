@@ -74,8 +74,7 @@ export function descriptorToPiModel(descriptor: PlexusModelDescriptor) {
 		);
 		// pi_options override heuristics — the Plexus server knows best
 		const builtinCompat = builtinModel?.compat as
-			| Record<string, unknown>
-			| undefined;
+			Record<string, unknown> | undefined;
 		const merged = {
 			...heuristic,
 			...(builtinCompat ?? {}),

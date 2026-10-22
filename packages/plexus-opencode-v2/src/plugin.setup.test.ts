@@ -40,10 +40,12 @@ mock.module("./cache.ts", () => ({
 
 const originalFetch = globalThis.fetch;
 const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
-let fetchImpl: (input: string, init?: RequestInit) => Promise<Response> =
-	async () => {
-		throw new Error("unexpected fetch");
-	};
+let fetchImpl: (
+	input: string,
+	init?: RequestInit,
+) => Promise<Response> = async () => {
+	throw new Error("unexpected fetch");
+};
 
 function jsonResponse(body: unknown, init?: ResponseInit): Response {
 	return new Response(JSON.stringify(body), {
@@ -204,7 +206,7 @@ function createHarness(options: Record<string, unknown>): {
 // Setup / teardown
 // ---------------------------------------------------------------------------
 
-let plugin: typeof import("./plugin.ts")["default"];
+let plugin: (typeof import("./plugin.ts"))["default"];
 
 const MANAGED_ENV = [
 	"PLUGIN_V2_TEST_KEY",
