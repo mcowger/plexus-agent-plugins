@@ -6,12 +6,7 @@
 	"files": [
 		"dist/extension.js",
 		"package.json",
-		"README.md",
-		"context-policy.md",
-		"service-tiers.md",
-		"short-names.md",
-		"policy-control.md",
-		"models-control.md"
+		"README.md"
 	],
 	"keywords": [
 		"plexus",

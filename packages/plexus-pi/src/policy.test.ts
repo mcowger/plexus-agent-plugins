@@ -2,46 +2,16 @@ import { describe, expect, test } from "bun:test";
 import {
 	effectiveContextWindow,
 	injectServiceTier,
-	POLICY_SET_CHANNEL,
-	POLICY_STATE_CHANNEL,
 	type PolicyAdvertisement,
 	PolicyController,
 	type PolicyHost,
-	PolicySetSchema,
-	PolicyStateSchema,
+	type PolicyModel,
 	policyAvailability,
 } from "./policy.ts";
 
-function expectDefined<T>(value: T | undefined): T {
-	if (value === undefined) throw new Error("expected an emitted value");
-	return value;
-}
-
-function bus() {
-	const listeners = new Map<string, Set<(data: unknown) => unknown>>();
-	const emitted: Array<{ channel: string; data: Record<string, unknown> }> = [];
-	return {
-		emitted,
-		listenerCount: (channel: string) => listeners.get(channel)?.size ?? 0,
-		on(channel: string, handler: (data: unknown) => unknown) {
-			const set = listeners.get(channel) ?? new Set();
-			set.add(handler);
-			listeners.set(channel, set);
-			return () => set.delete(handler);
-		},
-		emit(channel: string, data: unknown) {
-			emitted.push({ channel, data: data as Record<string, unknown> });
-		},
-		async dispatch(channel: string, data: unknown) {
-			for (const handler of [...(listeners.get(channel) ?? [])])
-				await handler(data);
-		},
-	};
-}
-
 function makeHost(
 	options: {
-		model?: { provider: string; id: string };
+		model?: PolicyModel;
 		advertisement?: PolicyAdvertisement;
 		catalogWindow?: number;
 		applies?: boolean;
@@ -49,27 +19,28 @@ function makeHost(
 ) {
 	let model = options.model;
 	let advertisement = options.advertisement;
-	let effectiveWindow = options.catalogWindow;
 	let applies = options.applies ?? true;
+	let window = options.catalogWindow;
 	const calls: Array<{
-		model: { provider: string; id: string };
+		model: PolicyModel;
 		contextWindow: number | undefined;
 	}> = [];
 	const host: PolicyHost = {
 		getActiveModel: () => model,
 		getAdvertisement: () => advertisement,
-		getEffectiveContextWindow: () => effectiveWindow,
+		getCatalogContextWindow: () => options.catalogWindow,
+		hasCatalogContextPolicy: () => advertisement?.context !== undefined,
 		async applyContextWindow(requested, contextWindow) {
 			calls.push({ model: requested, contextWindow });
 			if (!applies) return undefined;
-			effectiveWindow = contextWindow ?? options.catalogWindow;
-			return effectiveWindow;
+			window = contextWindow ?? options.catalogWindow;
+			return window;
 		},
 	};
 	return {
 		host,
 		calls,
-		setModel: (next: { provider: string; id: string } | undefined) => {
+		setModel: (next: PolicyModel | undefined) => {
 			model = next;
 		},
 		setAdvertisement: (next: PolicyAdvertisement | undefined) => {
@@ -90,14 +61,7 @@ const advertisement: PolicyAdvertisement = {
 		serviceTiers: ["standard", "priority"],
 	},
 };
-
-async function setup(options?: Parameters<typeof makeHost>[0]) {
-	const events = bus();
-	const state = makeHost(options);
-	const controller = new PolicyController(events, state.host);
-	await controller.reconcile();
-	return { events, state, controller };
-}
+const m1 = { provider: "plexus", id: "m1" };
 
 describe("policy helpers", () => {
 	test("derives availability and effective windows from the advertisement", () => {
@@ -119,12 +83,7 @@ describe("policy helpers", () => {
 				},
 			}),
 		).toEqual({ longContext: false, serviceTier: false });
-		expect(
-			effectiveContextWindow(advertisement, {
-				longContext: true,
-				serviceTier: null,
-			}),
-		).toBe(1_000);
+
 		expect(
 			effectiveContextWindow(advertisement, {
 				longContext: false,
@@ -132,396 +91,161 @@ describe("policy helpers", () => {
 			}),
 		).toBe(200);
 		expect(
-			effectiveContextWindow(undefined, {
-				longContext: false,
+			effectiveContextWindow(advertisement, {
+				longContext: true,
 				serviceTier: null,
 			}),
-		).toBeUndefined();
+		).toBe(1_000);
+		expect(
+			effectiveContextWindow(undefined, {
+				longContext: true,
+				serviceTier: null,
+			}),
+		).toBe(undefined);
 	});
 
 	test("injects service_tier without mutating or fabricating payloads", () => {
-		const payload = { model: "x" };
+		const payload = { model: "m1" };
 		expect(injectServiceTier(payload, "priority")).toEqual({
-			model: "x",
+			model: "m1",
 			service_tier: "priority",
 		});
-		expect(payload).toEqual({ model: "x" });
+		expect(payload).toEqual({ model: "m1" });
 		expect(injectServiceTier(payload, null)).toBe(payload);
-		expect(injectServiceTier(payload, undefined)).toBe(payload);
-		expect(injectServiceTier("nope", "priority")).toBe("nope");
+		expect(injectServiceTier([], "priority")).toEqual([]);
 	});
 });
 
-describe("policy state publication", () => {
-	test("reconciles the active model, applies the default maximum, and broadcasts", async () => {
-		const { events, controller } = await setup({
-			model: { provider: "plexus", id: "m1" },
-			advertisement,
-			catalogWindow: 1_000,
+describe("terminal default", () => {
+	test("applies the maximum budget and injects no tier without a resolver", async () => {
+		const state = makeHost({ model: m1, advertisement });
+		const controller = new PolicyController(state.host);
+		await controller.reconcile();
+		expect(state.calls.at(-1)?.contextWindow).toBe(1_000);
+		expect(controller.getView().selection).toEqual({
+			longContext: true,
+			serviceTier: null,
 		});
-		expect(controller.getState()).toMatchObject({
-			available: { longContext: true, serviceTier: true },
-			applied: { longContext: true, serviceTier: null, contextWindow: 1_000 },
-		});
-		expect(events.emitted.at(-1)).toMatchObject({
-			channel: POLICY_STATE_CHANNEL,
-		});
-		expect(events.emitted.at(-1)?.data.requestId).toBeUndefined();
-		expect(Object.isFrozen(controller.getState())).toBe(true);
-		expect(Object.isFrozen(controller.getState().applied)).toBe(true);
-		controller.dispose();
+		expect(controller.serviceTierFor(m1)).toBeNull();
 	});
+});
 
-	test("applies an advertised tier and short budget, correlating the reply and broadcasting the change", async () => {
-		const { events, controller, state } = await setup({
-			model: { provider: "plexus", id: "m1" },
-			advertisement,
-			catalogWindow: 1_000,
+describe("resolver-driven selection", () => {
+	test("applies the short budget and an advertised tier, and notifies subscribers", async () => {
+		const state = makeHost({ model: m1, advertisement });
+		const controller = new PolicyController(state.host);
+		let notified = 0;
+		controller.subscribe(() => {
+			notified += 1;
 		});
-		const revision = controller.getState().revision;
-		await events.dispatch(POLICY_SET_CHANNEL, {
-			version: 1,
-			requestId: "r1",
+		controller.setResolver(() => ({
 			longContext: false,
 			serviceTier: "priority",
+		}));
+		await controller.reconcile();
+		expect(state.calls.at(-1)?.contextWindow).toBe(200);
+		expect(controller.getView()).toMatchObject({
+			contextWindow: 200,
+			applyFailed: false,
+			selection: { longContext: false, serviceTier: "priority" },
 		});
-		expect(controller.getState()).toMatchObject({
-			revision: revision + 1,
-			applied: {
-				longContext: false,
-				serviceTier: "priority",
-				contextWindow: 200,
-			},
-		});
-		expect(controller.serviceTierFor({ provider: "plexus", id: "m1" })).toBe(
-			"priority",
-		);
+		expect(controller.serviceTierFor(m1)).toBe("priority");
 		expect(
 			controller.serviceTierFor({ provider: "plexus", id: "other" }),
 		).toBeNull();
-		expect(controller.serviceTierFor(undefined)).toBeNull();
-		expect(state.calls.at(-1)).toEqual({
-			model: { provider: "plexus", id: "m1" },
-			contextWindow: 200,
-		});
-		const reply = expectDefined(events.emitted.at(-1));
-		const broadcast = expectDefined(events.emitted.at(-2));
-		expect(reply.channel).toBe(POLICY_STATE_CHANNEL);
-		expect(reply.data).toMatchObject({
-			requestId: "r1",
-			revision: revision + 1,
-			applied: {
-				longContext: false,
-				serviceTier: "priority",
-				contextWindow: 200,
-			},
-		});
-		expect(broadcast.data.requestId).toBeUndefined();
-		controller.dispose();
+		expect(notified).toBe(1);
 	});
 
-	test("a correlated reply for an unchanged selection does not advance the revision", async () => {
-		const { events, controller } = await setup({
-			model: { provider: "plexus", id: "m1" },
-			advertisement,
-			catalogWindow: 1_000,
-		});
-		await events.dispatch(POLICY_SET_CHANNEL, {
-			version: 1,
-			requestId: "a",
-			longContext: false,
-		});
-		const revision = controller.getState().revision;
-		const emits = events.emitted.length;
-		await events.dispatch(POLICY_SET_CHANNEL, {
-			version: 1,
-			requestId: "b",
-			longContext: false,
-		});
-		expect(controller.getState().revision).toBe(revision);
-		expect(events.emitted.length).toBe(emits + 1);
-		expect(events.emitted.at(-1)?.data).toMatchObject({
-			requestId: "b",
-			revision,
-		});
-		controller.dispose();
+	test("drops a tier that is not advertised for the model", async () => {
+		const state = makeHost({ model: m1, advertisement });
+		const controller = new PolicyController(state.host);
+		controller.setResolver(() => ({ longContext: true, serviceTier: "flex" }));
+		await controller.reconcile();
+		expect(controller.getView().selection.serviceTier).toBeNull();
+		expect(controller.serviceTierFor(m1)).toBeNull();
 	});
 
-	test("rejects unadvertised selections with no partial application", async () => {
-		const { events, controller } = await setup({
-			model: { provider: "plexus", id: "m1" },
-			advertisement,
-			catalogWindow: 1_000,
-		});
-		await events.dispatch(POLICY_SET_CHANNEL, {
-			version: 1,
-			requestId: "setup",
-			longContext: false,
-			serviceTier: "priority",
-		});
-		const revision = controller.getState().revision;
-		await events.dispatch(POLICY_SET_CHANNEL, {
-			version: 1,
-			requestId: "bad",
-			longContext: true,
-			serviceTier: "unadvertised",
-		});
-		expect(controller.getState()).toMatchObject({
-			revision,
-			applied: {
-				longContext: false,
-				serviceTier: "priority",
-				contextWindow: 200,
-			},
-		});
-		expect(events.emitted.at(-1)?.data).toMatchObject({
-			requestId: "bad",
-			revision,
-		});
-		expect(typeof events.emitted.at(-1)?.data.reason).toBe("string");
-		controller.dispose();
-	});
-
-	test("rejects a context mode when the short and maximum budgets are not distinct", async () => {
-		const { events, controller, state } = await setup({
-			model: { provider: "plexus", id: "m1" },
-			advertisement,
-			catalogWindow: 1_000,
-		});
-		state.setAdvertisement({
+	test("never applies a short budget for a model without a distinct budget", async () => {
+		const equal = {
 			context: {
-				provider: "plexus",
-				modelId: "m1",
-				maxContextTokens: 1_000,
+				...context,
 				shortContextBudgetTokens: 1_000,
+				provider: "plexus",
+				modelId: "m1",
 			},
-			serviceTier: advertisement.serviceTier,
-		});
+		};
+		const state = makeHost({ model: m1, advertisement: equal });
+		const controller = new PolicyController(state.host);
+		controller.setResolver(() => ({ longContext: false, serviceTier: null }));
 		await controller.reconcile();
-		expect(controller.getState().available.longContext).toBe(false);
-		const revision = controller.getState().revision;
-		await events.dispatch(POLICY_SET_CHANNEL, {
-			version: 1,
-			requestId: "flat",
-			longContext: false,
+		expect(controller.getView()).toMatchObject({
+			contextWindow: 1_000,
+			selection: { longContext: false },
 		});
-		expect(controller.getState().revision).toBe(revision);
-		expect(typeof events.emitted.at(-1)?.data.reason).toBe("string");
-		controller.dispose();
 	});
 
-	test("reports unavailable, with a reason and no revision change, when no qualifying policy exists", async () => {
-		const { events, controller } = await setup({
-			model: { provider: "plexus", id: "m1" },
-			catalogWindow: 1_000,
-		});
-		expect(controller.getState()).toMatchObject({
-			available: { longContext: false, serviceTier: false },
-		});
-		expect(typeof controller.getState().reason).toBe("string");
-		const revision = controller.getState().revision;
-		await events.dispatch(POLICY_SET_CHANNEL, {
-			version: 1,
-			requestId: "none",
-			serviceTier: "priority",
-		});
-		expect(controller.getState().revision).toBe(revision);
-		expect(events.emitted.at(-1)?.data).toMatchObject({
-			requestId: "none",
-			revision,
-			available: { longContext: false, serviceTier: false },
-		});
-		expect(typeof events.emitted.at(-1)?.data.reason).toBe("string");
-		controller.dispose();
-	});
+	test("keeps the previous budget and reports a failed application", async () => {
+		const state = makeHost({ model: m1, advertisement });
+		const controller = new PolicyController(state.host);
+		controller.setResolver(() => ({ longContext: true, serviceTier: null }));
+		await controller.reconcile();
+		expect(controller.getView().selection.longContext).toBe(true);
 
-	test("rejects without changing state when the context window cannot be applied", async () => {
-		const { events, controller, state } = await setup({
-			model: { provider: "plexus", id: "m1" },
-			advertisement,
-			catalogWindow: 1_000,
-		});
 		state.setApplies(false);
-		const revision = controller.getState().revision;
-		await events.dispatch(POLICY_SET_CHANNEL, {
-			version: 1,
-			requestId: "fail",
-			longContext: false,
+		controller.setResolver(() => ({ longContext: false, serviceTier: null }));
+		await controller.reconcile();
+		expect(controller.getView()).toMatchObject({
+			applyFailed: true,
+			contextWindow: 1_000,
+			selection: { longContext: true },
 		});
-		expect(controller.getState().revision).toBe(revision);
-		expect(controller.getState().applied.longContext).toBe(true);
-		expect(typeof events.emitted.at(-1)?.data.reason).toBe("string");
-		controller.dispose();
-	});
-});
 
-describe("policy reconciliation on refresh", () => {
-	test("re-applies a lowered short budget and clears a removed service tier", async () => {
-		const { events, controller, state } = await setup({
-			model: { provider: "plexus", id: "m1" },
-			advertisement,
-			catalogWindow: 1_000,
-		});
-		await events.dispatch(POLICY_SET_CHANNEL, {
-			version: 1,
-			requestId: "on",
-			longContext: false,
-			serviceTier: "priority",
-		});
-		expect(controller.getState().applied).toMatchObject({
-			longContext: false,
-			serviceTier: "priority",
+		state.setApplies(true);
+		await controller.reconcile();
+		expect(controller.getView()).toMatchObject({
+			applyFailed: false,
 			contextWindow: 200,
 		});
-		const revision = controller.getState().revision;
-
-		state.setAdvertisement({
-			context: {
-				provider: "plexus",
-				modelId: "m1",
-				maxContextTokens: 1_000,
-				shortContextBudgetTokens: 150,
-			},
-			serviceTier: {
-				provider: "plexus",
-				modelId: "m1",
-				serviceTiers: ["standard"],
-			},
-		});
-		await controller.reconcile();
-		expect(controller.getState()).toMatchObject({
-			revision: revision + 1,
-			applied: { longContext: false, serviceTier: null, contextWindow: 150 },
-			available: { longContext: true, serviceTier: true },
-		});
-		expect(typeof controller.getState().reason).toBe("string");
-		expect(state.calls.at(-1)).toEqual({
-			model: { provider: "plexus", id: "m1" },
-			contextWindow: 150,
-		});
-		expect(
-			controller.serviceTierFor({ provider: "plexus", id: "m1" }),
-		).toBeNull();
-		controller.dispose();
 	});
 
-	test("restores the catalog window and resets selection when the context policy disappears", async () => {
-		const { events, controller, state } = await setup({
-			model: { provider: "plexus", id: "m1" },
-			advertisement,
-			catalogWindow: 1_000,
-		});
-		await events.dispatch(POLICY_SET_CHANNEL, {
-			version: 1,
-			requestId: "on",
-			longContext: false,
-		});
-		expect(controller.getState().applied.contextWindow).toBe(200);
-		state.setAdvertisement({ serviceTier: advertisement.serviceTier });
-		await controller.reconcile();
-		expect(controller.getState()).toMatchObject({
-			available: { longContext: false, serviceTier: true },
-			applied: { longContext: true, serviceTier: null },
-		});
-		expect(controller.getState().applied.contextWindow).toBeUndefined();
-		expect(state.calls.at(-1)).toEqual({
-			model: { provider: "plexus", id: "m1" },
-			contextWindow: undefined,
-		});
-		controller.dispose();
-	});
-
-	test("resets selection when the active model changes", async () => {
-		const { events, controller, state } = await setup({
-			model: { provider: "plexus", id: "m1" },
-			advertisement,
-			catalogWindow: 1_000,
-		});
-		await events.dispatch(POLICY_SET_CHANNEL, {
-			version: 1,
-			requestId: "on",
+	test("restores the catalog window when the advertisement disappears", async () => {
+		const state = makeHost({ model: m1, advertisement, catalogWindow: 5_000 });
+		const controller = new PolicyController(state.host);
+		controller.setResolver(() => ({
 			longContext: false,
 			serviceTier: "priority",
-		});
-		state.setModel({ provider: "plexus", id: "m2" });
+		}));
+		await controller.reconcile();
 		state.setAdvertisement(undefined);
 		await controller.reconcile();
-		expect(controller.getState()).toMatchObject({
-			available: { longContext: false, serviceTier: false },
-			applied: { longContext: true, serviceTier: null },
-		});
-		expect(
-			controller.serviceTierFor({ provider: "plexus", id: "m2" }),
-		).toBeNull();
-		controller.dispose();
-	});
-});
-
-describe("policy command validation", () => {
-	test("ignores malformed commands without replying", async () => {
-		const { events, controller } = await setup({
-			model: { provider: "plexus", id: "m1" },
-			advertisement,
-			catalogWindow: 1_000,
-		});
-		const emits = events.emitted.length;
-		await events.dispatch(POLICY_SET_CHANNEL, { version: 2, requestId: "bad" });
-		await events.dispatch(POLICY_SET_CHANNEL, { version: 1, requestId: "" });
-		await events.dispatch(POLICY_SET_CHANNEL, {
-			version: 1,
-			requestId: "empty",
-		});
-		await events.dispatch(POLICY_SET_CHANNEL, {
-			version: 1,
-			requestId: "extra",
-			longContext: true,
-			secret: "no",
-		});
-		expect(events.emitted.length).toBe(emits);
-		controller.dispose();
+		expect(state.calls.at(-1)).toEqual({ model: m1, contextWindow: undefined });
+		expect(controller.getView().contextWindow).toBeUndefined();
+		expect(controller.serviceTierFor(m1)).toBeNull();
 	});
 
-	test("validates the request and state contracts", () => {
-		expect(
-			PolicySetSchema.safeParse({ version: 1, requestId: "x" }).success,
-		).toBe(false);
-		expect(
-			PolicySetSchema.safeParse({
-				version: 1,
-				requestId: "x",
-				serviceTier: null,
-			}).success,
-		).toBe(true);
-		expect(
-			PolicySetSchema.safeParse({
-				version: 1,
-				requestId: "x",
-				longContext: false,
-			}).success,
-		).toBe(true);
-		expect(
-			PolicySetSchema.safeParse({ version: 1, requestId: "x", serviceTier: "" })
-				.success,
-		).toBe(false);
-		expect(
-			PolicyStateSchema.safeParse({
-				version: 1,
-				publisherId: "00000000-0000-4000-8000-000000000000",
-				revision: 1,
-				applied: { longContext: true, serviceTier: null },
-				available: { longContext: false, serviceTier: false },
-			}).success,
-		).toBe(true);
+	test("returns to the terminal default when the resolver is removed", async () => {
+		const state = makeHost({ model: m1, advertisement });
+		const controller = new PolicyController(state.host);
+		controller.setResolver(() => ({
+			longContext: false,
+			serviceTier: "priority",
+		}));
+		await controller.reconcile();
+		controller.setResolver(undefined);
+		await controller.reconcile();
+		expect(state.calls.at(-1)?.contextWindow).toBe(1_000);
+		expect(controller.serviceTierFor(m1)).toBeNull();
 	});
 
-	test("unsubscribes on dispose", async () => {
-		const { events, controller } = await setup({
-			model: { provider: "plexus", id: "m1" },
-			advertisement,
-			catalogWindow: 1_000,
+	test("unsubscribed listeners are not notified", async () => {
+		const state = makeHost({ model: m1, advertisement });
+		const controller = new PolicyController(state.host);
+		let notified = 0;
+		const unsubscribe = controller.subscribe(() => {
+			notified += 1;
 		});
-		expect(events.listenerCount(POLICY_SET_CHANNEL)).toBe(1);
-		controller.dispose();
-		expect(events.listenerCount(POLICY_SET_CHANNEL)).toBe(0);
+		unsubscribe();
+		await controller.reconcile();
+		expect(notified).toBe(0);
 	});
 });

@@ -36,8 +36,8 @@ By default the extension reads the Plexus key from `PLEXUS_API_KEY` after checki
 
 ```json
 {
-  "baseUrl": "https://plexus.example.com",
-  "apiKeyEnv": "AIHOME_PI_API_KEY"
+	"baseUrl": "https://plexus.example.com",
+	"apiKeyEnv": "AIHOME_PI_API_KEY"
 }
 ```
 
@@ -50,8 +50,8 @@ pi
 
 ### API key precedence
 
-| `apiKeyEnv` omitted (default) | `apiKeyEnv` set |
-|---|---|
+| `apiKeyEnv` omitted (default)                            | `apiKeyEnv` set                                                                                    |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | stored pi credential → `PLEXUS_API_KEY` process fallback | only the named environment variable; authoritative over the stored credential and `PLEXUS_API_KEY` |
 
 An explicit `apiKeyEnv` is authoritative even when it names `PLEXUS_API_KEY`. Saved credentials remain stored; remove `apiKeyEnv` to restore the default precedence.
@@ -71,36 +71,35 @@ When `apiKeyEnv` is set:
 
 Environment variables and config are read when pi starts. Editing `config.json` or the named variable requires a restart; `/reload` reloads the extension but the process environment is unchanged.
 
-## Cross-extension context-policy API
+## plexuspi-control
 
-Full channel, payload, mapping, and lifecycle details are in [context-policy.md](./context-policy.md), [service-tiers.md](./service-tiers.md), and [policy-control.md](./policy-control.md).
+The Plexus root session exposes a gated control command, `plexuspi-control`, that the Plexus integration uses to read and change the session's service tier and context budget. It is inert until a request carries the integration session key.
 
-The extension publishes complete context-policy snapshots on Pi's public cross-extension event bus:
+- Environment: `PLEXUSPI_SESSION_KEY`, read when Pi starts. Unset means every request is refused.
+- No launch flag. Activation is lazy: the module does nothing until the first request whose `sessionKey` matches `PLEXUSPI_SESSION_KEY`. Control requests arrive only through the root session's RPC prompt dispatch. Child sessions inherit the environment but never receive them, so they never activate. A wrong key is refused and changes nothing.
+- Request: `/plexuspi-control <base64url>`, where the decoded JSON is `{ "version": 1, "sessionKey", "requestId", "operation", "data"? }`.
 
-- Request: `plexus:context-policy:request:v1` — `{ version: 1, requestId: string }`
-- Reply/broadcast: `plexus:context-policy:snapshot:v1` — `{ version: 1, publisherId, revision, requestId?, status, policies, fetchedAt?, cached?, reason? }`
+| Operation   | `data`                    | Behavior                                                                                                                                                                             |
+| ----------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `hello`     | none                      | Activates the module, returns state. Fails when a known control owner (pi-microgpt's `/fast`, `/flex`, `/long-context`) is declared.                                                 |
+| `get-state` | none                      | Returns the current state.                                                                                                                                                           |
+| `configure` | `{ tier?, longContext? }` | Applies an advertised tier for the current model (`fast` maps to `priority` when advertised) or a short/max context budget. A failed budget application keeps the previous settings. |
+| `rewind`    | `{ targetEntryId }`       | Moves to an active-branch user message without summarizing. Requires an idle agent, no compaction, and no active owned children. Appends a `plexuspi-rewind` branch pin.             |
+| `reload`    | none                      | Idle only. Replies `ok` before reloading, so `ok` means started, not finished.                                                                                                       |
 
-A request listener is installed at extension initialization. Valid requests receive the current in-memory snapshot synchronously during the event emission; requests never initiate or wait for a network fetch. Replies echo `requestId` and do not advance `revision`. Initial state is `loading`; catalog state changes advance the revision (publisher UUID is stable for the extension load). Listeners are removed on `session_shutdown`.
+Replies are `ctx.ui.notify` messages prefixed `plexuspi:v1:` with JSON `{ version, sessionKey, requestId, operation, ok, data?, error? }`. Live state publishes use `plexuspi:state:v1:` and forwarded owned-subagent records use `plexuspi:child:v1:`.
 
-`status` is `ready`, `loading`, or `unavailable`. Non-ready snapshots have no policies; a successfully loaded catalog with no eligible models can use `ready` and an empty list. Each policy has exact registered `provider` and `modelId` identifiers, total route-usable `maxContextTokens`, smaller-or-equal `shortContextBudgetTokens`, and optional input-pricing boundary `pricingThresholdInputTokens`. All token counts are positive safe integers. For models with a valid pricing tier, the extension uses `context_length` as total context capacity and the first `pricing.tiers[].input_tokens_above` boundary as both the intended short-context budget and `pricingThresholdInputTokens`, per the configured Plexus tiering semantics. Models without both known limits, or whose tier boundary exceeds context capacity, are omitted. Snapshots replace the complete prior set, are validated, and are limited to 1 MiB; oversized/invalid data is replaced with an `unavailable` response rather than truncated. `fetchedAt` is the successful backend-fetch time; cached metadata is marked `cached: true`.
+Bus channels:
 
-Policy metadata is derived from the raw `/v1/models` response only for models in the committed Pi catalog, then stored alongside those model entries so cached catalogs retain the same policy and original fetch timestamp. Suppressed or removed models disappear on the next committed publication.
+- Consumes `plexuspi:subagent:v1` (owned-subagent bridge records, version 1) for active-child counts and forwarding.
+- Emits `plexuspi:root:v1` `{ version: 1, sessionId }` once activated.
 
-The parallel service-tier API publishes the model's `service_tiers` array on `plexus:service-tiers:snapshot:v1`. Models without that field have no tier policy. See [service-tiers.md](./service-tiers.md) for the contract.
+Branch-local session entries:
 
-The policy-control API accepts a command that selects, for the active session and model, the short or maximum context budget and the active advertised service tier:
+- `plexuspi-controls`: `{ version, tier, longContext, contextWindow?, timestamp }`, restored on session start, tree change, and rewind.
+- `plexuspi-rewind`: `{ version, targetEntryId, leafId?, timestamp }`.
 
-- Command: `plexus:policy:set:v1` — `{ version: 1, requestId, longContext?, serviceTier? }` (at least one selection field)
-- Reply/broadcast: `plexus:policy:state:v1` — `{ version: 1, publisherId, revision, requestId?, applied, available, reason? }`
-
-The command is validated against the active model's committed advertisement and rejected atomically when the tier is unadvertised or no distinct short/max budget exists. The selection is applied as `service_tier` on requests to the `plexus` provider and as a session-scoped effective context window; it never alters the catalog model or persisted defaults. See [policy-control.md](./policy-control.md).
-
-The models-refresh API accepts a command that forces a live catalog refresh:
-
-- Command: `plexus:models:refresh:v1` — `{ version: 1, requestId }`
-- Reply/broadcast: `plexus:models:state:v1` — `{ version: 1, publisherId, revision, requestId?, status, modelCount?, reason? }`
-
-Concurrent commands are coalesced into one refresh, each receiving a correlated reply. The refresh re-evaluates the active model's policy and publishes `refreshing` → `ready`/`error`. A failed or absent publisher is reported as a safe `error` state, or as silence when no publisher is loaded. See [models-control.md](./models-control.md).
+State fields: `capabilities`, `settings` (`{ tier, longContext }`), `origin` (`"root"`), `tiers`, `tierApplicable`, `longContextAvailable`, `longContextTarget?`, `shortContextBudgetTokens?`, `pricingThresholdInputTokens?`, `modelBaselineContextWindow?`, `contextWindow?`, `activeChildren?`, `sessionId?`, `contextPolicyError?`, `conflicts`, `limitations`. Optional fields are omitted when they cannot be observed.
 
 ## Notes
 

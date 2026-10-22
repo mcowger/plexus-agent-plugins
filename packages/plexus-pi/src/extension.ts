@@ -57,15 +57,11 @@ import {
 	resolveExplicitApiKeyFromEnv,
 	saveBaseUrl,
 } from "./config.ts";
-import {
-	CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON,
-	type ContextPolicy,
-	ContextPolicyPublisher,
-} from "./context-policy.ts";
+import type { ContextPolicy } from "./context-policy.ts";
 import { normalizeMalformedFunctionCall } from "./gemini-malformed-retry.ts";
 import { log } from "./log.ts";
 import { descriptorToPiModel, MINIMUM_OUTPUT_TOKENS } from "./mapper.ts";
-import { ModelsControl } from "./models-control.ts";
+import { createPlexuspiControl } from "./paseo-control/control.ts";
 import {
 	injectServiceTier,
 	type PolicyAdvertisement,
@@ -73,16 +69,10 @@ import {
 	type PolicyHost,
 } from "./policy.ts";
 import {
-	SERVICE_TIERS_METADATA_UNAVAILABLE_REASON,
 	type ServiceTierPolicy,
 	ServiceTierPolicySchema,
-	ServiceTiersPublisher,
 } from "./service-tiers.ts";
-import {
-	type ShortNameEntry,
-	ShortNameEntrySchema,
-	ShortNamesPublisher,
-} from "./short-names.ts";
+import { type ShortNameEntry, ShortNameEntrySchema } from "./short-names.ts";
 
 const PROVIDER_NAME = "plexus";
 const PLEXUS_CREDENTIAL_EXPIRES_AT = 253_402_300_799_000;
@@ -113,10 +103,6 @@ type ShortNameBearingModel = ProviderModelConfig & {
 interface PlexusInstanceState {
 	models: ProviderModelConfig[];
 	catalogSource: "host store" | "live refresh" | "none";
-	refreshSequence: number;
-	contextPolicies: ContextPolicyPublisher | undefined;
-	serviceTiers: ServiceTiersPublisher | undefined;
-	shortNames: ShortNamesPublisher | undefined;
 	policy: PolicyController | undefined;
 	/** This session's active model, from its own session/model events only. */
 	activeModel: Model<Api> | undefined;
@@ -441,9 +427,9 @@ export function withAuthoritativeApiKeyEnv(
 }
 
 /**
- * Host adapter for the session-scoped policy controller. The controller is
- * driven from the event bus, so the active model is cached from event handlers
- * and the catalog advertisement is read from the committed model metadata.
+ * Host adapter for the session-scoped policy controller. The active model is
+ * cached from this session's own event handlers, and the advertisement is read
+ * from the committed catalog metadata.
  */
 export function createPolicyHost(deps: {
 	getActiveModel: () => Model<Api> | undefined;
@@ -473,8 +459,17 @@ export function createPolicyHost(deps: {
 				...(serviceTier ? { serviceTier } : {}),
 			} satisfies PolicyAdvertisement;
 		},
-		getEffectiveContextWindow() {
-			return deps.getActiveModel()?.contextWindow;
+		getCatalogContextWindow(model) {
+			return deps.getRegistry()?.find(model.provider, model.id)?.contextWindow;
+		},
+		hasCatalogContextPolicy() {
+			return deps
+				.getModels()
+				.some(
+					(entry) =>
+						(entry as ContextPolicyBearingModel).plexusContextPolicy !==
+						undefined,
+				);
 		},
 		async applyContextWindow(model, contextWindow) {
 			const registry = deps.getRegistry();
@@ -503,65 +498,27 @@ export function createPolicyHost(deps: {
 }
 
 export default function plexusExtension(pi: ExtensionAPI): void {
-	const contextPolicies = new ContextPolicyPublisher(pi.events);
-	const serviceTiers = new ServiceTiersPublisher(pi.events);
-	const shortNames = new ShortNamesPublisher(pi.events);
 	const state: PlexusInstanceState = {
 		models: [],
 		catalogSource: "none",
-		refreshSequence: 0,
-		contextPolicies,
-		serviceTiers,
-		shortNames,
 		policy: undefined,
 		activeModel: undefined,
 		registry: undefined,
 	};
-	const policy = new PolicyController(
-		pi.events,
-		createPolicyHost({
-			getActiveModel: () => state.activeModel,
-			getModels: () => state.models,
-			getRegistry: () => state.registry,
-			setModel: (model) => pi.setModel(model),
-			setActiveModel: (model) => {
-				state.activeModel = model;
-			},
-		}),
-	);
-	state.policy = policy;
-	const modelsControl = new ModelsControl(pi.events, {
-		refresh: async () => {
-			const registry = state.registry;
-			if (!registry) {
-				const message =
-					"Plexus model registry is unavailable before the session starts.";
-				log("models:refresh unavailable", { reason: message });
-				throw new Error(message);
-			}
-			const result = await registry.refresh({
-				providers: [PROVIDER_NAME],
-				force: true,
-			});
-			if (result.aborted) {
-				log("models:refresh aborted", {});
-				throw new Error("Plexus model refresh was cancelled.");
-			}
-			const refreshError = result.errors.get(PROVIDER_NAME);
-			if (refreshError) throw refreshError;
-			return { modelCount: state.models.length };
+	const host = createPolicyHost({
+		getActiveModel: () => state.activeModel,
+		getModels: () => state.models,
+		getRegistry: () => state.registry,
+		setModel: (model) => pi.setModel(model),
+		setActiveModel: (model) => {
+			state.activeModel = model;
 		},
 	});
+	const policy = new PolicyController(host);
+	state.policy = policy;
+	// Inert until an authenticated Plexus root request activates it.
+	createPlexuspiControl(pi, { policy, host });
 	pi.on("session_shutdown", () => {
-		contextPolicies.dispose();
-		serviceTiers.dispose();
-		shortNames.dispose();
-		policy.dispose();
-		modelsControl.dispose();
-		if (state.contextPolicies === contextPolicies)
-			state.contextPolicies = undefined;
-		if (state.serviceTiers === serviceTiers) state.serviceTiers = undefined;
-		if (state.shortNames === shortNames) state.shortNames = undefined;
 		if (state.policy === policy) state.policy = undefined;
 	});
 
@@ -584,40 +541,10 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 
 	state.models = startupModels;
 	state.catalogSource = startupModels.length > 0 ? "host store" : "none";
-	const startupPolicies = collectStoredContextPolicies(startupModels);
-	contextPolicies.setCatalog(
-		startupPolicies.length > 0 ? "ready" : "unavailable",
-		startupPolicies.map((entry) => entry.policy),
-		startupPolicies.length > 0
-			? { cached: true, fetchedAt: startupPolicies[0]?.fetchedAt }
-			: { cached: true, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON },
-	);
-	if (storedCatalog) {
-		const cachedTiers = collectStoredServiceTiers(startupModels);
-		serviceTiers.setCatalog(
-			cachedTiers.complete ? "ready" : "unavailable",
-			cachedTiers.policies,
-			cachedTiers.complete
-				? {
-						cached: true,
-						...(cachedTiers.fetchedAt === undefined
-							? {}
-							: { fetchedAt: cachedTiers.fetchedAt }),
-					}
-				: { cached: true, reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON },
-		);
-		shortNames.setCatalog("ready", collectStoredShortNames(startupModels), {
-			cached: true,
-			...(storedCatalog.checkedAt
-				? { fetchedAt: storedCatalog.checkedAt }
-				: {}),
-		});
-	}
 	void policy.reconcile();
 
-	// Track the active model so the event-bus policy controller can resolve the
-	// advertisement and apply a session-scoped context window without an
-	// ExtensionContext.
+	// Track the active model so the policy controller resolves the advertisement
+	// and applies the session-scoped context window without an ExtensionContext.
 	pi.on("session_start", (_event, ctx) => {
 		state.registry = ctx.modelRegistry;
 		state.activeModel = ctx.model;
@@ -736,7 +663,6 @@ async function refreshPlexusModels(
 	state: PlexusInstanceState,
 	context: RefreshModelsContext,
 ): Promise<ProviderModelConfig[]> {
-	const refreshId = ++state.refreshSequence;
 	const baseUrl = getBaseUrl();
 	const modelsUrl = getModelsUrl();
 	const apiKey = resolveApiKey(credentialApiKey(context.credential));
@@ -756,38 +682,6 @@ async function refreshPlexusModels(
 				},
 				update: () => {
 					state.models = filteredCurrent;
-					const cachedTiers = collectStoredServiceTiers(filteredCurrent);
-					state.serviceTiers?.setCatalog(
-						cachedTiers.complete ? "ready" : "unavailable",
-						cachedTiers.policies,
-						cachedTiers.complete
-							? {
-									cached: true,
-									...(cachedTiers.fetchedAt === undefined
-										? {}
-										: { fetchedAt: cachedTiers.fetchedAt }),
-								}
-							: {
-									cached: true,
-									reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON,
-								},
-					);
-					const cachedPolicies = collectStoredContextPolicies(filteredCurrent);
-					state.contextPolicies?.setCatalog(
-						cachedPolicies.length > 0 ? "ready" : "unavailable",
-						cachedPolicies.map((entry) => entry.policy),
-						cachedPolicies.length > 0
-							? { cached: true, fetchedAt: cachedPolicies[0]?.fetchedAt }
-							: {
-									cached: true,
-									reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON,
-								},
-					);
-					state.shortNames?.setCatalog(
-						"ready",
-						collectStoredShortNames(filteredCurrent),
-						{ cached: true },
-					);
 					void state.policy?.reconcile();
 				},
 			});
@@ -795,22 +689,6 @@ async function refreshPlexusModels(
 		}
 		const restored = await restoreStoredModels(state, context);
 		if (restored) return restored;
-		if (
-			refreshId === state.refreshSequence &&
-			state.serviceTiers?.getSnapshot().status === "loading"
-		) {
-			state.serviceTiers.setCatalog("unavailable", [], {
-				reason: "Plexus model metadata is not configured.",
-			});
-		}
-		if (
-			refreshId === state.refreshSequence &&
-			state.shortNames?.getSnapshot().status === "loading"
-		) {
-			state.shortNames.setCatalog("unavailable", [], {
-				reason: "Plexus model metadata is not configured.",
-			});
-		}
 		throw new Error(
 			!modelsUrl || !baseUrl
 				? "Plexus base URL not configured. Run /login plexus first."
@@ -852,9 +730,6 @@ async function refreshPlexusModels(
 			if (shortName) piModel.plexusShortName = shortName.shortName;
 			else delete piModel.plexusShortName;
 		}
-		const committedPolicies = collectStoredContextPolicies(piModels);
-		const committedServiceTiers = collectStoredServiceTiers(piModels).policies;
-		const committedShortNames = collectStoredShortNames(piModels);
 
 		// pi publishes the returned list in memory but does not persist it —
 		// persistence is provider-owned via generation-checked publish().
@@ -866,19 +741,6 @@ async function refreshPlexusModels(
 			update: () => {
 				state.models = piModels;
 				state.catalogSource = "live refresh";
-				state.serviceTiers?.setCatalog("ready", committedServiceTiers, {
-					fetchedAt,
-				});
-				state.shortNames?.setCatalog("ready", committedShortNames, {
-					fetchedAt,
-				});
-				state.contextPolicies?.setCatalog(
-					committedPolicies.length > 0 ? "ready" : "unavailable",
-					committedPolicies.map((entry) => entry.policy),
-					committedPolicies.length > 0
-						? { fetchedAt }
-						: { fetchedAt, reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON },
-				);
 				void state.policy?.reconcile();
 			},
 		});
@@ -889,30 +751,6 @@ async function refreshPlexusModels(
 		log("refreshModels: fetched", { count: piModels.length });
 		return piModels;
 	} catch (error) {
-		if (
-			refreshId === state.refreshSequence &&
-			state.contextPolicies?.getSnapshot().status === "loading"
-		) {
-			state.contextPolicies.setCatalog("unavailable", [], {
-				reason: "Plexus model metadata could not be loaded.",
-			});
-		}
-		if (
-			refreshId === state.refreshSequence &&
-			state.serviceTiers?.getSnapshot().status === "loading"
-		) {
-			state.serviceTiers.setCatalog("unavailable", [], {
-				reason: "Plexus model metadata could not be loaded.",
-			});
-		}
-		if (
-			refreshId === state.refreshSequence &&
-			state.shortNames?.getSnapshot().status === "loading"
-		) {
-			state.shortNames.setCatalog("unavailable", [], {
-				reason: "Plexus model metadata could not be loaded.",
-			});
-		}
 		log("refreshModels: fetch failed", { error: String(error) });
 		throw error;
 	}
@@ -934,33 +772,6 @@ async function restoreStoredModels(
 		update: () => {
 			state.models = models;
 			state.catalogSource = "host store";
-			const cachedTiers = collectStoredServiceTiers(models);
-			state.serviceTiers?.setCatalog(
-				cachedTiers.complete ? "ready" : "unavailable",
-				cachedTiers.policies,
-				cachedTiers.complete
-					? {
-							cached: true,
-							...(cachedTiers.fetchedAt === undefined
-								? {}
-								: { fetchedAt: cachedTiers.fetchedAt }),
-						}
-					: { cached: true, reason: SERVICE_TIERS_METADATA_UNAVAILABLE_REASON },
-			);
-			const cachedPolicies = collectStoredContextPolicies(models);
-			state.contextPolicies?.setCatalog(
-				cachedPolicies.length > 0 ? "ready" : "unavailable",
-				cachedPolicies.map((entry) => entry.policy),
-				cachedPolicies.length > 0
-					? { cached: true, fetchedAt: cachedPolicies[0]?.fetchedAt }
-					: {
-							cached: true,
-							reason: CONTEXT_POLICY_METADATA_UNAVAILABLE_REASON,
-						},
-			);
-			state.shortNames?.setCatalog("ready", collectStoredShortNames(models), {
-				cached: true,
-			});
 			void state.policy?.reconcile();
 		},
 	});
@@ -993,15 +804,6 @@ export function contextPolicyFromApiModel(
 	};
 }
 
-function collectStoredContextPolicies(
-	models: readonly ProviderModelConfig[],
-): StoredContextPolicyMetadata[] {
-	return models.flatMap((model) => {
-		const metadata = (model as ContextPolicyBearingModel).plexusContextPolicy;
-		return metadata ? [metadata] : [];
-	});
-}
-
 export function serviceTierPolicyFromApiModel(
 	model: PlexusApiModel,
 ): ServiceTierPolicy | undefined {
@@ -1030,41 +832,6 @@ export function shortNameEntryFromApiModel(
 		shortName,
 	});
 	return parsed.success ? parsed.data : undefined;
-}
-
-function collectStoredShortNames(
-	models: readonly ProviderModelConfig[],
-): ShortNameEntry[] {
-	return models.flatMap((model) => {
-		const shortName = (model as ShortNameBearingModel).plexusShortName;
-		if (typeof shortName !== "string" || !shortName.trim()) return [];
-		const parsed = ShortNameEntrySchema.safeParse({
-			provider: PROVIDER_NAME,
-			modelId: model.id,
-			shortName: shortName.trim(),
-		});
-		return parsed.success ? [parsed.data] : [];
-	});
-}
-
-function collectStoredServiceTiers(models: readonly ProviderModelConfig[]): {
-	policies: ServiceTierPolicy[];
-	complete: boolean;
-	fetchedAt?: number;
-} {
-	const metadata = models.map(
-		(model) => (model as ServiceTierBearingModel).plexusServiceTiers,
-	);
-	const complete =
-		models.length === 0 || metadata.every((entry) => entry !== undefined);
-	const stored = metadata.filter(
-		(entry): entry is StoredServiceTiersMetadata => entry !== undefined,
-	);
-	return {
-		policies: stored.flatMap((entry) => (entry.policy ? [entry.policy] : [])),
-		complete,
-		...(stored[0] ? { fetchedAt: stored[0].fetchedAt } : {}),
-	};
 }
 
 function credentialApiKey(
