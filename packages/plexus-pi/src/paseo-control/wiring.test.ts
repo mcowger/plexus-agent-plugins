@@ -143,6 +143,14 @@ describe("plexusExtension wiring for plexuspi-control", () => {
 		});
 	}
 
+	test("returns an empty catalog during an offline restore without stored models", async () => {
+		const pi = fakePi();
+		plexusExtension(pi.api);
+		const config = pi.providerConfig();
+		if (!config) throw new Error("provider was not registered");
+		expect(await config.refreshModels({ allowNetwork: false })).toEqual([]);
+	});
+
 	test("registers exactly one before_provider_request injector, before and after activation", async () => {
 		const pi = fakePi();
 		plexusExtension(pi.api);

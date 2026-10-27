@@ -689,6 +689,7 @@ async function refreshPlexusModels(
 		}
 		const restored = await restoreStoredModels(state, context);
 		if (restored) return restored;
+		if (!context.allowNetwork) return [];
 		throw new Error(
 			!modelsUrl || !baseUrl
 				? "Plexus base URL not configured. Run /login plexus first."
