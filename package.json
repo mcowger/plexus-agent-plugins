@@ -1,6 +1,6 @@
 {
 	"name": "plexus-agent-plugins",
-	"version": "1.14.1",
+	"version": "1.14.2",
 	"type": "module",
 	"packageManager": "bun@1.4.4",
 	"private": true,
