@@ -6,8 +6,10 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
 	getEnvSuppressedModels,
 	parseSuppressionPatterns,
+	resolveApiKeyEnvSetting as resolveSharedApiKeyEnvSetting,
+	resolveApiKeyEnvValue,
+	resolvePlexusApiKey,
 } from "../../plexus-models/src/index.ts";
-
 const getConfigDir = (): string => join(getAgentDir(), "extensions", "plexus");
 const getConfigPath = (): string => join(getConfigDir(), "config.json");
 
@@ -167,15 +169,7 @@ export function getBaseUrlResolution(): {
  * throws a generic error that never echoes the configured value.
  */
 function resolveApiKeyEnvSetting(): { name: string; explicit: boolean } {
-	const raw = getConfigSync().apiKeyEnv;
-	if (raw === undefined || raw === null)
-		return { name: ENV_API_KEY, explicit: false };
-
-	const name = typeof raw === "string" ? raw.trim() : "";
-	if (!ENV_VAR_NAME_RE.test(name)) {
-		throw new Error("Invalid apiKeyEnv: expected an environment variable name");
-	}
-	return { name, explicit: true };
+	return resolveSharedApiKeyEnvSetting(getConfigSync().apiKeyEnv);
 }
 
 /** Environment variable name Pi resolves for the provider API key template. */
@@ -188,64 +182,26 @@ export function isApiKeyEnvExplicit(): boolean {
 	return resolveApiKeyEnvSetting().explicit;
 }
 
-function requireApiKeyEnvValue(name: string, raw: string | undefined): string {
-	const value = raw?.trim();
-	if (!value) {
-		throw new Error(
-			`apiKeyEnv environment variable "${name}" is missing or empty`,
-		);
-	}
-	return value;
+/** API-key environment setting, including whether it was explicitly configured. */
+export function getApiKeyEnvSetting(): { name: string; explicit: boolean } {
+	return resolveApiKeyEnvSetting();
 }
 
-/**
- * Resolve the API key named by an explicit `apiKeyEnv` from a host-provided
- * environment reader.
- *
- * Returns undefined when the setting is omitted (the default `PLEXUS_API_KEY`
- * precedence still applies). When set it is authoritative: the named variable
- * must exist and be non-empty, otherwise this throws instead of falling back
- * to a stored credential or `PLEXUS_API_KEY`. Error messages name the variable
- * but never include its value.
- */
-export async function resolveExplicitApiKeyFromEnv(
-	readEnv: (name: string) => Promise<string | undefined>,
-): Promise<string | undefined> {
-	const { name, explicit } = resolveApiKeyEnvSetting();
-	if (!explicit) return undefined;
-	return requireApiKeyEnvValue(name, await readEnv(name));
-}
-
-/**
- * Synchronous `process.env` variant of {@link resolveExplicitApiKeyFromEnv}.
- *
- * Returns undefined when the setting is omitted. When set it is authoritative
- * and throws for a missing or empty variable rather than falling back.
- */
-export function resolveExplicitApiKey(): string | undefined {
-	const { name, explicit } = resolveApiKeyEnvSetting();
-	if (!explicit) return undefined;
-	return requireApiKeyEnvValue(name, process.env[name]);
-}
-
-/**
- * Resolve the effective API key for a Plexus request.
- *
- * Explicit `apiKeyEnv` is authoritative and ignores the stored credential. The
- * default chain keeps a stored credential ahead of the `PLEXUS_API_KEY`
- * process fallback.
- */
 export function resolveApiKey(
 	storedKey: string | undefined,
 ): string | undefined {
-	const explicit = resolveExplicitApiKey();
-	if (explicit) return explicit;
-	return storedKey || getEnvApiKey() || undefined;
+	const setting = resolveApiKeyEnvSetting();
+	return resolvePlexusApiKey(setting, process.env[setting.name], storedKey);
 }
 
 /** The default `PLEXUS_API_KEY` fallback; null when unset or empty. */
 export function getEnvApiKey(): string | null {
-	return resolveStringOption(process.env[ENV_API_KEY]) ?? null;
+	return (
+		resolveApiKeyEnvValue(
+			{ name: ENV_API_KEY, explicit: false },
+			process.env[ENV_API_KEY],
+		) ?? null
+	);
 }
 
 /** Returns <baseUrl>/v1/models, or null. */

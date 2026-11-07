@@ -1,4 +1,29 @@
 // @bun
+// ../plexus-models/src/auth.ts
+var DEFAULT_API_KEY_ENV = "PLEXUS_API_KEY";
+var ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+function resolveApiKeyEnvSetting(raw) {
+  if (raw === undefined || raw === null)
+    return { name: DEFAULT_API_KEY_ENV, explicit: false };
+  const name = typeof raw === "string" ? raw.trim() : "";
+  if (!ENV_VAR_NAME_RE.test(name)) {
+    throw new Error("Invalid apiKeyEnv: expected an environment variable name");
+  }
+  return { name, explicit: true };
+}
+function resolveApiKeyEnvValue(setting, raw) {
+  const value = raw?.trim();
+  if (!value && setting.explicit) {
+    throw new Error(`apiKeyEnv environment variable "${setting.name}" is missing or empty`);
+  }
+  return value || undefined;
+}
+function resolvePlexusApiKey(setting, envValue, storedKey) {
+  const envKey = resolveApiKeyEnvValue(setting, envValue);
+  if (envKey !== undefined)
+    return envKey;
+  return storedKey || undefined;
+}
 // ../plexus-models/src/convert.ts
 var REASONING_PARAMS = new Set([
   "reasoning",
@@ -396,8 +421,7 @@ var getConfigDir = () => join2(getAgentDir2(), "extensions", "plexus");
 var getConfigPath = () => join2(getConfigDir(), "config.json");
 var ENV_BASE_URL = "PLEXUS_BASE_URL";
 var ENV_API_URL = "PLEXUS_API_URL";
-var ENV_API_KEY = "PLEXUS_API_KEY";
-var ENV_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+var ENV_VAR_NAME_RE2 = /^[A-Za-z_][A-Za-z0-9_]*$/;
 var ENV_VAR_NAME_PREFIX_RE = /^[A-Za-z_][A-Za-z0-9_]*/;
 var normalizeRoot = (raw) => raw.trim().replace(/\/+$/, "");
 function resolveConfigTemplate(value) {
@@ -424,7 +448,7 @@ function resolveConfigTemplate(value) {
         continue;
       }
       const name = value.slice(dollarIndex + 2, endIndex);
-      if (!ENV_VAR_NAME_RE.test(name)) {
+      if (!ENV_VAR_NAME_RE2.test(name)) {
         result += value.slice(dollarIndex, endIndex + 1);
         index = endIndex + 1;
         continue;
@@ -499,49 +523,15 @@ function getBaseUrlResolution() {
   const saved = resolveStringOption(config.baseUrl);
   return { baseUrl: saved ?? null, source: saved ? "saved" : "none" };
 }
-function resolveApiKeyEnvSetting() {
-  const raw = getConfigSync().apiKeyEnv;
-  if (raw === undefined || raw === null)
-    return { name: ENV_API_KEY, explicit: false };
-  const name = typeof raw === "string" ? raw.trim() : "";
-  if (!ENV_VAR_NAME_RE.test(name)) {
-    throw new Error("Invalid apiKeyEnv: expected an environment variable name");
-  }
-  return { name, explicit: true };
+function resolveApiKeyEnvSetting2() {
+  return resolveApiKeyEnvSetting(getConfigSync().apiKeyEnv);
 }
-function getApiKeyEnvName() {
-  return resolveApiKeyEnvSetting().name;
-}
-function isApiKeyEnvExplicit() {
-  return resolveApiKeyEnvSetting().explicit;
-}
-function requireApiKeyEnvValue(name, raw) {
-  const value = raw?.trim();
-  if (!value) {
-    throw new Error(`apiKeyEnv environment variable "${name}" is missing or empty`);
-  }
-  return value;
-}
-async function resolveExplicitApiKeyFromEnv(readEnv) {
-  const { name, explicit } = resolveApiKeyEnvSetting();
-  if (!explicit)
-    return;
-  return requireApiKeyEnvValue(name, await readEnv(name));
-}
-function resolveExplicitApiKey() {
-  const { name, explicit } = resolveApiKeyEnvSetting();
-  if (!explicit)
-    return;
-  return requireApiKeyEnvValue(name, process.env[name]);
+function getApiKeyEnvSetting() {
+  return resolveApiKeyEnvSetting2();
 }
 function resolveApiKey(storedKey) {
-  const explicit = resolveExplicitApiKey();
-  if (explicit)
-    return explicit;
-  return storedKey || getEnvApiKey() || undefined;
-}
-function getEnvApiKey() {
-  return resolveStringOption(process.env[ENV_API_KEY]) ?? null;
+  const setting = resolveApiKeyEnvSetting2();
+  return resolvePlexusApiKey(setting, process.env[setting.name], storedKey);
 }
 function getModelsUrl() {
   const { baseUrl } = getBaseUrlResolution();
@@ -7273,7 +7263,7 @@ function getSessionThinkingLevel(pi) {
     return;
   }
 }
-function withAuthoritativeApiKeyEnv(provider, envName, getHeaderModels = () => []) {
+function withAuthoritativeApiKeyEnv(provider, setting, getHeaderModels = () => []) {
   const apiKey = provider.auth.apiKey;
   if (!apiKey)
     return provider;
@@ -7297,18 +7287,19 @@ function withAuthoritativeApiKeyEnv(provider, envName, getHeaderModels = () => [
       apiKey: {
         ...apiKey,
         resolve: async (input) => {
-          const explicit = await resolveExplicitApiKeyFromEnv((name) => input.ctx.env(name));
-          if (explicit === undefined)
+          const envValue = await input.ctx.env(setting.name);
+          const envKey = resolveApiKeyEnvValue(setting, envValue);
+          if (envKey === undefined)
             return apiKey.resolve(input);
           const result = await apiKey.resolve({
             ...input,
             credential: {
               type: "api_key",
-              key: explicit,
+              key: envKey,
               ...input.credential?.env ? { env: input.credential.env } : {}
             }
           });
-          return result ? { ...result, source: `${envName} (apiKeyEnv)` } : result;
+          return result ? { ...result, source: `${setting.name} (apiKeyEnv)` } : result;
         }
       }
     },
@@ -7387,10 +7378,9 @@ function plexusExtension(pi) {
     if (state.policy === policy)
       state.policy = undefined;
   });
-  const apiKeyEnvExplicit = isApiKeyEnvExplicit();
-  const explicitApiKey = apiKeyEnvExplicit ? resolveExplicitApiKey() : undefined;
-  const apiKeyEnvName = getApiKeyEnvName();
-  const envApiKey = explicitApiKey ?? getEnvApiKey();
+  const apiKeySetting = getApiKeyEnvSetting();
+  const apiKeyEnvName = apiKeySetting.name;
+  const envApiKey = resolveApiKeyEnvValue(apiKeySetting, process.env[apiKeyEnvName]);
   const startupBaseUrl = getBaseUrl();
   const suppressPatterns = getSuppressedModels();
   const storedCatalog = readStoredModelsSync();
@@ -7432,20 +7422,17 @@ function plexusExtension(pi) {
     refreshModels: (context) => refreshPlexusModels(state, context),
     oauth: createPlexusLoginProvider()
   });
-  if (apiKeyEnvExplicit) {
+  if (envApiKey !== undefined) {
     let authOverrideApplied = false;
     pi.on("session_start", (_event, ctx) => {
       if (authOverrideApplied)
         return;
       const composed = ctx.modelRegistry.getProvider(PROVIDER_NAME);
       if (!composed?.auth.apiKey) {
-        throw new Error("Plexus apiKeyEnv override failed: provider API-key auth is unavailable");
+        throw new Error("Plexus API-key auth is unavailable");
       }
-      pi.registerProvider(withAuthoritativeApiKeyEnv(composed, apiKeyEnvName, () => state.models));
+      pi.registerProvider(withAuthoritativeApiKeyEnv(composed, apiKeySetting, () => state.models));
       authOverrideApplied = true;
-      log("auth: applied authoritative apiKeyEnv override", {
-        apiKeyEnv: apiKeyEnvName
-      });
     });
   }
   pi.registerCommand("plexus", {
@@ -7478,7 +7465,8 @@ function plexusExtension(pi) {
 async function refreshPlexusModels(state, context) {
   const baseUrl = getBaseUrl();
   const modelsUrl = getModelsUrl();
-  const apiKey = resolveApiKey(credentialApiKey(context.credential));
+  const setting = getApiKeyEnvSetting();
+  const apiKey = resolvePlexusApiKey(setting, process.env[setting.name], credentialApiKey(context.credential));
   const suppress = getSuppressedModels();
   if (!context.allowNetwork || !apiKey || !modelsUrl || !baseUrl) {
     if (state.models.length > 0) {
@@ -7633,8 +7621,9 @@ function createPlexusLoginProvider() {
       return { ...credentials, expires: PLEXUS_CREDENTIAL_EXPIRES_AT };
     },
     getApiKey(credentials) {
+      const setting = getApiKeyEnvSetting();
       const stored = String(credentials.access || credentials.refresh || "");
-      return resolveExplicitApiKey() ?? stored;
+      return resolvePlexusApiKey(setting, process.env[setting.name], stored) ?? "";
     },
     modifyModels(models, credentials) {
       const baseUrl = credentials.plexusBaseUrl;
@@ -7675,14 +7664,14 @@ async function handleRefresh(state, ctx) {
 }
 async function handleStatus(state, ctx) {
   const baseUrl = getBaseUrlResolution();
-  const apiKeyEnvName = getApiKeyEnvName();
+  const apiKeyEnvName = getApiKeyEnvSetting().name;
   const apiKey = await ctx.modelRegistry.getApiKeyForProvider(PROVIDER_NAME).catch(() => {
     return;
   });
-  const explicitApiKey = apiKey ? resolveExplicitApiKey() : undefined;
+  const effectiveApiKey = resolveApiKey(apiKey);
   ctx.ui.notify([
     `Plexus base URL: ${baseUrl.baseUrl ?? "not configured"} (${baseUrl.source})`,
-    `API key: ${apiKey ? explicitApiKey !== undefined ? `${apiKeyEnvName} (apiKeyEnv)` : getEnvApiKey() ? `host credential or ${apiKeyEnvName} fallback` : "host credential" : "not configured"}`,
+    `API key: ${effectiveApiKey ? `${apiKeyEnvName} or host credential` : "not configured"}`,
     `Catalog: ${state.models.length} models (${state.catalogSource})`,
     "Default model: managed by Pi. Use /model and save the selection there."
   ].join(`

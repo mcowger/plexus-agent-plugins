@@ -400,6 +400,7 @@ describe("cross-session policy isolation", () => {
 		const channels = new Map<string, Array<(data: unknown) => void>>();
 		const setModelCalls: Array<{ id: string; contextWindow: number }> = [];
 		const registry = {
+			getProvider: () => ({ auth: { apiKey: {} } }),
 			find: (provider: string, id: string) => ({
 				provider,
 				id,

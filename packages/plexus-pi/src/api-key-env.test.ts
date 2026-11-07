@@ -31,7 +31,6 @@ import {
 	isApiKeyEnvExplicit,
 	resetConfigCache,
 	resolveApiKey,
-	resolveExplicitApiKey,
 } from "./config.ts";
 import plexusExtension, { withAuthoritativeApiKeyEnv } from "./extension.ts";
 
@@ -131,7 +130,7 @@ describe("apiKeyEnv default behavior", () => {
 	test("omitted apiKeyEnv uses PLEXUS_API_KEY", () => {
 		process.env.PLEXUS_API_KEY = "default-key";
 		expect(getApiKeyEnvName()).toBe("PLEXUS_API_KEY");
-		expect(resolveExplicitApiKey()).toBeUndefined();
+		expect(resolveApiKey(undefined)).toBe("default-key");
 		expect(getEnvApiKey()).toBe("default-key");
 	});
 
@@ -149,14 +148,13 @@ describe("apiKeyEnv custom variable", () => {
 		process.env[CUSTOM_ENV] = "custom-key";
 
 		expect(getApiKeyEnvName()).toBe(CUSTOM_ENV);
-		expect(resolveExplicitApiKey()).toBe("custom-key");
 		expect(resolveApiKey("stored-key")).toBe("custom-key");
 	});
 
 	test("trims whitespace from the named variable", () => {
 		writeConfig({ apiKeyEnv: `  ${CUSTOM_ENV}  ` });
 		process.env[CUSTOM_ENV] = "  custom-key  ";
-		expect(resolveExplicitApiKey()).toBe("custom-key");
+		expect(resolveApiKey(undefined)).toBe("custom-key");
 	});
 });
 
@@ -165,7 +163,6 @@ describe("apiKeyEnv missing and empty", () => {
 		writeConfig({ apiKeyEnv: CUSTOM_ENV });
 		process.env.PLEXUS_API_KEY = "default-key";
 
-		expect(() => resolveExplicitApiKey()).toThrow(/is missing or empty/);
 		expect(() => resolveApiKey("stored-key")).toThrow(/is missing or empty/);
 	});
 
@@ -175,7 +172,6 @@ describe("apiKeyEnv missing and empty", () => {
 
 		for (const value of ["", "   "]) {
 			process.env[CUSTOM_ENV] = value;
-			expect(() => resolveExplicitApiKey()).toThrow(/is missing or empty/);
 			expect(() => resolveApiKey("stored-key")).toThrow(/is missing or empty/);
 		}
 	});
@@ -183,8 +179,8 @@ describe("apiKeyEnv missing and empty", () => {
 	test("error names the variable without including a value", () => {
 		writeConfig({ apiKeyEnv: CUSTOM_ENV });
 		try {
-			resolveExplicitApiKey();
-			throw new Error("expected resolveExplicitApiKey to throw");
+			resolveApiKey(undefined);
+			throw new Error("expected missing environment key to throw");
 		} catch (error) {
 			expect(String(error)).toContain(CUSTOM_ENV);
 		}
@@ -197,7 +193,6 @@ describe("apiKeyEnv validation", () => {
 		writeConfig({ apiKeyEnv: invalid });
 
 		expect(() => getApiKeyEnvName()).toThrow(/Invalid apiKeyEnv/);
-		expect(() => resolveExplicitApiKey()).toThrow(/Invalid apiKeyEnv/);
 		try {
 			getApiKeyEnvName();
 		} catch (error) {
@@ -215,9 +210,9 @@ describe("apiKeyEnv validation", () => {
 });
 
 describe("apiKeyEnv precedence", () => {
-	test("default keeps the stored credential ahead of PLEXUS_API_KEY", () => {
+	test("default environment key overrides the stored credential", () => {
 		process.env.PLEXUS_API_KEY = "default-key";
-		expect(resolveApiKey("stored-key")).toBe("stored-key");
+		expect(resolveApiKey("stored-key")).toBe("default-key");
 	});
 
 	test("explicit apiKeyEnv outranks the stored credential", () => {
@@ -324,7 +319,7 @@ function legacyApiKeyAuth(): ApiKeyAuth {
 	};
 }
 
-/** Mirrors the extension OAuth projection: explicit apiKeyEnv, else the token. */
+/** Exercises the extension's OAuth credential projection through native auth. */
 function extensionOAuth(): OAuthAuth {
 	return {
 		name: "Plexus",
@@ -333,9 +328,7 @@ function extensionOAuth(): OAuthAuth {
 		},
 		refresh: async (credential) => credential,
 		toAuth: async (credential) => ({
-			apiKey:
-				resolveExplicitApiKey() ??
-				String(credential.access || credential.refresh || ""),
+			apiKey: captureProvider().oauth!.getApiKey!(credential),
 		}),
 	};
 }
@@ -377,7 +370,10 @@ describe("apiKeyEnv real host auth resolution", () => {
 		process.env[CUSTOM_ENV] = "custom-key";
 		process.env.PLEXUS_API_KEY = "default-key";
 
-		const provider = withAuthoritativeApiKeyEnv(composedProvider(), CUSTOM_ENV);
+		const provider = withAuthoritativeApiKeyEnv(composedProvider(), {
+			name: CUSTOM_ENV,
+			explicit: true,
+		});
 		const key = await resolveEffectiveApiKey({
 			provider,
 			stored: { type: "api_key", key: "stored-key" },
@@ -391,7 +387,7 @@ describe("apiKeyEnv real host auth resolution", () => {
 
 		const provider = withAuthoritativeApiKeyEnv(
 			composedProvider({ oauth: true }),
-			CUSTOM_ENV,
+			{ name: CUSTOM_ENV, explicit: true },
 		);
 		const key = await resolveEffectiveApiKey({
 			provider,
@@ -416,7 +412,10 @@ describe("apiKeyEnv real host auth resolution", () => {
 		}));
 		const models = createModels({ credentials });
 		models.setProvider(
-			withAuthoritativeApiKeyEnv(composedProvider(), CUSTOM_ENV),
+			withAuthoritativeApiKeyEnv(composedProvider(), {
+				name: CUSTOM_ENV,
+				explicit: true,
+			}),
 		);
 
 		for (const id of ["gpt", "claude", "gemini"]) {
@@ -431,7 +430,10 @@ describe("apiKeyEnv real host auth resolution", () => {
 		delete process.env[CUSTOM_ENV];
 		process.env.PLEXUS_API_KEY = "default-key";
 
-		const provider = withAuthoritativeApiKeyEnv(composedProvider(), CUSTOM_ENV);
+		const provider = withAuthoritativeApiKeyEnv(composedProvider(), {
+			name: CUSTOM_ENV,
+			explicit: true,
+		});
 		await expect(
 			resolveEffectiveApiKey({
 				provider,
@@ -478,18 +480,24 @@ describe("apiKeyEnv native auth override registration", () => {
 		expect(key).toBe("custom-key");
 	});
 
-	test("omitted apiKeyEnv does not upgrade the provider", () => {
+	test("optional PLEXUS_API_KEY registers native auth and overrides stored key", async () => {
 		writeConfig({});
+		process.env.PLEXUS_API_KEY = "default-key";
 		const { pi, providers, sessionStart } = fakePi();
 		plexusExtension(pi);
-
 		const ctx = {
 			modelRegistry: { getProvider: () => composedProvider() },
 		} as unknown as ExtensionContext;
 		for (const handler of sessionStart)
 			handler({ type: "session_start", reason: "new" }, ctx);
-
-		expect(providers.some((entry) => entry.native)).toBe(false);
+		const native = providers.find((entry) => entry.native)?.native;
+		if (!native) throw new Error("expected native auth registration");
+		expect(
+			await resolveEffectiveApiKey({
+				provider: native,
+				stored: { type: "api_key", key: "stored-key" },
+			}),
+		).toBe("default-key");
 	});
 });
 
@@ -618,7 +626,7 @@ describe("apiKeyEnv auth swap on a real runtime", () => {
 		}> = [{ id: "gpt", headers: { "X-Model": "gpt" } }];
 		const wrapped = withAuthoritativeApiKeyEnv(
 			composedProvider(),
-			CUSTOM_ENV,
+			{ name: CUSTOM_ENV, explicit: true },
 			() => headerModels,
 		);
 

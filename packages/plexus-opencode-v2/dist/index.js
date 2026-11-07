@@ -1,7 +1,6 @@
 // @bun
 // src/plugin.ts
 import { Plugin, Provider } from "@opencode/plugin";
-
 // ../plexus-models/src/convert.ts
 var REASONING_PARAMS = new Set([
   "reasoning",

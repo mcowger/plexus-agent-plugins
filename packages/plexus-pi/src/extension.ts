@@ -41,20 +41,18 @@ import {
 	convertDescriptors,
 	fetchPlexusModels,
 	isModelSuppressed,
+	resolveApiKeyEnvValue,
+	resolvePlexusApiKey,
 	type PlexusApiModel,
 } from "../../plexus-models/src/index.ts";
 import { readStoredModelsSync } from "./cache.ts";
 import {
-	getApiKeyEnvName,
+	getApiKeyEnvSetting,
 	getBaseUrl,
 	getBaseUrlResolution,
-	getEnvApiKey,
 	getModelsUrl,
 	getSuppressedModels,
-	isApiKeyEnvExplicit,
 	resolveApiKey,
-	resolveExplicitApiKey,
-	resolveExplicitApiKeyFromEnv,
 	saveBaseUrl,
 } from "./config.ts";
 import type { ContextPolicy } from "./context-policy.ts";
@@ -373,7 +371,7 @@ interface HeaderBearingModel {
  */
 export function withAuthoritativeApiKeyEnv(
 	provider: Provider,
-	envName: string,
+	setting: { name: string; explicit: boolean },
 	getHeaderModels: () => ReadonlyArray<HeaderBearingModel> = () => [],
 ): Provider {
 	const apiKey = provider.auth.apiKey;
@@ -402,20 +400,19 @@ export function withAuthoritativeApiKeyEnv(
 			apiKey: {
 				...apiKey,
 				resolve: async (input) => {
-					const explicit = await resolveExplicitApiKeyFromEnv((name) =>
-						input.ctx.env(name),
-					);
-					if (explicit === undefined) return apiKey.resolve(input);
+					const envValue = await input.ctx.env(setting.name);
+					const envKey = resolveApiKeyEnvValue(setting, envValue);
+					if (envKey === undefined) return apiKey.resolve(input);
 					const result = await apiKey.resolve({
 						...input,
 						credential: {
 							type: "api_key",
-							key: explicit,
+							key: envKey,
 							...(input.credential?.env ? { env: input.credential.env } : {}),
 						},
 					});
 					return result
-						? { ...result, source: `${envName} (apiKeyEnv)` }
+						? { ...result, source: `${setting.name} (apiKeyEnv)` }
 						: result;
 				},
 			},
@@ -522,14 +519,12 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 		if (state.policy === policy) state.policy = undefined;
 	});
 
-	// An explicit apiKeyEnv is authoritative and throws when its variable is
-	// missing or empty; the default PLEXUS_API_KEY remains an optional fallback.
-	const apiKeyEnvExplicit = isApiKeyEnvExplicit();
-	const explicitApiKey = apiKeyEnvExplicit
-		? resolveExplicitApiKey()
-		: undefined;
-	const apiKeyEnvName = getApiKeyEnvName();
-	const envApiKey = explicitApiKey ?? getEnvApiKey();
+	const apiKeySetting = getApiKeyEnvSetting();
+	const apiKeyEnvName = apiKeySetting.name;
+	const envApiKey = resolveApiKeyEnvValue(
+		apiKeySetting,
+		process.env[apiKeyEnvName],
+	);
 	const startupBaseUrl = getBaseUrl();
 	const suppressPatterns = getSuppressedModels();
 
@@ -599,25 +594,20 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 		oauth: createPlexusLoginProvider(),
 	});
 
-	// Templates are fallbacks behind stored plain keys. Wrap the composed
-	// provider's native auth once it exists so explicit apiKeyEnv wins instead.
-	if (apiKeyEnvExplicit) {
+	// Apply native auth at request time so environment keys override saved
+	// credentials consistently across every model dialect.
+	if (envApiKey !== undefined) {
 		let authOverrideApplied = false;
 		pi.on("session_start", (_event, ctx) => {
 			if (authOverrideApplied) return;
 			const composed = ctx.modelRegistry.getProvider(PROVIDER_NAME);
 			if (!composed?.auth.apiKey) {
-				throw new Error(
-					"Plexus apiKeyEnv override failed: provider API-key auth is unavailable",
-				);
+				throw new Error("Plexus API-key auth is unavailable");
 			}
 			pi.registerProvider(
-				withAuthoritativeApiKeyEnv(composed, apiKeyEnvName, () => state.models),
+				withAuthoritativeApiKeyEnv(composed, apiKeySetting, () => state.models),
 			);
 			authOverrideApplied = true;
-			log("auth: applied authoritative apiKeyEnv override", {
-				apiKeyEnv: apiKeyEnvName,
-			});
 		});
 	}
 
@@ -665,7 +655,12 @@ async function refreshPlexusModels(
 ): Promise<ProviderModelConfig[]> {
 	const baseUrl = getBaseUrl();
 	const modelsUrl = getModelsUrl();
-	const apiKey = resolveApiKey(credentialApiKey(context.credential));
+	const setting = getApiKeyEnvSetting();
+	const apiKey = resolvePlexusApiKey(
+		setting,
+		process.env[setting.name],
+		credentialApiKey(context.credential),
+	);
 	const suppress = getSuppressedModels();
 
 	if (!context.allowNetwork || !apiKey || !modelsUrl || !baseUrl) {
@@ -879,10 +874,11 @@ function createPlexusLoginProvider(): NonNullable<ProviderConfig["oauth"]> {
 			return { ...credentials, expires: PLEXUS_CREDENTIAL_EXPIRES_AT };
 		},
 		getApiKey(credentials: OAuthCredentials): string {
-			// Explicit apiKeyEnv outranks the stored OAuth credential; missing or
-			// empty values throw instead of silently falling back.
+			const setting = getApiKeyEnvSetting();
 			const stored = String(credentials.access || credentials.refresh || "");
-			return resolveExplicitApiKey() ?? stored;
+			return (
+				resolvePlexusApiKey(setting, process.env[setting.name], stored) ?? ""
+			);
 		},
 		modifyModels(models, credentials) {
 			const baseUrl = (credentials as PlexusCredentials).plexusBaseUrl;
@@ -955,23 +951,15 @@ async function handleStatus(
 	ctx: ExtensionCommandContext,
 ): Promise<void> {
 	const baseUrl = getBaseUrlResolution();
-	const apiKeyEnvName = getApiKeyEnvName();
+	const apiKeyEnvName = getApiKeyEnvSetting().name;
 	const apiKey = await ctx.modelRegistry
 		.getApiKeyForProvider(PROVIDER_NAME)
 		.catch(() => undefined);
-	const explicitApiKey = apiKey ? resolveExplicitApiKey() : undefined;
+	const effectiveApiKey = resolveApiKey(apiKey);
 	ctx.ui.notify(
 		[
 			`Plexus base URL: ${baseUrl.baseUrl ?? "not configured"} (${baseUrl.source})`,
-			`API key: ${
-				apiKey
-					? explicitApiKey !== undefined
-						? `${apiKeyEnvName} (apiKeyEnv)`
-						: getEnvApiKey()
-							? `host credential or ${apiKeyEnvName} fallback`
-							: "host credential"
-					: "not configured"
-			}`,
+			`API key: ${effectiveApiKey ? `${apiKeyEnvName} or host credential` : "not configured"}`,
 			`Catalog: ${state.models.length} models (${state.catalogSource})`,
 			"Default model: managed by Pi. Use /model and save the selection there.",
 		].join("\n"),

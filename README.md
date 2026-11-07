@@ -173,16 +173,16 @@ Pi and OMP store only non-secret Plexus settings in their own `config.json`:
 
 Credentials stay in the host credential store (`auth.json` for Pi, `agent.db` for OMP). Model catalogs stay in the host model registry/store. The extension no longer writes a second model cache, ETag file, raw API response, or default-model preference.
 
-With `apiKeyEnv` omitted, Pi resolves configuration as follows:
+With `apiKeyEnv` omitted, Pi and OMP resolve configuration as follows:
 
 ```text
 base URL: PLEXUS_API_URL → PLEXUS_BASE_URL → saved Plexus base URL
-API key: host credential store → PLEXUS_API_KEY process fallback
+API key: PLEXUS_API_KEY → host credential store
 catalog: host model store → live Plexus refresh
 startup model: host model-picker preference
 ```
 
-OMP uses the same URL precedence, but its registered `PLEXUS_API_KEY` environment reference is a native config-key override, ahead of saved credentials. If that variable isn't set, OMP uses its host credential resolver. OpenCode uses `PLEXUS_API_KEY` before the saved `/connect` credential and plugin `apiKey` option.
+Pi and OMP share credential selection in `plexus-models`: environment keys override saved credentials for discovery and every inference API, including Messages, Responses, and Chat Completions. OpenCode uses `PLEXUS_API_KEY` before the saved `/connect` credential and plugin `apiKey` option.
 
 `PLEXUS_API_URL` and `PLEXUS_BASE_URL` are process-only URL overrides; environment API keys aren't persisted. `/plexus status` reports the effective URL source, whether auth is available, and catalog state without exposing credentials.
 
@@ -232,7 +232,7 @@ Credential precedence:
 
 | Client      | `apiKeyEnv` omitted                                                             | `apiKeyEnv` explicitly set                                                        |
 | ----------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Pi          | Saved host credential, then `PLEXUS_API_KEY` fallback                           | Only the named environment variable, ahead of saved credentials                   |
+| Pi          | `PLEXUS_API_KEY`, then saved host credential                                    | Only the named environment variable, ahead of saved credentials                   |
 | OMP         | Registered `PLEXUS_API_KEY` env override, then host credentials                 | Only the named environment variable, ahead of saved credentials                   |
 | OpenCode V2 | `PLEXUS_API_KEY`, then saved `/connect` credential, then plugin `apiKey` option | Only the named environment variable, ahead of both saved credentials and `apiKey` |
 
@@ -240,12 +240,13 @@ An explicit setting is authoritative even when it names `PLEXUS_API_KEY`. If the
 
 ### Native login with `apiKeyEnv`
 
-`apiKeyEnv` changes which key authenticates requests, not the native login UI:
+Environment overrides authenticate requests independently of saved login credentials:
 
-- Pi and OMP: `/login plexus` still prompts for the base URL and API key, and saves both through the normal configuration and credential stores.
+- Pi: `/login plexus` still prompts for the base URL and API key and saves both normally.
+- OMP: `/login plexus` is registered only when no environment key override is active. Otherwise OMP would treat the env key as a fallback behind saved credentials. Configure the URL through `config.json` or a URL environment override instead.
 - OpenCode V2: `/connect` still stores the Plexus base URL and API key normally.
 
-With an explicit `apiKeyEnv`, discovery and model requests use the named environment variable rather than the key entered during login. OMP's immediate post-login refresh also uses the environment key. Login remains useful for configuring the base URL, but entering a different key won't override the environment setting.
+With an explicit `apiKeyEnv`, discovery and model requests use the named environment variable rather than a saved login key. Entering a different key during login won't override the environment setting.
 
 If the named variable is missing or empty at startup, the plugin fails to load. Native login cannot repair that setting: set the variable in the launching process environment or remove `apiKeyEnv`, then restart. Removing the setting restores the default precedence above without deleting saved credentials.
 

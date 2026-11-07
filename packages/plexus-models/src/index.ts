@@ -1,3 +1,8 @@
+export {
+	resolveApiKeyEnvSetting,
+	resolveApiKeyEnvValue,
+	resolvePlexusApiKey,
+} from "./auth.ts";
 // Types
 
 export type { OpenAICompletionsThinkingFormat } from "./convert.ts";

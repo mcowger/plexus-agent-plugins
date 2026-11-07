@@ -50,17 +50,16 @@ pi
 
 ### API key precedence
 
-| `apiKeyEnv` omitted (default)                            | `apiKeyEnv` set                                                                                    |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| stored pi credential → `PLEXUS_API_KEY` process fallback | only the named environment variable; authoritative over the stored credential and `PLEXUS_API_KEY` |
+| `apiKeyEnv` omitted (default) | `PLEXUS_API_KEY` when set; otherwise stored pi credential |
+| `apiKeyEnv` set | only the named environment variable; authoritative over stored credentials and `PLEXUS_API_KEY` |
 
-An explicit `apiKeyEnv` is authoritative even when it names `PLEXUS_API_KEY`. Saved credentials remain stored; remove `apiKeyEnv` to restore the default precedence.
+Environment keys override stored credentials. An explicit `apiKeyEnv` is authoritative even when it names `PLEXUS_API_KEY`. Saved credentials remain stored.
 
 ### Native login
 
-`/login plexus` still prompts for the base URL and API key and saves them normally. With `apiKeyEnv` explicitly set, discovery and model requests use the named environment variable instead of the saved key. Login can still configure the base URL, but entering a different key won't override `apiKeyEnv`.
+`/login plexus` still prompts for the base URL and API key and saves them normally. Discovery and model requests use an available environment key before the saved key.
 
-If the named variable is missing or empty at startup, the extension fails to load. Set the variable in the environment that launches pi or remove `apiKeyEnv`, then restart; native login cannot repair the environment setting.
+An explicit `apiKeyEnv` that is missing or empty fails at startup. Missing optional `PLEXUS_API_KEY` falls back to the saved credential.
 
 ### Missing / empty / invalid
 

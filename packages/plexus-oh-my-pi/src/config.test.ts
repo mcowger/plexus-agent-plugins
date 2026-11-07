@@ -55,7 +55,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	process.env = { ...ORIGINAL_ENV };
+	for (const name of Object.keys(process.env)) {
+		if (!(name in ORIGINAL_ENV)) delete process.env[name];
+	}
+	Object.assign(process.env, ORIGINAL_ENV);
 });
 
 test("builds Plexus endpoints once before model dialect adjustment", () => {
@@ -186,9 +189,9 @@ describe("apiKeyEnv validation", () => {
 });
 
 describe("apiKeyEnv precedence", () => {
-	test("default keeps the host-resolved key ahead of the process fallback", () => {
+	test("default environment key overrides a stale stored credential", () => {
 		process.env.PLEXUS_API_KEY = "env-key";
-		expect(resolveApiKey("stored-key")).toBe("stored-key");
+		expect(resolveApiKey("stored-key")).toBe("env-key");
 	});
 
 	test("default falls back to PLEXUS_API_KEY when no stored credential exists", () => {

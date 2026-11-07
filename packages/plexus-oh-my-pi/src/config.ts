@@ -5,6 +5,9 @@ import { getAgentDir } from "@oh-my-pi/pi-utils";
 import {
 	getEnvSuppressedModels,
 	parseSuppressionPatterns,
+	resolveApiKeyEnvSetting as parseApiKeyEnvSetting,
+	resolveApiKeyEnvValue,
+	resolvePlexusApiKey,
 } from "../../plexus-models/src/index.ts";
 
 const getConfigDir = (): string => join(getAgentDir(), "extensions", "plexus");
@@ -113,15 +116,7 @@ export const toPlexusApiBase = (raw: string): string => {
  * throws a generic error that never echoes the configured value.
  */
 function resolveApiKeyEnvSetting(): { name: string; explicit: boolean } {
-	const raw = getConfigSync().apiKeyEnv;
-	if (raw === undefined || raw === null)
-		return { name: ENV_API_KEY, explicit: false };
-
-	const name = typeof raw === "string" ? raw.trim() : "";
-	if (!ENV_VAR_NAME_RE.test(name)) {
-		throw new Error("Invalid apiKeyEnv: expected an environment variable name");
-	}
-	return { name, explicit: true };
+	return parseApiKeyEnvSetting(getConfigSync().apiKeyEnv);
 }
 
 /** Environment variable name OMP resolves for the provider API key. */
@@ -139,16 +134,10 @@ export function getApiKeyEnvName(): string {
  * but never include its value.
  */
 export function resolveExplicitApiKey(): string | undefined {
-	const { name, explicit } = resolveApiKeyEnvSetting();
-	if (!explicit) return undefined;
-
-	const value = process.env[name]?.trim();
-	if (!value) {
-		throw new Error(
-			`apiKeyEnv environment variable "${name}" is missing or empty`,
-		);
-	}
-	return value;
+	const setting = resolveApiKeyEnvSetting();
+	return setting.explicit
+		? resolveApiKeyEnvValue(setting, process.env[setting.name])
+		: undefined;
 }
 
 /** Cached parsed config, resolved once per process and invalidated on write.
@@ -215,16 +204,20 @@ export function getEnvApiKey(): string | null {
 /**
  * Resolve the effective API key for a Plexus request.
  *
- * Explicit `apiKeyEnv` is authoritative and ignores the stored credential. The
- * default chain keeps the host-resolved key ahead of the process fallback;
- * OMP's host resolver includes the registered environment override.
+ * Environment credentials override stored credentials for every API dialect.
+ * Explicit apiKeyEnv values must resolve; the default PLEXUS_API_KEY is optional.
  */
 export function resolveApiKey(
 	storedKey: string | null | undefined,
 ): string | null {
-	const explicit = resolveExplicitApiKey();
-	if (explicit) return explicit;
-	return storedKey ?? getEnvApiKey();
+	const setting = resolveApiKeyEnvSetting();
+	return (
+		resolvePlexusApiKey(
+			setting,
+			setting.explicit ? process.env[setting.name] : getEnvApiKey(),
+			storedKey,
+		) ?? null
+	);
 }
 
 /** Returns <baseUrl>/v1/models, or null. */

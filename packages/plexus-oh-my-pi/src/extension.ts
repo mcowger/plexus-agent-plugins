@@ -60,12 +60,11 @@ export function getProviderApiKeyConfig(): Pick<
 	"apiKey" | "authHeader"
 > {
 	// An explicit apiKeyEnv is authoritative and throws when its variable is
-	// missing or empty; the default PLEXUS_API_KEY remains an optional fallback.
+	// missing or empty; the default PLEXUS_API_KEY is an optional override.
 	// OMP resolves provider env references through Bun.env and treats an unknown
 	// name as a literal key, so only register a name that actually resolves.
-	const explicitApiKey = resolveExplicitApiKey();
 	const envName = getApiKeyEnvName();
-	const envValue = explicitApiKey ?? getEnvApiKey();
+	const envValue = resolveApiKey(undefined);
 	return envValue ? { apiKey: envName, authHeader: true } : {};
 }
 let currentModels: ReturnType<typeof descriptorToOhMyPiModel>[] = [];
@@ -77,15 +76,18 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	// the provider and refreshes the dynamic Plexus catalog when auth is ready.
 	// -------------------------------------------------------------------------
 	const startupBaseUrl = getBaseUrl();
+	const apiKeyConfig = getProviderApiKeyConfig();
 
 	log("startup", { catalogSource, startupBaseUrl });
 
 	pi.registerProvider(PROVIDER_NAME, {
 		api: "openai-completions" as Api,
-		...getProviderApiKeyConfig(),
+		...apiKeyConfig,
 		...(startupBaseUrl ? { baseUrl: startupBaseUrl } : {}),
 		fetchDynamicModels: fetchPlexusModelConfigs,
-		oauth: createPlexusLoginProvider(pi),
+		// OMP treats apiKey as a fallback when oauth is present. Environment
+		// overrides must own request auth, not just the Authorization header.
+		...(apiKeyConfig.apiKey ? {} : { oauth: createPlexusLoginProvider(pi) }),
 	});
 
 	// Retag the Plexus proxy's otherwise-unclassified closed-connection error so
@@ -305,13 +307,14 @@ async function doRefresh(
 
 		currentModels = ohMyPiModels;
 		catalogSource = "live refresh";
+		const apiKeyConfig = getProviderApiKeyConfig();
 		pi.registerProvider(PROVIDER_NAME, {
 			api: "openai-completions" as Api,
-			...getProviderApiKeyConfig(),
+			...apiKeyConfig,
 			baseUrl,
 			models: ohMyPiModels,
 			fetchDynamicModels: fetchPlexusModelConfigs,
-			oauth: createPlexusLoginProvider(pi),
+			...(apiKeyConfig.apiKey ? {} : { oauth: createPlexusLoginProvider(pi) }),
 		});
 
 		log("doRefresh: registered", { count: ohMyPiModels.length });

@@ -10,6 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { streamGoogle } from "@oh-my-pi/pi-ai/providers/google";
+import { stream } from "@oh-my-pi/pi-ai/stream";
 import type {
 	AssistantMessageEvent,
 	FetchImpl,
@@ -218,60 +219,112 @@ describe("Oh My Pi Plexus provider registration (apiKeyEnv)", () => {
 		});
 	});
 
-	test("explicit apiKeyEnv overrides saved credentials in native request authentication", async () => {
-		fs.writeFileSync(
-			configPath,
-			JSON.stringify({ apiKeyEnv: "AIHOME_OMP_API_KEY" }),
-		);
-		resetConfigCache();
-		Bun.env.AIHOME_OMP_API_KEY = RESOLVED_API_KEY;
-		const authStorage = await AuthStorage.create(
-			path.join(tempDir, "request-auth.db"),
-		);
-		const registry = new ModelRegistry(
-			authStorage,
-			path.join(tempDir, "models.json"),
-		);
-		const sourceId = "ext://plexus-custom-env-test";
-		const originalUrls = [Bun.env.PLEXUS_API_URL, Bun.env.PLEXUS_BASE_URL];
-		delete Bun.env.PLEXUS_API_URL;
-		delete Bun.env.PLEXUS_BASE_URL;
-		try {
-			await authStorage.credentials.set("plexus", {
-				type: "api_key",
-				key: "saved-key",
-			});
-			const pi = {
-				on() {},
-				registerProvider(
-					name: string,
-					config: Parameters<typeof registry.registerProvider>[1],
-				) {
-					registry.registerProvider(name, config, sourceId);
-				},
-				registerCommand() {},
-			} as unknown as ExtensionAPI;
-			plexusExtension(pi);
-			expect(await authStorage.keys.get("plexus")).toBe(RESOLVED_API_KEY);
-			expect(authStorage.credentials.get("plexus")).toMatchObject({
-				key: "saved-key",
-			});
-			registry.clearSourceRegistrations(sourceId);
-			expect(await authStorage.keys.get("plexus")).toBe("saved-key");
-		} finally {
-			registry.clearSourceRegistrations(sourceId);
-			authStorage.close();
-			delete Bun.env.AIHOME_OMP_API_KEY;
-			for (const [index, name] of [
-				"PLEXUS_API_URL",
-				"PLEXUS_BASE_URL",
-			].entries()) {
-				const value = originalUrls[index];
-				if (value === undefined) delete Bun.env[name];
-				else Bun.env[name] = value;
+	test.each([
+		[true, "anthropic-messages"],
+		[true, "openai-completions"],
+		[true, "openai-responses"],
+		[false, "anthropic-messages"],
+		[false, "openai-completions"],
+		[false, "openai-responses"],
+	] as const)(
+		"environment credentials override saved credentials (explicit=%s, api=%s)",
+		async (explicit, api) => {
+			fs.writeFileSync(
+				configPath,
+				JSON.stringify(explicit ? { apiKeyEnv: "AIHOME_OMP_API_KEY" } : {}),
+			);
+			resetConfigCache();
+			Bun.env.AIHOME_OMP_API_KEY = RESOLVED_API_KEY;
+			Bun.env[ENV_API_KEY] = explicit ? "wrong-default-key" : RESOLVED_API_KEY;
+			const authStorage = await AuthStorage.create(
+				path.join(tempDir, `request-auth-${explicit}-${api}.db`),
+			);
+			const registry = new ModelRegistry(
+				authStorage,
+				path.join(tempDir, "models.json"),
+			);
+			const sourceId = "ext://plexus-custom-env-test";
+			const originalUrls = [Bun.env.PLEXUS_API_URL, Bun.env.PLEXUS_BASE_URL];
+			delete Bun.env.PLEXUS_API_URL;
+			delete Bun.env.PLEXUS_BASE_URL;
+			try {
+				await authStorage.credentials.set("plexus", {
+					type: "api_key",
+					key: "saved-key",
+				});
+				const pi = {
+					on() {},
+					registerProvider(
+						name: string,
+						config: Parameters<typeof registry.registerProvider>[1],
+					) {
+						registry.registerProvider(
+							name,
+							{
+								...config,
+								baseUrl: "https://plexus.example.com/v1",
+								models: [
+									{
+										id: "claude-auth-test",
+										name: "Claude Auth Test",
+										api,
+										reasoning: false,
+										input: ["text"],
+										cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+										contextWindow: 8192,
+										maxTokens: 128,
+									},
+								],
+							},
+							sourceId,
+						);
+					},
+					registerCommand() {},
+				} as unknown as ExtensionAPI;
+				plexusExtension(pi);
+				expect(await authStorage.keys.get("plexus")).toBe(RESOLVED_API_KEY);
+				expect(authStorage.credentials.get("plexus")).toMatchObject({
+					key: "saved-key",
+				});
+				const model = registry.find("plexus", "claude-auth-test");
+				if (!model) throw new Error("Request model not registered");
+				const authorizations: (string | null)[] = [];
+				await stream(
+					model,
+					{
+						messages: [{ role: "user", content: "Hi", timestamp: 1 }],
+					},
+					{
+						apiKey: await registry.getApiKey(model),
+						fetch: async (_url, init) => {
+							authorizations.push(
+								new Headers(init?.headers).get("authorization"),
+							);
+							return Response.json(
+								{ error: { message: "captured" } },
+								{ status: 400 },
+							);
+						},
+					},
+				).result();
+				expect(authorizations).toEqual([`Bearer ${RESOLVED_API_KEY}`]);
+				registry.clearSourceRegistrations(sourceId);
+				expect(await authStorage.keys.get("plexus")).toBe("saved-key");
+			} finally {
+				registry.clearSourceRegistrations(sourceId);
+				authStorage.close();
+				delete Bun.env.AIHOME_OMP_API_KEY;
+				for (const [index, name] of [
+					"PLEXUS_API_URL",
+					"PLEXUS_BASE_URL",
+				].entries()) {
+					const value = originalUrls[index];
+					if (value === undefined) delete Bun.env[name];
+					else Bun.env[name] = value;
+				}
 			}
-		}
-	});
+		},
+	);
 
 	test("omitted apiKeyEnv preserves OMP's registered env override above saved credentials", async () => {
 		fs.rmSync(configPath, { force: true });

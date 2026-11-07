@@ -59,7 +59,7 @@ An explicit `apiKeyEnv` is authoritative even when it names `PLEXUS_API_KEY`. Sa
 
 ### Native login
 
-`/login plexus` still prompts for the base URL and API key and saves them normally. With `apiKeyEnv` explicitly set, discovery and model requests, including the immediate post-login refresh, use the named environment variable instead of the saved key. Login can still configure the base URL, but entering a different key won't override `apiKeyEnv`.
+`/login plexus` is available when no environment key override is active. While `apiKeyEnv` or `PLEXUS_API_KEY` supplies a key, the extension omits the login provider so OMP treats that key as authoritative for Messages, Responses, and Chat Completions. Registering both would let saved login credentials replace the environment key on Messages requests. Configure the base URL in `config.json` or through `PLEXUS_API_URL` / `PLEXUS_BASE_URL` while using an environment key.
 
 If the named variable is missing or empty at startup, the extension fails to load. Set the variable in the environment that launches OMP or remove `apiKeyEnv`, then restart; native login cannot repair the environment setting.
 

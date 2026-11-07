@@ -20,7 +20,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	process.env = { ...ORIGINAL_ENV };
+	for (const name of Object.keys(process.env)) {
+		if (!(name in ORIGINAL_ENV)) delete process.env[name];
+	}
+	Object.assign(process.env, ORIGINAL_ENV);
 	resetConfigCache();
 	rmSync(agentDir, { recursive: true, force: true });
 });
