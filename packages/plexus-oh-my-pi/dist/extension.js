@@ -17424,6 +17424,12 @@ function convertToDescriptor(raw, baseUrl) {
     descriptor.piModel = raw.pi_model;
   if (raw.pi_options && Object.keys(raw.pi_options).length > 0)
     descriptor.piOptions = raw.pi_options;
+  const effortOption = raw.reasoning_options?.find((option) => option.type === "effort");
+  if (effortOption !== undefined) {
+    const values = effortOption.values.filter((value) => typeof value === "string" && value.length > 0);
+    if (values.length > 0)
+      descriptor.effortValues = values;
+  }
   return descriptor;
 }
 function isChatModel(model) {
@@ -25201,6 +25207,20 @@ init_utils();
 init_codex();
 
 // src/mapper.ts
+function serverEffortThinking(descriptor) {
+  if (!descriptor.reasoning)
+    return;
+  if (descriptor.preferredApi !== "openai-completions" && descriptor.preferredApi !== "openai-responses") {
+    return;
+  }
+  const values = descriptor.effortValues;
+  if (values === undefined)
+    return;
+  const efforts = THINKING_EFFORTS.filter((effort) => values.includes(effort));
+  if (efforts.length === 0)
+    return;
+  return { mode: "effort", efforts };
+}
 function descriptorToOhMyPiModel(descriptor) {
   let builtinModel;
   if (descriptor.piProvider && descriptor.piModel) {
@@ -25239,6 +25259,7 @@ function descriptorToOhMyPiModel(descriptor) {
   } else if (builtinModel?.compat) {
     compat = builtinModel.compat;
   }
+  const serverThinking = serverEffortThinking(descriptor);
   return {
     id: descriptor.id,
     name: descriptor.name,
@@ -25250,7 +25271,7 @@ function descriptorToOhMyPiModel(descriptor) {
     cost,
     contextWindow: descriptor.contextWindow,
     maxTokens: descriptor.maxTokens,
-    ...builtinModel?.thinking !== undefined ? { thinking: builtinModel.thinking } : {},
+    ...serverThinking !== undefined ? { thinking: serverThinking } : builtinModel?.thinking !== undefined ? { thinking: builtinModel.thinking } : {},
     ...builtinModel?.headers !== undefined ? { headers: builtinModel.headers } : {},
     ...compat !== undefined ? { compat } : {}
   };

@@ -1,4 +1,8 @@
-import type { PlexusApiModel, PlexusModelDescriptor } from "./types.ts";
+import type {
+	PlexusApiModel,
+	PlexusModelDescriptor,
+	PlexusReasoningOption,
+} from "./types.ts";
 
 const REASONING_PARAMS = new Set([
 	"reasoning",
@@ -193,6 +197,16 @@ export function convertToDescriptor(
 	if (raw.pi_model) descriptor.piModel = raw.pi_model;
 	if (raw.pi_options && Object.keys(raw.pi_options).length > 0)
 		descriptor.piOptions = raw.pi_options;
+	const effortOption = raw.reasoning_options?.find(
+		(option): option is Extract<PlexusReasoningOption, { type: "effort" }> =>
+			option.type === "effort",
+	);
+	if (effortOption !== undefined) {
+		const values = effortOption.values.filter(
+			(value): value is string => typeof value === "string" && value.length > 0,
+		);
+		if (values.length > 0) descriptor.effortValues = values;
+	}
 
 	return descriptor;
 }

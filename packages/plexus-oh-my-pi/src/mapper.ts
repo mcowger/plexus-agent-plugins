@@ -4,7 +4,12 @@
 // dropped `thinkingLevelMap` in favor of a structured `thinking` config.
 
 import type { Api } from "@oh-my-pi/pi-ai";
-import { type GeneratedProvider, getBundledModel } from "@oh-my-pi/pi-catalog";
+import {
+	type Effort,
+	type GeneratedProvider,
+	getBundledModel,
+	THINKING_EFFORTS,
+} from "@oh-my-pi/pi-catalog";
 import {
 	convertDescriptors,
 	detectOpenAICompletionsCompat,
@@ -24,10 +29,41 @@ import {
  *      Oh My Pi's bundled catalog, which is a superset of upstream pi's)
  *   3. Merge in pi_options from the Plexus server (server wins on any overlap)
  * Other API dialects leave compat undefined so the host auto-detects.
- *
- * `thinking` and `headers` are copied from pi_provider/pi_model's bundled
- * catalog entry when present.
+ * Thinking resolution:
+ *   1. Server-advertised effort dial (`descriptor.effortValues`) as an
+ *      explicit thinking config for the OpenAI dialects (see
+ *      serverEffortThinking). Wins over the catalog: the server is
+ *      authoritative for the plexus deployment.
+ *   2. Bundled catalog entry for pi_provider/pi_model, when present.
+ * Otherwise OMP derives a generic ladder (minimal..xhigh for
+ * openai-responses) that can cap below the server tier.
+ * Headers are copied from the catalog entry when present.
  */
+
+/**
+ * Explicit thinking config from the server-advertised effort dial.
+ * Wins over the bundled catalog entry when both exist: the server is
+ * authoritative for the plexus deployment (e.g. muse-spark-1.3 caps at
+ * xhigh on the server while the catalog offers max). Effort mode is
+ * the host default transport for the OpenAI dialects, so only those
+ * dialects map here; other dialects keep the host derivation.
+ */
+function serverEffortThinking(
+	descriptor: PlexusModelDescriptor,
+): { mode: "effort"; efforts: Effort[] } | undefined {
+	if (!descriptor.reasoning) return undefined;
+	if (
+		descriptor.preferredApi !== "openai-completions" &&
+		descriptor.preferredApi !== "openai-responses"
+	) {
+		return undefined;
+	}
+	const values = descriptor.effortValues;
+	if (values === undefined) return undefined;
+	const efforts = THINKING_EFFORTS.filter((effort) => values.includes(effort));
+	if (efforts.length === 0) return undefined;
+	return { mode: "effort", efforts };
+}
 export function descriptorToOhMyPiModel(descriptor: PlexusModelDescriptor) {
 	let builtinModel: ReturnType<typeof getBundledModel> | undefined;
 	if (descriptor.piProvider && descriptor.piModel) {
@@ -80,7 +116,9 @@ export function descriptorToOhMyPiModel(descriptor: PlexusModelDescriptor) {
 	} else if (builtinModel?.compat) {
 		compat = builtinModel.compat as Record<string, unknown>;
 	}
-
+	// Explicit thinking from the server effort dial. Wins over the
+	// bundled catalog entry when both exist.
+	const serverThinking = serverEffortThinking(descriptor);
 	return {
 		id: descriptor.id,
 		name: descriptor.name,
@@ -92,9 +130,11 @@ export function descriptorToOhMyPiModel(descriptor: PlexusModelDescriptor) {
 		cost,
 		contextWindow: descriptor.contextWindow,
 		maxTokens: descriptor.maxTokens,
-		...(builtinModel?.thinking !== undefined
-			? { thinking: builtinModel.thinking }
-			: {}),
+		...(serverThinking !== undefined
+			? { thinking: serverThinking }
+			: builtinModel?.thinking !== undefined
+				? { thinking: builtinModel.thinking }
+				: {}),
 		...(builtinModel?.headers !== undefined
 			? { headers: builtinModel.headers }
 			: {}),

@@ -45,6 +45,87 @@ describe("descriptorToPiModel", () => {
 		expect(model.maxTokens).toBe(MINIMUM_OUTPUT_TOKENS);
 	});
 
+	test("maps server effort values to an identity thinkingLevelMap", () => {
+		const model = descriptorToPiModel({
+			id: "muse-ember-1.0",
+			name: "Muse Ember",
+			preferredApi: "openai-responses",
+			provider: "plexus",
+			baseUrl: "https://plexus.example.com/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1_000_000,
+			maxTokens: 524_288,
+			effortValues: ["minimal", "low", "medium", "high", "xhigh", "max"],
+		});
+
+		expect(model.thinkingLevelMap).toEqual({
+			minimal: "minimal",
+			low: "low",
+			medium: "medium",
+			high: "high",
+			xhigh: "xhigh",
+			max: "max",
+		});
+	});
+
+	test("server effort values win over the built-in catalog entry", () => {
+		// Built-in gpt-5.2 maps max to null; the server advertises max
+		// and wins.
+		const model = descriptorToPiModel({
+			id: "gpt-6-luna",
+			name: "GPT-6 Luna",
+			preferredApi: "openai-responses",
+			provider: "plexus",
+			baseUrl: "https://plexus.example.com/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1_000_000,
+			maxTokens: 524_288,
+			piProvider: "openai",
+			piModel: "gpt-5.2",
+			effortValues: ["low", "medium", "high", "xhigh", "max"],
+		});
+
+		expect(model.thinkingLevelMap).toEqual({
+			low: "low",
+			medium: "medium",
+			high: "high",
+			xhigh: "xhigh",
+			max: "max",
+		});
+	});
+
+	test("omits thinkingLevelMap without server effort values or off-dialect", () => {
+		const base = {
+			name: "Muse Ember",
+			provider: "plexus" as const,
+			baseUrl: "https://plexus.example.com/v1",
+			reasoning: true,
+			input: ["text"] as ("text" | "image")[],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1_000_000,
+			maxTokens: 524_288,
+		};
+		expect(
+			descriptorToPiModel({
+				...base,
+				id: "no-effort",
+				preferredApi: "openai-responses",
+			}),
+		).not.toHaveProperty("thinkingLevelMap");
+		expect(
+			descriptorToPiModel({
+				...base,
+				id: "messages",
+				preferredApi: "anthropic-messages",
+				effortValues: ["low", "max"],
+			}),
+		).not.toHaveProperty("thinkingLevelMap");
+	});
+
 	test("maps each API dialect to the base expected by pi", () => {
 		const models = convertToPiModels(
 			[

@@ -158,6 +158,36 @@ describe("convertToDescriptor", () => {
 			).shortName,
 		).toBeUndefined();
 	});
+
+	test("carries the server-advertised effort dial into effortValues", () => {
+		const descriptor = convertToDescriptor(
+			{
+				...baseModel,
+				reasoning_options: [
+					{
+						type: "effort",
+						values: ["off", null, "low", "high", "max"],
+					},
+				],
+			},
+			"https://plexus.example.com/v1",
+		);
+
+		expect(descriptor.effortValues).toEqual(["off", "low", "high", "max"]);
+	});
+
+	test("omits effortValues without an effort option", () => {
+		expect(
+			convertToDescriptor(baseModel, "https://plexus.example.com/v1")
+				.effortValues,
+		).toBeUndefined();
+		expect(
+			convertToDescriptor(
+				{ ...baseModel, reasoning_options: [{ type: "toggle" }] },
+				"https://plexus.example.com/v1",
+			).effortValues,
+		).toBeUndefined();
+	});
 });
 
 describe("isChatModel", () => {

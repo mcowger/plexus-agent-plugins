@@ -116,6 +116,14 @@ export interface PlexusModelDescriptor {
 	/** Base URL adjusted for the API dialect. */
 	baseUrl: string;
 	reasoning: boolean;
+	/**
+	 * Server-advertised effort dial values from `reasoning_options`
+	 * (e.g. ["minimal", "low", "medium", "high", "xhigh", "max"]).
+	 * Present only when the server advertises an effort dial. Host
+	 * interpretation is dialect-specific (OMP effort ladder, pi
+	 * thinkingLevelMap). Note: "off" is not an OMP Effort value.
+	 */
+	effortValues?: string[];
 	input: ("text" | "image")[];
 	cost: {
 		/** $/million tokens (parsed float, 0 when absent or invalid). */

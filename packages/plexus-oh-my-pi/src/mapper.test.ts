@@ -97,4 +97,108 @@ describe("descriptorToOhMyPiModel", () => {
 			],
 		});
 	});
+
+	test("surfaces server effort values as explicit thinking", () => {
+		const model = descriptorToOhMyPiModel({
+			id: "muse-ember-1.0",
+			name: "Muse Ember",
+			preferredApi: "openai-responses",
+			provider: "plexus",
+			baseUrl: "https://plexus.example.com/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1_000_000,
+			maxTokens: 524_288,
+			effortValues: ["minimal", "low", "medium", "high", "xhigh", "max"],
+		});
+
+		expect(model.thinking).toEqual({
+			mode: "effort",
+			efforts: ["minimal", "low", "medium", "high", "xhigh", "max"],
+		});
+	});
+
+	test("drops off and unknown efforts from the server dial", () => {
+		const model = descriptorToOhMyPiModel({
+			id: "deepseek-v4.1-flash",
+			name: "DeepSeek V4.1 Flash",
+			preferredApi: "openai-completions",
+			provider: "plexus",
+			baseUrl: "https://plexus.example.com/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128_000,
+			maxTokens: 8_192,
+			effortValues: ["off", "low", "high", "max"],
+		});
+
+		expect(model.thinking).toEqual({
+			mode: "effort",
+			efforts: ["low", "high", "max"],
+		});
+	});
+
+	test("server effort values win over the bundled catalog entry", () => {
+		// The bundled catalog offers max for this id; the server caps
+		// at xhigh, and the server wins.
+		const model = descriptorToOhMyPiModel({
+			id: "muse-spark-1.3",
+			name: "Muse Spark 1.3",
+			preferredApi: "openai-responses",
+			provider: "plexus",
+			baseUrl: "https://plexus.example.com/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1_000_000,
+			maxTokens: 131_072,
+			piProvider: "meta",
+			piModel: "muse-spark-1.3-contributor",
+			effortValues: ["minimal", "low", "medium", "high", "xhigh"],
+		});
+
+		expect(model.thinking).toEqual({
+			mode: "effort",
+			efforts: ["minimal", "low", "medium", "high", "xhigh"],
+		});
+	});
+
+	test("omits thinking without server effort values or off-dialect", () => {
+		const base = {
+			name: "Muse Ember",
+			provider: "plexus" as const,
+			baseUrl: "https://plexus.example.com/v1",
+			reasoning: true,
+			input: ["text"] as ("text" | "image")[],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1_000_000,
+			maxTokens: 524_288,
+		};
+		expect(
+			descriptorToOhMyPiModel({
+				...base,
+				id: "no-effort",
+				preferredApi: "openai-responses",
+			}),
+		).not.toHaveProperty("thinking");
+		expect(
+			descriptorToOhMyPiModel({
+				...base,
+				id: "messages",
+				preferredApi: "anthropic-messages",
+				effortValues: ["low", "max"],
+			}),
+		).not.toHaveProperty("thinking");
+		expect(
+			descriptorToOhMyPiModel({
+				...base,
+				id: "non-reasoning",
+				preferredApi: "openai-responses",
+				reasoning: false,
+				effortValues: ["low", "max"],
+			}),
+		).not.toHaveProperty("thinking");
+	});
 });

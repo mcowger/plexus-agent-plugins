@@ -149,6 +149,12 @@ function convertToDescriptor(raw, baseUrl) {
     descriptor.piModel = raw.pi_model;
   if (raw.pi_options && Object.keys(raw.pi_options).length > 0)
     descriptor.piOptions = raw.pi_options;
+  const effortOption = raw.reasoning_options?.find((option) => option.type === "effort");
+  if (effortOption !== undefined) {
+    const values = effortOption.values.filter((value) => typeof value === "string" && value.length > 0);
+    if (values.length > 0)
+      descriptor.effortValues = values;
+  }
   return descriptor;
 }
 function isChatModel(model) {
@@ -634,6 +640,30 @@ import {
   getModel
 } from "@earendil-works/pi-ai/compat";
 var MINIMUM_OUTPUT_TOKENS = 8192;
+var SERVER_EFFORT_LEVELS = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max"
+];
+function serverThinkingLevelMap(descriptor) {
+  if (!descriptor.reasoning)
+    return;
+  if (descriptor.preferredApi !== "openai-completions" && descriptor.preferredApi !== "openai-responses") {
+    return;
+  }
+  const values = descriptor.effortValues;
+  if (values === undefined)
+    return;
+  const map = {};
+  for (const level of SERVER_EFFORT_LEVELS) {
+    if (values.includes(level))
+      map[level] = level;
+  }
+  return Object.keys(map).length > 0 ? map : undefined;
+}
 function descriptorToPiModel(descriptor) {
   let builtinModel;
   if (descriptor.piProvider && descriptor.piModel) {
@@ -673,6 +703,7 @@ function descriptorToPiModel(descriptor) {
   } else if (builtinModel?.compat) {
     compat = builtinModel.compat;
   }
+  const serverThinkingLevelMapValue = serverThinkingLevelMap(descriptor);
   return {
     id: descriptor.id,
     name: descriptor.name,
@@ -685,7 +716,7 @@ function descriptorToPiModel(descriptor) {
     cost,
     contextWindow: descriptor.contextWindow,
     maxTokens: Math.max(descriptor.maxTokens, MINIMUM_OUTPUT_TOKENS),
-    ...builtinModel?.thinkingLevelMap !== undefined ? { thinkingLevelMap: builtinModel.thinkingLevelMap } : {},
+    ...serverThinkingLevelMapValue !== undefined ? { thinkingLevelMap: serverThinkingLevelMapValue } : builtinModel?.thinkingLevelMap !== undefined ? { thinkingLevelMap: builtinModel.thinkingLevelMap } : {},
     ...builtinModel?.headers !== undefined ? { headers: builtinModel.headers } : {},
     ...compat !== undefined ? { compat } : {}
   };

@@ -15,6 +15,41 @@ import {
 
 export const MINIMUM_OUTPUT_TOKENS = 8_192;
 
+const SERVER_EFFORT_LEVELS = [
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+] as const;
+
+/**
+ * Identity thinkingLevelMap from the server-advertised effort dial.
+ * Wins over the built-in catalog entry when both exist: the server is
+ * authoritative for the plexus deployment. "off" is not mapped — pi's
+ * default off handling applies. Only the OpenAI dialects use identity
+ * wire values; other dialects keep the host derivation.
+ */
+function serverThinkingLevelMap(
+	descriptor: PlexusModelDescriptor,
+): Record<string, string> | undefined {
+	if (!descriptor.reasoning) return undefined;
+	if (
+		descriptor.preferredApi !== "openai-completions" &&
+		descriptor.preferredApi !== "openai-responses"
+	) {
+		return undefined;
+	}
+	const values = descriptor.effortValues;
+	if (values === undefined) return undefined;
+	const map: Record<string, string> = {};
+	for (const level of SERVER_EFFORT_LEVELS) {
+		if (values.includes(level)) map[level] = level;
+	}
+	return Object.keys(map).length > 0 ? map : undefined;
+}
+
 /**
  * Maps a PlexusModelDescriptor to a pi ProviderModelConfig entry suitable for
  * use in pi.registerProvider({ models: [...] }).
@@ -27,7 +62,13 @@ export const MINIMUM_OUTPUT_TOKENS = 8_192;
  *   3. Merge in pi_options from the Plexus server (server wins on any overlap)
  * Other API dialects leave compat undefined so the host auto-detects.
  *
- * thinkingLevelMap and headers are copied from pi_provider/pi_model when present.
+ * thinkingLevelMap resolution:
+ *   1. Server-advertised effort dial (`descriptor.effortValues`) as an
+ *      identity map for the OpenAI dialects (see serverThinkingLevelMap).
+ *      Wins over the built-in catalog entry when both exist: the server
+ *      is authoritative for the plexus deployment.
+ *   2. Built-in catalog entry for pi_provider/pi_model, when present.
+ * Headers are copied from the built-in entry when present.
  *
  * The server-advertised short name rides along as an extra `plexusShortName`
  * prop (same pattern as the extension's `plexusContextPolicy` /
@@ -87,6 +128,9 @@ export function descriptorToPiModel(descriptor: PlexusModelDescriptor) {
 	} else if (builtinModel?.compat) {
 		compat = builtinModel.compat as OpenAICompletionsCompat;
 	}
+	// Identity map from the server effort dial. Wins over the
+	// built-in catalog entry when both exist.
+	const serverThinkingLevelMapValue = serverThinkingLevelMap(descriptor);
 
 	return {
 		id: descriptor.id,
@@ -102,9 +146,11 @@ export function descriptorToPiModel(descriptor: PlexusModelDescriptor) {
 		cost,
 		contextWindow: descriptor.contextWindow,
 		maxTokens: Math.max(descriptor.maxTokens, MINIMUM_OUTPUT_TOKENS),
-		...(builtinModel?.thinkingLevelMap !== undefined
-			? { thinkingLevelMap: builtinModel.thinkingLevelMap }
-			: {}),
+		...(serverThinkingLevelMapValue !== undefined
+			? { thinkingLevelMap: serverThinkingLevelMapValue }
+			: builtinModel?.thinkingLevelMap !== undefined
+				? { thinkingLevelMap: builtinModel.thinkingLevelMap }
+				: {}),
 		...(builtinModel?.headers !== undefined
 			? { headers: builtinModel.headers }
 			: {}),
