@@ -94,5 +94,5 @@ conversion and should not be treated as authoritative prices.
 
 ## Notes
 
-- Model discovery runs through the provider's dynamic-model hook. `/plexus refresh` forces a live fetch without changing the model selected for the session.
+- Model discovery runs through the provider's dynamic-model hook. `/plexus refresh` updates the in-memory catalog and rebinds the selected Plexus model to its refreshed metadata without changing the selection; OMP retains its configured thinking selection, including `auto`. If the selected model is no longer advertised, it remains selected until you choose another model.
 - `PLEXUS_API_URL` / `PLEXUS_BASE_URL` override the stored base URL, and `PLEXUS_SUPPRESS_MODELS` / `PLEXUS_EXCLUDE_MODELS` suppress models. See the repository README for details.

@@ -25466,15 +25466,37 @@ async function doRefresh(pi, apiKey, ctx) {
     const ohMyPiModels = descriptors.map(descriptorToOhMyPiModel);
     currentModels = ohMyPiModels;
     catalogSource = "live refresh";
+    let pendingModels = ctx ? ohMyPiModels : undefined;
+    if (ctx)
+      pi.unregisterProvider(PROVIDER_NAME);
     const apiKeyConfig = getProviderApiKeyConfig();
     pi.registerProvider(PROVIDER_NAME, {
       api: "openai-completions",
       ...apiKeyConfig,
       baseUrl,
-      models: ohMyPiModels,
-      fetchDynamicModels: fetchPlexusModelConfigs,
+      ...ctx ? {} : { models: ohMyPiModels },
+      fetchDynamicModels: async (key) => {
+        if (pendingModels !== undefined) {
+          const models = pendingModels;
+          pendingModels = undefined;
+          return models;
+        }
+        return fetchPlexusModelConfigs(key);
+      },
       ...apiKeyConfig.apiKey ? {} : { oauth: createPlexusLoginProvider(pi) }
     });
+    if (ctx) {
+      await ctx.modelRegistry.refreshProvider(PROVIDER_NAME, "online");
+      const selected = ctx.model;
+      if (selected?.provider === PROVIDER_NAME) {
+        const updated = ctx.modelRegistry.find(PROVIDER_NAME, selected.id);
+        if (updated) {
+          if (!await pi.setModel(updated)) {
+            throw new Error("Unable to update the selected Plexus model");
+          }
+        }
+      }
+    }
     log("doRefresh: registered", { count: ohMyPiModels.length });
     if (ctx)
       ctx.ui.notify(`Refreshed ${ohMyPiModels.length} Plexus models`, "info");
