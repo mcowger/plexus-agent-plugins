@@ -25230,11 +25230,21 @@ function descriptorToOhMyPiModel(descriptor) {
       builtinModel = undefined;
     }
   }
+  const firstTier = descriptor.cost.tiers?.reduce((first, tier) => tier.inputTokensAbove > 0 && (!first || tier.inputTokensAbove < first.inputTokensAbove) ? tier : first, undefined);
   const cost = {
     input: descriptor.cost.input * 1e6,
     output: descriptor.cost.output * 1e6,
     cacheRead: descriptor.cost.cacheRead * 1e6,
     cacheWrite: descriptor.cost.cacheWrite * 1e6,
+    ...firstTier ? {
+      longContext: {
+        inputThreshold: firstTier.inputTokensAbove,
+        input: firstTier.input * 1e6,
+        output: firstTier.output * 1e6,
+        cacheRead: firstTier.cacheRead * 1e6,
+        cacheWrite: firstTier.cacheWrite * 1e6
+      }
+    } : {},
     ...descriptor.cost.tiers ? {
       tiers: descriptor.cost.tiers.map((tier) => ({
         inputTokensAbove: tier.inputTokensAbove,

@@ -72,6 +72,26 @@ When `apiKeyEnv` is set:
 
 Environment variables and config are read when Oh My Pi starts. Editing `config.json` or the named variable requires a restart; reloading the extension does not re-read the process environment.
 
+## Extended context and pricing
+
+After upgrading the extension, restart OMP and run `/plexus refresh` to refresh
+the dynamic model catalog. For a model with a Plexus pricing breakpoint below
+its advertised context window, OMP normally uses that breakpoint as the window
+when extended context is off. Use `/extended-context on`, `/extended-context
+off`, or `/extended-context status` to select or inspect the setting. Models
+without a breakpoint, or with a smaller provider window, keep their window.
+Explicit model window overrides still take precedence. An OMP per-model
+compaction threshold beyond the standard window can also opt that model into
+its extended window, even when the global toggle is off. Idle compaction is
+independent of the extended-context toggle.
+
+This is not a strict billing ceiling: an individual request can jump past the
+maintenance threshold, and provider token accounting can differ. OMP supports
+one long-context price tier in its cost estimator; if Plexus advertises multiple
+tiers, OMP estimates using the first breakpoint and cannot accurately estimate
+requests in later tiers. Missing Plexus rates use the existing zero/default
+conversion and should not be treated as authoritative prices.
+
 ## Notes
 
 - Model discovery runs through the provider's dynamic-model hook. `/plexus refresh` forces a live fetch without changing the model selected for the session.

@@ -77,11 +77,34 @@ export function descriptorToOhMyPiModel(descriptor: PlexusModelDescriptor) {
 		}
 	}
 
+	// OMP's window policy and cost estimator consume longContext, not tiers.
+	// Keep all tiers as supplied; OMP currently estimates only the first one.
+	const firstTier = descriptor.cost.tiers?.reduce<
+		NonNullable<typeof descriptor.cost.tiers>[number] | undefined
+	>(
+		(first, tier) =>
+			tier.inputTokensAbove > 0 &&
+			(!first || tier.inputTokensAbove < first.inputTokensAbove)
+				? tier
+				: first,
+		undefined,
+	);
 	const cost = {
 		input: descriptor.cost.input * 1_000_000,
 		output: descriptor.cost.output * 1_000_000,
 		cacheRead: descriptor.cost.cacheRead * 1_000_000,
 		cacheWrite: descriptor.cost.cacheWrite * 1_000_000,
+		...(firstTier
+			? {
+					longContext: {
+						inputThreshold: firstTier.inputTokensAbove,
+						input: firstTier.input * 1_000_000,
+						output: firstTier.output * 1_000_000,
+						cacheRead: firstTier.cacheRead * 1_000_000,
+						cacheWrite: firstTier.cacheWrite * 1_000_000,
+					},
+				}
+			: {}),
 		...(descriptor.cost.tiers
 			? {
 					tiers: descriptor.cost.tiers.map((tier) => ({

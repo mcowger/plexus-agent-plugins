@@ -86,6 +86,13 @@ describe("descriptorToOhMyPiModel", () => {
 			output: 30,
 			cacheRead: 0.5,
 			cacheWrite: 6.25,
+			longContext: {
+				inputThreshold: 272_000,
+				input: 10,
+				output: 45,
+				cacheRead: 1,
+				cacheWrite: 12.5,
+			},
 			tiers: [
 				{
 					inputTokensAbove: 272_000,
@@ -96,6 +103,56 @@ describe("descriptorToOhMyPiModel", () => {
 				},
 			],
 		});
+	});
+
+	test("maps the lowest positive breakpoint without losing the full window or tiers", () => {
+		const [model] = convertToOhMyPiModels(
+			[
+				{
+					id: "multi",
+					context_length: 1_050_000,
+					pricing: {
+						prompt: "0.000001",
+						completion: "0.000002",
+						tiers: [
+							{ input_tokens_above: 700_000, prompt: "0.000004" },
+							{ input_tokens_above: 500_000, prompt: "0.000003" },
+						],
+					},
+				},
+			],
+			"https://plexus.example/v1",
+		);
+		expect(model.contextWindow).toBe(1_050_000);
+		expect(model.cost.longContext).toEqual({
+			inputThreshold: 500_000,
+			input: 3,
+			output: 2,
+			cacheRead: 0,
+			cacheWrite: 0,
+		});
+		expect(model.cost.tiers?.map((t) => t.inputTokensAbove)).toEqual([
+			700_000, 500_000,
+		]);
+	});
+
+	test("does not add a long context tier without a valid positive breakpoint", () => {
+		const models = convertToOhMyPiModels(
+			[
+				{ id: "none", context_length: 100_000 },
+				{ id: "zero", pricing: { tiers: [{ input_tokens_above: 0 }] } },
+				{
+					id: "small",
+					context_length: 100_000,
+					pricing: { tiers: [{ input_tokens_above: 272_000 }] },
+				},
+			],
+			"https://plexus.example/v1",
+		);
+		expect(models[0].cost.longContext).toBeUndefined();
+		expect(models[1].cost.longContext).toBeUndefined();
+		expect(models[2].contextWindow).toBe(100_000);
+		expect(models[2].cost.longContext?.inputThreshold).toBe(272_000);
 	});
 
 	test("surfaces server effort values as explicit thinking", () => {
