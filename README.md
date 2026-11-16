@@ -57,6 +57,10 @@ Then register the path in `~/.pi/agent/settings.json`:
 
 Oh My Pi is a fork of pi and is **not** wire-compatible with `plexus-pi` in every respect (different runtime packages, extension manifest field, and built-in model registry — see [AGENTS.md](AGENTS.md)), so it has its own adapter package.
 
+Plexus Decisions aliases are available as OMP judge models, not chat models.
+Set `modelRoles.judge` to `plexus/<alias>` and list them with
+`omp models --kind judge`. See the [OMP plugin README](packages/plexus-oh-my-pi/README.md#decisions-judge-models) for refresh and endpoint requirements.
+
 #### Option 1 — npm (recommended)
 
 ```sh

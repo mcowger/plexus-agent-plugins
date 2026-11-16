@@ -72,6 +72,17 @@ When `apiKeyEnv` is set:
 
 Environment variables and config are read when Oh My Pi starts. Editing `config.json` or the named variable requires a restart; reloading the extension does not re-read the process environment.
 
+## Decisions judge models
+
+Plexus aliases advertised with `type: decisions` are discovered as OMP judge
+models, not chat models. Configure `modelRoles.judge` as `plexus/<alias>` and
+use `omp models --kind judge` to list them. Judgments use the Plexus
+`/v1/systemone` endpoint and the same credential as chat requests.
+
+After upgrading the extension, restart OMP and run `/plexus refresh` to replace
+the cached catalog. The Plexus server must expose the Decisions alias in
+`/v1/models` and support `/v1/systemone`.
+
 ## Extended context and pricing
 
 After upgrading the extension, restart OMP and run `/plexus refresh` to refresh

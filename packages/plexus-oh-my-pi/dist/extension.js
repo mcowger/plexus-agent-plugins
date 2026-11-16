@@ -17513,6 +17513,14 @@ function isSuppressedModel(model, suppress) {
   }
   return false;
 }
+function filterSuppressedModels(models, suppress) {
+  if (!suppress)
+    return models;
+  const patterns = parseSuppressionPatterns(suppress);
+  if (patterns.length === 0)
+    return models;
+  return models.filter((m) => !isSuppressedModel(m, patterns));
+}
 function convertDescriptors(models, baseUrl, suppress) {
   const result = [];
   for (const m of models) {
@@ -25320,7 +25328,6 @@ function plexusExtension(pi) {
   pi.registerProvider(PROVIDER_NAME, {
     api: "openai-completions",
     ...apiKeyConfig,
-    ...startupBaseUrl ? { baseUrl: startupBaseUrl } : {},
     fetchDynamicModels: fetchPlexusModelConfigs,
     ...apiKeyConfig.apiKey ? {} : { oauth: createPlexusLoginProvider(pi) }
   });
@@ -25430,6 +25437,18 @@ function describeApiKey(savedApiKey) {
     return `invalid apiKeyEnv configuration (${error instanceof Error ? error.message : String(error)})`;
   }
 }
+function mapPlexusModels(apiModels, baseUrl) {
+  const suppress = getSuppressedModels();
+  const chat = convertDescriptors(apiModels, baseUrl, suppress).map(descriptorToOhMyPiModel);
+  const judges = filterSuppressedModels(apiModels.filter((model) => model.id && model.type === "decisions"), suppress).map((model) => ({
+    ...descriptorToOhMyPiModel(convertToDescriptor(model, baseUrl)),
+    api: "typesafe",
+    kind: "judge",
+    baseUrl: baseUrl.replace(/\/v1\/?$/, ""),
+    reasoning: false
+  }));
+  return [...chat, ...judges];
+}
 async function fetchPlexusModelConfigs(apiKey) {
   const key = resolveApiKey(apiKey);
   const modelsUrl = getModelsUrl();
@@ -25437,8 +25456,7 @@ async function fetchPlexusModelConfigs(apiKey) {
   if (!key || !modelsUrl || !baseUrl)
     return [];
   const { models: apiModels } = await fetchPlexusModels(key, modelsUrl);
-  const descriptors = convertDescriptors(apiModels, baseUrl, getSuppressedModels());
-  const models = descriptors.map(descriptorToOhMyPiModel);
+  const models = mapPlexusModels(apiModels, baseUrl);
   currentModels = [...models];
   catalogSource = "live refresh";
   return models;
@@ -25461,20 +25479,16 @@ async function doRefresh(pi, apiKey, ctx) {
       return;
     }
     const { models: apiModels } = await fetchPlexusModels(resolvedApiKey, modelsUrl);
-    const suppressPatterns = getSuppressedModels();
-    const descriptors = convertDescriptors(apiModels, baseUrl, suppressPatterns);
-    const ohMyPiModels = descriptors.map(descriptorToOhMyPiModel);
+    const ohMyPiModels = mapPlexusModels(apiModels, baseUrl);
     currentModels = ohMyPiModels;
     catalogSource = "live refresh";
-    let pendingModels = ctx ? ohMyPiModels : undefined;
+    let pendingModels = ohMyPiModels;
     if (ctx)
       pi.unregisterProvider(PROVIDER_NAME);
     const apiKeyConfig = getProviderApiKeyConfig();
     pi.registerProvider(PROVIDER_NAME, {
       api: "openai-completions",
       ...apiKeyConfig,
-      baseUrl,
-      ...ctx ? {} : { models: ohMyPiModels },
       fetchDynamicModels: async (key) => {
         if (pendingModels !== undefined) {
           const models = pendingModels;

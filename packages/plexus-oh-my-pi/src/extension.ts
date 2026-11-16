@@ -37,8 +37,11 @@ import type {
 } from "@oh-my-pi/pi-coding-agent";
 import {
 	convertDescriptors,
+	convertToDescriptor,
+	type PlexusApiModel,
 	fetchPlexusModels,
 } from "../../plexus-models/src/index.ts";
+import { filterSuppressedModels } from "../../plexus-models/src/convert.ts";
 import {
 	getApiKeyEnvName,
 	getBaseUrl,
@@ -67,7 +70,7 @@ export function getProviderApiKeyConfig(): Pick<
 	const envValue = resolveApiKey(undefined);
 	return envValue ? { apiKey: envName, authHeader: true } : {};
 }
-let currentModels: ReturnType<typeof descriptorToOhMyPiModel>[] = [];
+let currentModels: readonly ProviderModelConfig[] = [];
 let catalogSource: "live refresh" | "none" = "none";
 
 export default function plexusExtension(pi: ExtensionAPI): void {
@@ -83,7 +86,8 @@ export default function plexusExtension(pi: ExtensionAPI): void {
 	pi.registerProvider(PROVIDER_NAME, {
 		api: "openai-completions" as Api,
 		...apiKeyConfig,
-		...(startupBaseUrl ? { baseUrl: startupBaseUrl } : {}),
+		// Each model carries its own dialect-specific URL. A provider-level URL
+		// would override the root URL needed by the System One judge transport.
 		fetchDynamicModels: fetchPlexusModelConfigs,
 		// OMP treats apiKey as a fallback when oauth is present. Environment
 		// overrides must own request auth, not just the Authorization header.
@@ -244,6 +248,27 @@ function describeApiKey(savedApiKey: string | undefined): string {
 // ---------------------------------------------------------------------------
 // Core refresh logic
 // ---------------------------------------------------------------------------
+function mapPlexusModels(
+	apiModels: PlexusApiModel[],
+	baseUrl: string,
+): ProviderModelConfig[] {
+	const suppress = getSuppressedModels();
+	const chat = convertDescriptors(apiModels, baseUrl, suppress).map(
+		descriptorToOhMyPiModel,
+	);
+	const judges = filterSuppressedModels(
+		apiModels.filter((model) => model.id && model.type === "decisions"),
+		suppress,
+	).map((model) => ({
+		...descriptorToOhMyPiModel(convertToDescriptor(model, baseUrl)),
+		api: "typesafe" as Api,
+		kind: "judge" as const,
+		baseUrl: baseUrl.replace(/\/v1\/?$/, ""),
+		reasoning: false,
+	}));
+	return [...chat, ...judges];
+}
+
 async function fetchPlexusModelConfigs(
 	apiKey: string | undefined,
 ): Promise<readonly ProviderModelConfig[]> {
@@ -252,12 +277,7 @@ async function fetchPlexusModelConfigs(
 	const baseUrl = getBaseUrl();
 	if (!key || !modelsUrl || !baseUrl) return [];
 	const { models: apiModels } = await fetchPlexusModels(key, modelsUrl);
-	const descriptors = convertDescriptors(
-		apiModels,
-		baseUrl,
-		getSuppressedModels(),
-	);
-	const models = descriptors.map(descriptorToOhMyPiModel);
+	const models = mapPlexusModels(apiModels, baseUrl);
 	currentModels = [...models];
 	catalogSource = "live refresh";
 	return models;
@@ -297,28 +317,20 @@ async function doRefresh(
 			modelsUrl,
 		);
 
-		const suppressPatterns = getSuppressedModels();
-		const descriptors = convertDescriptors(
-			apiModels,
-			baseUrl,
-			suppressPatterns,
-		);
-		const ohMyPiModels = descriptors.map(descriptorToOhMyPiModel);
+		const ohMyPiModels = mapPlexusModels(apiModels, baseUrl);
 
 		currentModels = ohMyPiModels;
 		catalogSource = "live refresh";
 		// Feed the already-fetched snapshot to OMP's discovery transaction once.
 		// Re-registering static models alone leaves the previous dynamic catalog
 		// and its cache authoritative over those models.
-		let pendingModels = ctx ? ohMyPiModels : undefined;
+		let pendingModels: ProviderModelConfig[] | undefined = ohMyPiModels;
 		// Drop earlier static overlays, including when the new catalog is empty.
 		if (ctx) pi.unregisterProvider(PROVIDER_NAME);
 		const apiKeyConfig = getProviderApiKeyConfig();
 		pi.registerProvider(PROVIDER_NAME, {
 			api: "openai-completions" as Api,
 			...apiKeyConfig,
-			baseUrl,
-			...(ctx ? {} : { models: ohMyPiModels }),
 			fetchDynamicModels: async (key) => {
 				if (pendingModels !== undefined) {
 					const models = pendingModels;
