@@ -83,6 +83,14 @@ After upgrading the extension, restart OMP and run `/plexus refresh` to replace
 the cached catalog. The Plexus server must expose the Decisions alias in
 `/v1/models` and support `/v1/systemone`.
 
+## Reasoning off
+
+When a model advertises `off`, the plugin maps it to `reasoning.effort: "none"`
+for Responses and `reasoning_effort: "none"` for standard Chat Completions.
+Provider-specific Chat Completions formats, Anthropic Messages, and Gemini
+keep OMP's native disable behavior. `omp models` lists only enabled effort
+levels; select off with `/effort` or `--thinking off`.
+
 ## Extended context and pricing
 
 After upgrading the extension, restart OMP and run `/plexus refresh` to refresh

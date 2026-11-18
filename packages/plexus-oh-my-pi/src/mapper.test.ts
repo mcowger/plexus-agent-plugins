@@ -176,6 +176,43 @@ describe("descriptorToOhMyPiModel", () => {
 		});
 	});
 
+	test.each(["responses", "chat_completions"])(
+		"maps advertised %s off without adding an effort tier",
+		(preferred_api) => {
+			const alias = {
+				id: "responses-alias",
+				preferred_api,
+				pi_options: { supportsStrictMode: true },
+			};
+			const [off, withoutOff] = convertToOhMyPiModels(
+				[
+					{
+						...alias,
+						reasoning_options: [
+							{ type: "effort", values: ["off", "low", "high"] },
+						],
+					},
+					{
+						...alias,
+						id: "responses-without-off",
+						reasoning_options: [{ type: "effort", values: ["low", "high"] }],
+					},
+				],
+				"https://plexus.example/v1",
+			);
+			expect(off.reasoning).toBe(true);
+			expect(off.thinking).toEqual({
+				mode: "effort",
+				efforts: ["low", "high"],
+			});
+			expect(off.compat).toMatchObject({
+				supportsStrictMode: true,
+				reasoningDisableMode: "none-effort",
+			});
+			expect(withoutOff.compat?.reasoningDisableMode).toBeUndefined();
+		},
+	);
+
 	test("drops off and unknown efforts from the server dial", () => {
 		const model = descriptorToOhMyPiModel({
 			id: "deepseek-v4.1-flash",
@@ -254,7 +291,7 @@ describe("descriptorToOhMyPiModel", () => {
 				id: "non-reasoning",
 				preferredApi: "openai-responses",
 				reasoning: false,
-				effortValues: ["low", "max"],
+				effortValues: ["unknown"],
 			}),
 		).not.toHaveProperty("thinking");
 	});

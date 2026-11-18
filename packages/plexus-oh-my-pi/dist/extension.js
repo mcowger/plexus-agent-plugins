@@ -25216,8 +25216,6 @@ init_codex();
 
 // src/mapper.ts
 function serverEffortThinking(descriptor) {
-  if (!descriptor.reasoning)
-    return;
   if (descriptor.preferredApi !== "openai-completions" && descriptor.preferredApi !== "openai-responses") {
     return;
   }
@@ -25278,13 +25276,19 @@ function descriptorToOhMyPiModel(descriptor) {
     compat = builtinModel.compat;
   }
   const serverThinking = serverEffortThinking(descriptor);
+  const reasoning = descriptor.reasoning || serverThinking !== undefined || THINKING_EFFORTS.some((effort) => descriptor.effortValues?.includes(effort));
+  const advertisedOff = reasoning && descriptor.effortValues?.includes("off");
+  const chatFormat = compat?.thinkingFormat;
+  if (advertisedOff && descriptor.piOptions?.reasoningDisableMode === undefined && (descriptor.preferredApi === "openai-responses" || descriptor.preferredApi === "openai-completions" && (chatFormat === undefined || chatFormat === "openai" || chatFormat === "deepseek") && (compat?.reasoningDisableMode === undefined || compat.reasoningDisableMode === "lowest-effort") && compat?.supportsReasoningEffort !== false)) {
+    compat = { ...compat, reasoningDisableMode: "none-effort" };
+  }
   return {
     id: descriptor.id,
     name: descriptor.name,
     api: descriptor.preferredApi,
     provider: descriptor.provider,
     baseUrl: descriptor.baseUrl,
-    reasoning: descriptor.reasoning,
+    reasoning,
     input: descriptor.input,
     cost,
     contextWindow: descriptor.contextWindow,

@@ -51,7 +51,6 @@ import {
 function serverEffortThinking(
 	descriptor: PlexusModelDescriptor,
 ): { mode: "effort"; efforts: Effort[] } | undefined {
-	if (!descriptor.reasoning) return undefined;
 	if (
 		descriptor.preferredApi !== "openai-completions" &&
 		descriptor.preferredApi !== "openai-responses"
@@ -118,7 +117,7 @@ export function descriptorToOhMyPiModel(descriptor: PlexusModelDescriptor) {
 			: {}),
 	};
 
-	// Compat applies only to openai-completions; other dialects auto-detect from URL
+	// Derive Chat Completions defaults from the upstream, not the Plexus URL.
 	let compat: Record<string, unknown> | undefined;
 	if (descriptor.preferredApi === "openai-completions") {
 		const heuristic = detectOpenAICompletionsCompat(
@@ -139,16 +138,40 @@ export function descriptorToOhMyPiModel(descriptor: PlexusModelDescriptor) {
 	} else if (builtinModel?.compat) {
 		compat = builtinModel.compat as Record<string, unknown>;
 	}
-	// Explicit thinking from the server effort dial. Wins over the
-	// bundled catalog entry when both exist.
 	const serverThinking = serverEffortThinking(descriptor);
+	// Plexus can advertise effort levels without supported_parameters.
+	const reasoning =
+		descriptor.reasoning ||
+		serverThinking !== undefined ||
+		THINKING_EFFORTS.some((effort) =>
+			descriptor.effortValues?.includes(effort),
+		);
+	// Off is a separate control, not an effort. Use the explicit OpenAI
+	// sentinel instead of OMP's generic lowest-effort fallback. Keep native
+	// dialects (e.g. OpenRouter and Qwen) and their own disable controls.
+	const advertisedOff = reasoning && descriptor.effortValues?.includes("off");
+	const chatFormat = compat?.thinkingFormat;
+	if (
+		advertisedOff &&
+		descriptor.piOptions?.reasoningDisableMode === undefined &&
+		(descriptor.preferredApi === "openai-responses" ||
+			(descriptor.preferredApi === "openai-completions" &&
+				(chatFormat === undefined ||
+					chatFormat === "openai" ||
+					chatFormat === "deepseek") &&
+				(compat?.reasoningDisableMode === undefined ||
+					compat.reasoningDisableMode === "lowest-effort") &&
+				compat?.supportsReasoningEffort !== false))
+	) {
+		compat = { ...compat, reasoningDisableMode: "none-effort" };
+	}
 	return {
 		id: descriptor.id,
 		name: descriptor.name,
 		api: descriptor.preferredApi as Api,
 		provider: descriptor.provider,
 		baseUrl: descriptor.baseUrl,
-		reasoning: descriptor.reasoning,
+		reasoning,
 		input: descriptor.input,
 		cost,
 		contextWindow: descriptor.contextWindow,
