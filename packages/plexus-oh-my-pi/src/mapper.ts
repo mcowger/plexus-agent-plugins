@@ -50,7 +50,14 @@ import {
  */
 function serverEffortThinking(
 	descriptor: PlexusModelDescriptor,
-): { mode: "effort"; efforts: Effort[] } | undefined {
+	builtinThinking?: { effortMap?: Partial<Record<Effort, string>> },
+):
+	| {
+			mode: "effort";
+			efforts: Effort[];
+			effortMap?: Partial<Record<Effort, string>>;
+	  }
+	| undefined {
 	if (
 		descriptor.preferredApi !== "openai-completions" &&
 		descriptor.preferredApi !== "openai-responses"
@@ -61,7 +68,23 @@ function serverEffortThinking(
 	if (values === undefined) return undefined;
 	const efforts = THINKING_EFFORTS.filter((effort) => values.includes(effort));
 	if (efforts.length === 0) return undefined;
-	return { mode: "effort", efforts };
+	const effortMapEntries = builtinThinking?.effortMap
+		? Object.entries(builtinThinking.effortMap).filter(
+				([key, value]) =>
+					value !== undefined && efforts.includes(key as Effort),
+			)
+		: [];
+	return {
+		mode: "effort",
+		efforts,
+		...(effortMapEntries.length > 0
+			? {
+					effortMap: Object.fromEntries(effortMapEntries) as Partial<
+						Record<Effort, string>
+					>,
+				}
+			: {}),
+	};
 }
 export function descriptorToOhMyPiModel(descriptor: PlexusModelDescriptor) {
 	let builtinModel: ReturnType<typeof getBundledModel> | undefined;
@@ -138,7 +161,10 @@ export function descriptorToOhMyPiModel(descriptor: PlexusModelDescriptor) {
 	} else if (builtinModel?.compat) {
 		compat = builtinModel.compat as Record<string, unknown>;
 	}
-	const serverThinking = serverEffortThinking(descriptor);
+	const serverThinking = serverEffortThinking(
+		descriptor,
+		builtinModel?.thinking,
+	);
 	// Plexus can advertise effort levels without supported_parameters.
 	const reasoning =
 		descriptor.reasoning ||

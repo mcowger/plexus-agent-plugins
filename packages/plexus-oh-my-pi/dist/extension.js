@@ -25215,7 +25215,7 @@ init_utils();
 init_codex();
 
 // src/mapper.ts
-function serverEffortThinking(descriptor) {
+function serverEffortThinking(descriptor, builtinThinking) {
   if (descriptor.preferredApi !== "openai-completions" && descriptor.preferredApi !== "openai-responses") {
     return;
   }
@@ -25225,7 +25225,14 @@ function serverEffortThinking(descriptor) {
   const efforts = THINKING_EFFORTS.filter((effort) => values.includes(effort));
   if (efforts.length === 0)
     return;
-  return { mode: "effort", efforts };
+  const effortMapEntries = builtinThinking?.effortMap ? Object.entries(builtinThinking.effortMap).filter(([key, value]) => value !== undefined && efforts.includes(key)) : [];
+  return {
+    mode: "effort",
+    efforts,
+    ...effortMapEntries.length > 0 ? {
+      effortMap: Object.fromEntries(effortMapEntries)
+    } : {}
+  };
 }
 function descriptorToOhMyPiModel(descriptor) {
   let builtinModel;
@@ -25275,7 +25282,7 @@ function descriptorToOhMyPiModel(descriptor) {
   } else if (builtinModel?.compat) {
     compat = builtinModel.compat;
   }
-  const serverThinking = serverEffortThinking(descriptor);
+  const serverThinking = serverEffortThinking(descriptor, builtinModel?.thinking);
   const reasoning = descriptor.reasoning || serverThinking !== undefined || THINKING_EFFORTS.some((effort) => descriptor.effortValues?.includes(effort));
   const advertisedOff = reasoning && descriptor.effortValues?.includes("off");
   const chatFormat = compat?.thinkingFormat;

@@ -259,6 +259,32 @@ describe("descriptorToOhMyPiModel", () => {
 		});
 	});
 
+	test("server effort values keep bundled effortMap entries for served efforts", () => {
+		// Bundled abliterated-model-large-v2 maps medium→high and xhigh→max.
+		// The server serves only low/medium/high, so xhigh's mapping is dropped.
+		const model = descriptorToOhMyPiModel({
+			id: "abliterated-model-large-v2",
+			name: "Abliterated Large v2",
+			preferredApi: "openai-responses",
+			provider: "plexus",
+			baseUrl: "https://plexus.example.com/v1",
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 200_000,
+			maxTokens: 32_768,
+			piProvider: "abliteration",
+			piModel: "abliterated-model-large-v2",
+			effortValues: ["low", "medium", "high"],
+		});
+
+		expect(model.thinking).toEqual({
+			mode: "effort",
+			efforts: ["low", "medium", "high"],
+			effortMap: { medium: "high" },
+		});
+	});
+
 	test("omits thinking without server effort values or off-dialect", () => {
 		const base = {
 			name: "Muse Ember",
